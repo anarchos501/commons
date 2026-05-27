@@ -58,7 +58,7 @@ CREATE DATABASE commons;
 Create `apps/web/.env`:
 
 ```env
-DATABASE_URL="postgresql://postgres:password@localhost:5432/commons"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/commons"
 ```
 
 Run migrations:
@@ -79,3 +79,4 @@ Then visit `http://localhost:3000`.
 ## License
 
 Commons is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+
