@@ -135,6 +135,46 @@ enum LinkedPresenceStatus {
   revoked
 }
 
+enum SignedEventType {
+  proposal_created
+  support_request_submitted
+  contribution_logged
+  identity_presence_updated
+  governance_preference_changed
+  migration_prepared
+}
+
+enum DataClass {
+  offline_draft
+  personal_note
+  local_reminder
+  private_availability
+  cached_coordination_history
+  sync_queue_item
+  support_request
+  offer
+  contribution
+  proposal
+  governance_preference
+  portable_identity
+  linked_node_presence
+}
+
+enum NodeStoragePolicy {
+  none
+  temporary
+  canonical
+  reference
+}
+
+enum LocalStoragePolicy {
+  none
+  cache
+  draft
+  private_data
+  sync_queue
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -147,6 +187,7 @@ model Node {
   accounts            Account[]
   groups              Group[]
   linkedNodePresences LinkedNodePresence[]
+  signedEvents        SignedEvent[]
 }
 
 model PortableIdentity {
@@ -157,6 +198,7 @@ model PortableIdentity {
 
   accounts            Account[]
   linkedNodePresences LinkedNodePresence[]
+  signedEvents        SignedEvent[]
 }
 
 model LinkedNodePresence {
@@ -196,6 +238,8 @@ model Account {
   proposals           Proposal[]
   roles               Role[]
   actionLogs          ActionLog[]
+  signedEvents        SignedEvent[]
+  localSyncStates     LocalSyncState[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -221,6 +265,7 @@ model Group {
   proposals       Proposal[]
   roles           Role[]
   actionLogs      ActionLog[]
+  signedEvents    SignedEvent[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -243,6 +288,7 @@ model Project {
   proposals       Proposal[]
   roles           Role[]
   actionLogs      ActionLog[]
+  signedEvents    SignedEvent[]
 
   @@unique([groupId, name])
   @@index([groupId])
@@ -492,4 +538,76 @@ model ActionLog {
   @@index([action])
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+model SignedEvent {
+  id                 String          @id @default(cuid())
+  eventType          SignedEventType
+  subjectType        String
+  subjectId          String
+  actorAccountId     String?
+  portableIdentityId String?
+  nodeId             String?
+  groupId            String?
+  projectId          String?
+  payload            Json
+  payloadHash        String
+  signature          String
+  publicKey          String
+  createdAt          DateTime        @default(now())
+
+  actor            Account?          @relation(fields: [actorAccountId], references: [id], onDelete: SetNull)
+  portableIdentity PortableIdentity? @relation(fields: [portableIdentityId], references: [id], onDelete: SetNull)
+  node             Node?             @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  group            Group?            @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@unique([payloadHash, signature])
+  @@index([eventType])
+  @@index([subjectType, subjectId])
+  @@index([actorAccountId])
+  @@index([portableIdentityId])
+  @@index([nodeId])
+  @@index([groupId])
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+model LocalSyncState {
+  id               String    @id @default(cuid())
+  accountId        String
+  deviceId         String
+  lastAckedEventId String?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, deviceId])
+  @@index([lastAckedEventId])
+  @@index([lastSyncedAt])
+}
+
+model DataReplicationPolicy {
+  id                  String             @id @default(cuid())
+  scope               GovernanceScope
+  scopeId             String
+  dataClass           DataClass
+  nodeStorage         NodeStoragePolicy
+  localStorage        LocalStoragePolicy
+  federationAllowed   Boolean            @default(false)
+  p2pAllowed          Boolean            @default(false)
+  retentionDays       Int?
+  requiresEncryption  Boolean            @default(true)
+  userExportAllowed   Boolean            @default(true)
+  userDeletionAllowed Boolean            @default(true)
+  syncRequiresConsent Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+
+  @@unique([scope, scopeId, dataClass])
+  @@index([dataClass])
+  @@index([scope, scopeId])
+  @@index([federationAllowed])
+  @@index([p2pAllowed])
 }

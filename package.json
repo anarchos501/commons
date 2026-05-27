@@ -8,7 +8,8 @@
     "db:generate": "pnpm --dir apps/web prisma generate",
     "db:migrate": "pnpm --dir apps/web prisma migrate dev",
     "db:seed": "pnpm --dir apps/web prisma db seed",
-    "db:studio": "pnpm --dir apps/web prisma studio"
+    "db:studio": "pnpm --dir apps/web prisma studio",
+    "test": "pnpm --dir apps/web test"
   },
   "devDependencies": {
     "turbo": "^2.6.1"

@@ -19,3 +19,6 @@ Mobile and PWA: installable app, offline drafts, encrypted local storage, sync q
 ## Later
 
 Governance resolver, privacy engine, security audits, federation readiness, portable identity migration, and plugin foundations.
+## Hybrid Architecture Preparation
+
+Prepare a split-by-data-class architecture with lightweight signed events, local sync state, and replication policies before implementing full federation, P2P, CRDTs, or browser encryption.

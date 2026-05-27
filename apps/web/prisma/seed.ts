@@ -1,5 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { createSignedEventRecord } from "../src/lib/signed-events";
+import { defaultReplicationPolicies } from "../src/lib/replication-policies";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -483,6 +485,226 @@ async function main() {
     },
   });
 
+
+  for (const policy of defaultReplicationPolicies) {
+    await prisma.dataReplicationPolicy.upsert({
+      where: {
+        scope_scopeId_dataClass: {
+          scope: "group",
+          scopeId: group.id,
+          dataClass: policy.dataClass,
+        },
+      },
+      update: {
+        nodeStorage: policy.nodeStorage,
+        localStorage: policy.localStorage,
+        federationAllowed: policy.federationAllowed,
+        p2pAllowed: policy.p2pAllowed,
+        retentionDays: policy.retentionDays,
+        requiresEncryption: policy.requiresEncryption,
+        userExportAllowed: policy.userExportAllowed,
+        userDeletionAllowed: policy.userDeletionAllowed,
+        syncRequiresConsent: policy.syncRequiresConsent,
+      },
+      create: {
+        id: `policy_gotham_${policy.dataClass}`,
+        scope: "group",
+        scopeId: group.id,
+        dataClass: policy.dataClass,
+        nodeStorage: policy.nodeStorage,
+        localStorage: policy.localStorage,
+        federationAllowed: policy.federationAllowed,
+        p2pAllowed: policy.p2pAllowed,
+        retentionDays: policy.retentionDays,
+        requiresEncryption: policy.requiresEncryption,
+        userExportAllowed: policy.userExportAllowed,
+        userDeletionAllowed: policy.userDeletionAllowed,
+        syncRequiresConsent: policy.syncRequiresConsent,
+      },
+    });
+  }
+
+  await prisma.localSyncState.upsert({
+    where: { accountId_deviceId: { accountId: mary.id, deviceId: "dev-device-mary-phone" } },
+    update: {
+      lastAckedEventId: "event_identity_presence_alice",
+      lastSyncedAt: new Date("2026-05-27T12:00:00.000Z"),
+    },
+    create: {
+      id: "sync_mary_phone",
+      accountId: mary.id,
+      deviceId: "dev-device-mary-phone",
+      lastAckedEventId: "event_identity_presence_alice",
+      lastSyncedAt: new Date("2026-05-27T12:00:00.000Z"),
+    },
+  });
+
+  const proposalEvent = createSignedEventRecord({
+    eventType: "proposal_created",
+    subjectType: "Proposal",
+    subjectId: proposal.id,
+    actorAccountId: zora.id,
+    portableIdentityId: zoraIdentity.id,
+    nodeId: node.id,
+    groupId: group.id,
+    payload: {
+      title: proposal.title,
+      privacy: "node-canonical",
+      signedEventPurpose: "federation-readiness",
+    },
+    publicKey: zoraIdentity.publicKey,
+    createdAt: new Date("2026-05-27T12:00:00.000Z"),
+  });
+
+  await prisma.signedEvent.upsert({
+    where: { payloadHash_signature: { payloadHash: proposalEvent.payloadHash, signature: proposalEvent.signature } },
+    update: {
+      payload: proposalEvent.payload,
+      publicKey: proposalEvent.publicKey,
+    },
+    create: {
+      id: "event_proposal_support_retention_created",
+      eventType: proposalEvent.eventType,
+      subjectType: proposalEvent.subjectType,
+      subjectId: proposalEvent.subjectId,
+      actorAccountId: proposalEvent.actorAccountId,
+      portableIdentityId: proposalEvent.portableIdentityId,
+      nodeId: proposalEvent.nodeId,
+      groupId: proposalEvent.groupId,
+      projectId: proposalEvent.projectId,
+      payload: proposalEvent.payload,
+      payloadHash: proposalEvent.payloadHash,
+      signature: proposalEvent.signature,
+      publicKey: proposalEvent.publicKey,
+      createdAt: proposalEvent.createdAt,
+    },
+  });
+
+  const supportRequestEvent = createSignedEventRecord({
+    eventType: "support_request_submitted",
+    subjectType: "SupportRequest",
+    subjectId: request.id,
+    actorAccountId: mary.id,
+    portableIdentityId: maryIdentity.id,
+    nodeId: node.id,
+    groupId: group.id,
+    projectId: ridesProject.id,
+    payload: {
+      requestType: request.requestType,
+      serviceTypes: ["rides"],
+      privacyLevel: "private",
+      sensitiveDetailsIncluded: false,
+    },
+    publicKey: maryIdentity.publicKey,
+    createdAt: new Date("2026-05-27T12:01:00.000Z"),
+  });
+
+  await prisma.signedEvent.upsert({
+    where: { payloadHash_signature: { payloadHash: supportRequestEvent.payloadHash, signature: supportRequestEvent.signature } },
+    update: {
+      payload: supportRequestEvent.payload,
+      publicKey: supportRequestEvent.publicKey,
+    },
+    create: {
+      id: "event_support_request_mary_ride_submitted",
+      eventType: supportRequestEvent.eventType,
+      subjectType: supportRequestEvent.subjectType,
+      subjectId: supportRequestEvent.subjectId,
+      actorAccountId: supportRequestEvent.actorAccountId,
+      portableIdentityId: supportRequestEvent.portableIdentityId,
+      nodeId: supportRequestEvent.nodeId,
+      groupId: supportRequestEvent.groupId,
+      projectId: supportRequestEvent.projectId,
+      payload: supportRequestEvent.payload,
+      payloadHash: supportRequestEvent.payloadHash,
+      signature: supportRequestEvent.signature,
+      publicKey: supportRequestEvent.publicKey,
+      createdAt: supportRequestEvent.createdAt,
+    },
+  });
+
+  const contributionEvent = createSignedEventRecord({
+    eventType: "contribution_logged",
+    subjectType: "Contribution",
+    subjectId: "contribution_monthly_rides",
+    actorAccountId: alice.id,
+    portableIdentityId: aliceIdentity.id,
+    nodeId: node.id,
+    groupId: group.id,
+    projectId: ridesProject.id,
+    payload: {
+      contributionType: "rides",
+      aggregateOnly: true,
+      excludesRecipientIdentity: true,
+    },
+    publicKey: aliceIdentity.publicKey,
+    createdAt: new Date("2026-05-27T12:02:00.000Z"),
+  });
+
+  await prisma.signedEvent.upsert({
+    where: { payloadHash_signature: { payloadHash: contributionEvent.payloadHash, signature: contributionEvent.signature } },
+    update: {
+      payload: contributionEvent.payload,
+      publicKey: contributionEvent.publicKey,
+    },
+    create: {
+      id: "event_contribution_monthly_rides_logged",
+      eventType: contributionEvent.eventType,
+      subjectType: contributionEvent.subjectType,
+      subjectId: contributionEvent.subjectId,
+      actorAccountId: contributionEvent.actorAccountId,
+      portableIdentityId: contributionEvent.portableIdentityId,
+      nodeId: contributionEvent.nodeId,
+      groupId: contributionEvent.groupId,
+      projectId: contributionEvent.projectId,
+      payload: contributionEvent.payload,
+      payloadHash: contributionEvent.payloadHash,
+      signature: contributionEvent.signature,
+      publicKey: contributionEvent.publicKey,
+      createdAt: contributionEvent.createdAt,
+    },
+  });
+
+  const identityPresenceEvent = createSignedEventRecord({
+    eventType: "identity_presence_updated",
+    subjectType: "LinkedNodePresence",
+    subjectId: "presence_alice_localhost",
+    actorAccountId: alice.id,
+    portableIdentityId: aliceIdentity.id,
+    nodeId: node.id,
+    groupId: group.id,
+    payload: {
+      did: aliceIdentity.did,
+      handle: "alice@localhost",
+      status: "active",
+    },
+    publicKey: aliceIdentity.publicKey,
+    createdAt: new Date("2026-05-27T12:03:00.000Z"),
+  });
+
+  await prisma.signedEvent.upsert({
+    where: { payloadHash_signature: { payloadHash: identityPresenceEvent.payloadHash, signature: identityPresenceEvent.signature } },
+    update: {
+      payload: identityPresenceEvent.payload,
+      publicKey: identityPresenceEvent.publicKey,
+    },
+    create: {
+      id: "event_identity_presence_alice",
+      eventType: identityPresenceEvent.eventType,
+      subjectType: identityPresenceEvent.subjectType,
+      subjectId: identityPresenceEvent.subjectId,
+      actorAccountId: identityPresenceEvent.actorAccountId,
+      portableIdentityId: identityPresenceEvent.portableIdentityId,
+      nodeId: identityPresenceEvent.nodeId,
+      groupId: identityPresenceEvent.groupId,
+      projectId: identityPresenceEvent.projectId,
+      payload: identityPresenceEvent.payload,
+      payloadHash: identityPresenceEvent.payloadHash,
+      signature: identityPresenceEvent.signature,
+      publicKey: identityPresenceEvent.publicKey,
+      createdAt: identityPresenceEvent.createdAt,
+    },
+  });
   console.log("Seeded Commons local-node development data.");
   console.log({
     node: node.domain,
