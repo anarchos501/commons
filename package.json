@@ -1,17 +1,21 @@
 {
-    "name":  "commons",
-    "private":  true,
-    "packageManager":  "pnpm@10.33.4",
-    "scripts":  {
-                    "dev":  "turbo dev",
-                    "build":  "turbo build"
-                },
-    "devDependencies":  {
-                            "turbo":  "^2.6.1"
-                        },
-    "dependencies":  {
-                         "date-fns":  "^4.1.0",
-                         "zod":  "^4.1.12",
-                         "zustand":  "^5.0.8"
-                     }
+  "name": "commons",
+  "private": true,
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "db:generate": "pnpm --dir apps/web prisma generate",
+    "db:migrate": "pnpm --dir apps/web prisma migrate dev",
+    "db:seed": "pnpm --dir apps/web prisma db seed",
+    "db:studio": "pnpm --dir apps/web prisma studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.6.1"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
+  }
 }

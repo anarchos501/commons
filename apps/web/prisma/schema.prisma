@@ -7,17 +7,146 @@ datasource db {
   provider = "postgresql"
 }
 
-model Node {
-  id                        String   @id @default(cuid())
-  name                      String
-  domain                    String   @unique
-  constitutionalPreferences Json?
-  federationPolicy          String   @default("disabled")
-  pluginPolicy              String   @default("disabled")
-  createdAt                 DateTime @default(now())
+enum AccountType {
+  guest
+  participant
+  member
+}
 
-  accounts Account[]
-  groups   Group[]
+enum VisibilityLevel {
+  private
+  group
+  project
+  public
+}
+
+enum PrivacyLevel {
+  private
+  group
+  project
+  public
+}
+
+enum FederationPolicy {
+  open
+  allowlisted
+  project_level
+  read_only
+  emergency_only
+  disabled
+}
+
+enum PluginPolicy {
+  open
+  allowlisted
+  reviewed
+  disabled
+}
+
+enum ProjectStatus {
+  active
+  paused
+  completed
+  archived
+}
+
+enum TrustRequirement {
+  lightweight
+  elevated
+}
+
+enum ServiceCapabilityStatus {
+  available
+  petitioned
+  approved
+  revoked
+  unavailable
+}
+
+enum TrustStatus {
+  petitioned
+  approved
+  objected
+  revoked
+  expired
+}
+
+enum UrgencyLevel {
+  low
+  normal
+  high
+  urgent
+}
+
+enum SupportRequestStatus {
+  open
+  matched
+  fulfilled
+  expired
+  deleted
+}
+
+enum OfferStatus {
+  open
+  accepted
+  declined
+  withdrawn
+  expired
+}
+
+enum ProposalStatus {
+  draft
+  open
+  approved
+  rejected
+  withdrawn
+  implemented
+}
+
+enum RoleRecallPolicy {
+  proposal
+  consent
+  emergency
+}
+
+enum GovernanceScope {
+  node
+  group
+  project
+  proposal
+  service
+  plugin
+  contribution
+  account
+  trust
+}
+
+enum GovernanceChangeRule {
+  mutable
+  immutable
+  stricter_only
+  more_open_only
+}
+
+enum LinkedPresenceStatus {
+  active
+  migrating
+  inactive
+  revoked
+}
+
+model Node {
+  id                        String           @id @default(cuid())
+  name                      String
+  domain                    String           @unique
+  constitutionalPreferences Json?
+  federationPolicy          FederationPolicy @default(disabled)
+  pluginPolicy              PluginPolicy     @default(disabled)
+  createdAt                 DateTime         @default(now())
+
+  accounts            Account[]
+  groups              Group[]
+  linkedNodePresences LinkedNodePresence[]
 }
 
 model PortableIdentity {
@@ -26,18 +155,36 @@ model PortableIdentity {
   publicKey String
   createdAt DateTime @default(now())
 
-  accounts Account[]
+  accounts            Account[]
+  linkedNodePresences LinkedNodePresence[]
+}
+
+model LinkedNodePresence {
+  id                 String               @id @default(cuid())
+  portableIdentityId String
+  nodeId             String
+  handle             String
+  status             LinkedPresenceStatus @default(active)
+  createdAt          DateTime             @default(now())
+  lastSeenAt         DateTime?
+
+  portableIdentity PortableIdentity @relation(fields: [portableIdentityId], references: [id])
+  node             Node             @relation(fields: [nodeId], references: [id])
+
+  @@unique([portableIdentityId, nodeId])
+  @@index([nodeId])
+  @@index([status])
 }
 
 model Account {
-  id                 String   @id @default(cuid())
+  id                 String          @id @default(cuid())
   portableIdentityId String?
   homeNodeId         String
   displayName        String
-  accountType        String   @default("guest")
+  accountType        AccountType     @default(guest)
   publicKey          String?
-  profileVisibility  String   @default("private")
-  createdAt          DateTime @default(now())
+  profileVisibility  VisibilityLevel @default(private)
+  createdAt          DateTime        @default(now())
 
   portableIdentity PortableIdentity? @relation(fields: [portableIdentityId], references: [id])
   homeNode         Node              @relation(fields: [homeNodeId], references: [id])
@@ -48,9 +195,11 @@ model Account {
   contributions       Contribution[]
   proposals           Proposal[]
   roles               Role[]
+  actionLogs          ActionLog[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
+  @@index([accountType])
 }
 
 model Group {
@@ -71,19 +220,21 @@ model Group {
   contributions   Contribution[]
   proposals       Proposal[]
   roles           Role[]
+  actionLogs      ActionLog[]
 
+  @@unique([nodeId, name])
   @@index([nodeId])
 }
 
 model Project {
-  id                    String   @id @default(cuid())
+  id                    String        @id @default(cuid())
   groupId               String
   name                  String
   description           String?
-  status                String   @default("active")
+  status                ProjectStatus @default(active)
   governancePreferences Json?
   privacyPreferences    Json?
-  createdAt             DateTime @default(now())
+  createdAt             DateTime      @default(now())
 
   group           Group            @relation(fields: [groupId], references: [id])
   supportRequests SupportRequest[]
@@ -91,77 +242,99 @@ model Project {
   contributions   Contribution[]
   proposals       Proposal[]
   roles           Role[]
+  actionLogs      ActionLog[]
 
+  @@unique([groupId, name])
   @@index([groupId])
+  @@index([status])
 }
 
 model ServiceCapability {
-  id               String   @id @default(cuid())
+  id               String                  @id @default(cuid())
   accountId        String
   serviceType      String
   description      String?
   availability     Json?
-  visibility       String   @default("group")
-  trustRequirement String   @default("lightweight")
-  approvalStatus   String   @default("available")
-  createdAt        DateTime @default(now())
+  visibility       VisibilityLevel         @default(group)
+  trustRequirement TrustRequirement        @default(lightweight)
+  approvalStatus   ServiceCapabilityStatus @default(available)
+  createdAt        DateTime                @default(now())
 
   account        Account                    @relation(fields: [accountId], references: [id])
   trustedRecords TrustedServiceCapability[]
 
+  @@unique([accountId, serviceType, trustRequirement])
   @@index([accountId])
   @@index([serviceType])
   @@index([approvalStatus])
+  @@index([trustRequirement])
 }
 
 model TrustedServiceCapability {
-  id                  String    @id @default(cuid())
+  id                  String      @id @default(cuid())
   serviceCapabilityId String
   groupId             String
   trustContext        String
-  status              String    @default("petitioned")
+  status              TrustStatus @default(petitioned)
   supportThreshold    Float?
   reviewEndsAt        DateTime?
   approvedAt          DateTime?
   revokedAt           DateTime?
-  createdAt           DateTime  @default(now())
+  createdAt           DateTime    @default(now())
 
   serviceCapability ServiceCapability @relation(fields: [serviceCapabilityId], references: [id])
   group             Group             @relation(fields: [groupId], references: [id])
 
+  @@unique([serviceCapabilityId, groupId, trustContext])
   @@index([serviceCapabilityId])
   @@index([groupId])
   @@index([status])
 }
 
 model SupportRequest {
-  id                   String    @id @default(cuid())
+  id                   String               @id @default(cuid())
   submittedByAccountId String?
   groupId              String
   projectId            String?
   requestType          String
   requestedServices    Json
   description          String
-  urgency              String    @default("normal")
-  privacyLevel         String    @default("private")
-  status               String    @default("open")
+  urgency              UrgencyLevel         @default(normal)
+  privacyLevel         PrivacyLevel         @default(private)
+  status               SupportRequestStatus @default(open)
   expiresAt            DateTime?
-  createdAt            DateTime  @default(now())
+  createdAt            DateTime             @default(now())
 
-  submittedBy Account? @relation(fields: [submittedByAccountId], references: [id])
-  group       Group    @relation(fields: [groupId], references: [id])
-  project     Project? @relation(fields: [projectId], references: [id])
+  submittedBy Account?                @relation(fields: [submittedByAccountId], references: [id])
+  group       Group                   @relation(fields: [groupId], references: [id])
+  project     Project?                @relation(fields: [projectId], references: [id])
   offers      Offer[]
+  services    SupportRequestService[]
 
   @@index([submittedByAccountId])
   @@index([groupId])
   @@index([projectId])
   @@index([status])
   @@index([expiresAt])
+  @@index([urgency])
+}
+
+model SupportRequestService {
+  id               String           @id @default(cuid())
+  supportRequestId String
+  serviceType      String
+  trustRequirement TrustRequirement @default(lightweight)
+  createdAt        DateTime         @default(now())
+
+  supportRequest SupportRequest @relation(fields: [supportRequestId], references: [id])
+
+  @@unique([supportRequestId, serviceType, trustRequirement])
+  @@index([serviceType])
+  @@index([trustRequirement])
 }
 
 model Offer {
-  id               String    @id @default(cuid())
+  id               String       @id @default(cuid())
   accountId        String
   groupId          String
   projectId        String?
@@ -169,25 +342,41 @@ model Offer {
   offeredServices  Json
   description      String?
   availability     Json?
-  status           String    @default("open")
-  privacyLevel     String    @default("group")
+  status           OfferStatus  @default(open)
+  privacyLevel     PrivacyLevel @default(group)
   expiresAt        DateTime?
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime     @default(now())
 
   account        Account         @relation(fields: [accountId], references: [id])
   group          Group           @relation(fields: [groupId], references: [id])
   project        Project?        @relation(fields: [projectId], references: [id])
   supportRequest SupportRequest? @relation(fields: [supportRequestId], references: [id])
+  services       OfferService[]
 
   @@index([accountId])
   @@index([groupId])
   @@index([projectId])
   @@index([supportRequestId])
   @@index([status])
+  @@index([expiresAt])
+}
+
+model OfferService {
+  id               String           @id @default(cuid())
+  offerId          String
+  serviceType      String
+  trustRequirement TrustRequirement @default(lightweight)
+  createdAt        DateTime         @default(now())
+
+  offer Offer @relation(fields: [offerId], references: [id])
+
+  @@unique([offerId, serviceType, trustRequirement])
+  @@index([serviceType])
+  @@index([trustRequirement])
 }
 
 model Contribution {
-  id                   String   @id @default(cuid())
+  id                   String          @id @default(cuid())
   contributorAccountId String
   groupId              String?
   projectId            String?
@@ -195,9 +384,9 @@ model Contribution {
   description          String
   quantity             String?
   occurredAt           DateTime
-  visibility           String   @default("group")
+  visibility           VisibilityLevel @default(group)
   privacyEnvelope      Json?
-  createdAt            DateTime @default(now())
+  createdAt            DateTime        @default(now())
 
   contributor Account  @relation(fields: [contributorAccountId], references: [id])
   group       Group?   @relation(fields: [groupId], references: [id])
@@ -207,18 +396,19 @@ model Contribution {
   @@index([groupId])
   @@index([projectId])
   @@index([occurredAt])
+  @@index([visibility])
 }
 
 model Proposal {
-  id                            String    @id @default(cuid())
+  id                            String         @id @default(cuid())
   groupId                       String
   projectId                     String?
   title                         String
   body                          String
-  status                        String    @default("open")
+  status                        ProposalStatus @default(open)
   governancePreferencesSnapshot Json?
   createdByAccountId            String
-  createdAt                     DateTime  @default(now())
+  createdAt                     DateTime       @default(now())
   resolvedAt                    DateTime?
 
   group     Group    @relation(fields: [groupId], references: [id])
@@ -232,16 +422,16 @@ model Proposal {
 }
 
 model Role {
-  id           String   @id @default(cuid())
+  id           String           @id @default(cuid())
   accountId    String
   roleType     String
   permissions  Json
   groupId      String?
   projectId    String?
-  startsAt     DateTime @default(now())
+  startsAt     DateTime         @default(now())
   expiresAt    DateTime
-  recallPolicy String   @default("proposal")
-  createdAt    DateTime @default(now())
+  recallPolicy RoleRecallPolicy @default(proposal)
+  createdAt    DateTime         @default(now())
 
   account Account  @relation(fields: [accountId], references: [id])
   group   Group?   @relation(fields: [groupId], references: [id])
@@ -254,29 +444,52 @@ model Role {
 }
 
 model GovernancePreference {
-  id         String   @id @default(cuid())
+  id         String               @id @default(cuid())
   key        String
   value      Json
-  scope      String
+  scope      GovernanceScope
   scopeId    String?
-  changeRule String   @default("mutable")
+  changeRule GovernanceChangeRule @default(mutable)
   createdBy  String
-  createdAt  DateTime @default(now())
+  createdAt  DateTime             @default(now())
 
   @@index([scope, scopeId])
   @@index([key])
 }
 
 model PrivacyEnvelope {
-  id         String   @id @default(cuid())
+  id         String       @id @default(cuid())
   targetType String
   targetId   String
-  level      String   @default("private")
+  level      PrivacyLevel @default(private)
   rules      Json?
   createdBy  String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
   @@unique([targetType, targetId])
   @@index([level])
+}
+
+model ActionLog {
+  id             String   @id @default(cuid())
+  actorAccountId String?
+  groupId        String?
+  projectId      String?
+  action         String
+  targetType     String
+  targetId       String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  actor   Account? @relation(fields: [actorAccountId], references: [id])
+  group   Group?   @relation(fields: [groupId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+
+  @@index([actorAccountId])
+  @@index([groupId])
+  @@index([projectId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }
