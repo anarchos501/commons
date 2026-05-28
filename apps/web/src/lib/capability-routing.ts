@@ -311,7 +311,7 @@ export async function decideRequestRoute(prisma: PrismaClient, input: RouteDecis
     throw new Error("Only the routed contributor can decide this route.");
   }
 
-  if (!["notified", "accepted", "declined"].includes(route.status)) {
+  if (route.status !== "notified") {
     throw new Error(`Route cannot be decided from status ${route.status}.`);
   }
 

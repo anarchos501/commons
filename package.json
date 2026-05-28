@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "db:generate": "pnpm --dir apps/web prisma generate",
-    "db:migrate": "pnpm --dir apps/web prisma migrate dev",
-    "db:seed": "pnpm --dir apps/web prisma db seed",
-    "db:studio": "pnpm --dir apps/web prisma studio",
+    "db:generate": "pnpm --dir apps/web db:generate",
+    "db:migrate": "pnpm --dir apps/web db:migrate",
+    "db:seed": "pnpm --dir apps/web db:seed",
+    "db:studio": "pnpm --dir apps/web db:studio",
     "test": "pnpm --dir apps/web test"
   },
   "devDependencies": {

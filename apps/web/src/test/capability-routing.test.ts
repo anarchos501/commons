@@ -184,6 +184,42 @@ test("contributors can accept and decline routed requests", async () => {
   assert.equal(accepted.status, "accepted");
   assert.equal(declined.status, "declined");
 });
+test("route decisions cannot be changed after accepting or declining", async () => {
+  const fixture = await createFixture("decision_finality");
+  await declareServiceCapability(prisma, {
+    accountId: fixture.alice.id,
+    serviceType: "grocery pickup",
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_decision_finality_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    requestType: "grocery pickup",
+    requestedServices: [{ serviceType: "grocery pickup", trustRequirement: "lightweight" }],
+    description: "Needs a grocery pickup.",
+    expiresAt: futureDate(),
+  });
+
+  const [route] = await routeSupportRequest(prisma, { supportRequestId: request.id });
+  await decideRequestRoute(prisma, {
+    routeId: route.id,
+    contributorAccountId: fixture.alice.id,
+    decision: "accepted",
+  });
+
+  await assert.rejects(
+    () =>
+      decideRequestRoute(prisma, {
+        routeId: route.id,
+        contributorAccountId: fixture.alice.id,
+        decision: "declined",
+      }),
+    /Route cannot be decided from status accepted/,
+  );
+});
 
 test("accepted request can produce a privacy-safe contribution summary", async () => {
   const fixture = await createFixture("contribution");

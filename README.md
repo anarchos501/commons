@@ -52,23 +52,37 @@ Install dependencies:
 corepack pnpm install
 ```
 
-Prepare the database:
+Prepare PostgreSQL:
 
 ```sql
 CREATE DATABASE commons;
 ```
 
-Create `apps/web/.env`:
+Create the local environment file:
+
+```bash
+cp apps/web/.env.example apps/web/.env
+```
+
+Update `apps/web/.env` if your PostgreSQL username, password, host, port, or database name differs:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/commons"
 ```
 
-Run migrations:
+Generate the Prisma client, apply migrations, and seed local development data:
 
 ```bash
-cd apps/web
-corepack pnpm prisma migrate dev --name init
+corepack pnpm db:generate
+corepack pnpm db:migrate
+corepack pnpm db:seed
+```
+
+Verify the app and local-first domain logic:
+
+```bash
+corepack pnpm test
+corepack pnpm build
 ```
 
 Start development:
@@ -79,7 +93,16 @@ corepack pnpm dev
 
 Then visit `http://localhost:3000`.
 
+Useful database references:
+
+```bash
+corepack pnpm db:studio
+cd apps/web
+corepack pnpm prisma generate
+corepack pnpm prisma migrate dev
+corepack pnpm prisma db seed
+```
+
 ## License
 
 Commons is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
-

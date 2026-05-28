@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import {
   Check,
   Clock,
@@ -85,7 +86,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
               <p className="mt-2">Help requests are shared only for coordination. Contribution summaries do not name who received help.</p>
             </div>
           </div>
-          <nav aria-label="Primary actions" className="grid gap-3 sm:grid-cols-4">
+          <nav aria-label="Primary actions" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <JumpLink href="#request" icon={<HelpCircle className="h-4 w-4" />}>
               Request Help
             </JumpLink>
@@ -120,13 +121,17 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
                   </select>
                 </label>
                 <label className="block">
-                  <span className="field-label">How should someone contact you?</span>
+                  <span className="field-label">Safe contact note</span>
                   <input
                     name="contact"
                     className="field-input"
                     placeholder="Phone, email, or a safe way to reach you"
+                    aria-describedby="contact-help"
                     required
                   />
+                  <p id="contact-help" className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    This is kept inside the private request record and is only for coordination after someone accepts.
+                  </p>
                 </label>
                 <div className="grid gap-4 sm:grid-cols-3">
                   <label className="block">
@@ -153,9 +158,14 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
                     <input name="language" className="field-input" placeholder="Optional" />
                   </label>
                 </div>
-                <p className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
-                  We will look for people who offered this kind of help. Your request is not posted as a public feed.
-                </p>
+                <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
+                  <p className="font-medium text-[var(--text)]">Privacy check</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    <li>Your request is not posted as a public feed.</li>
+                    <li>Only the minimum matching details are routed before someone accepts.</li>
+                    <li>Support requests expire after 30 days by default.</li>
+                  </ul>
+                </div>
                 <SubmitButton>Ask for help</SubmitButton>
               </form>
             </Section>
@@ -164,10 +174,11 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
               <form action={offerHelpAction} className="space-y-5">
                 <input type="hidden" name="accountId" value={data.currentContributor.id} />
                 <p className="text-sm leading-6 text-[var(--soft-text)]">
-                  Offering as <strong className="font-medium text-[var(--text)]">{data.currentContributor.displayName}</strong>. This is private coordination information, not a promise or public status.
+                  Offering as <strong className="font-medium text-[var(--text)]">{data.currentContributor.displayName}</strong>. Choose only what feels realistic right now. This is private coordination information, not a promise or public status.
                 </p>
                 <fieldset>
                   <legend className="field-label">What can you help with?</legend>
+                  <p className="text-sm leading-6 text-[var(--muted)]">Pick at least one. Sensitive help may require extra trust before routing.</p>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {serviceOptions.map((service) => (
                       <label key={service.value} className="flex min-h-11 items-center gap-3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
@@ -178,7 +189,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
                   </div>
                 </fieldset>
                 <label className="block">
-                  <span className="field-label">Availability preference</span>
+                  <span className="field-label">Availability boundary</span>
                   <select name="availabilityPreference" className="field-input" defaultValue="available">
                     {availabilityOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -323,29 +334,33 @@ function RouteCard({ route }: { route: ExperienceRoute }) {
           <span>Created {route.createdAtLabel}</span>
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <form action={decideRouteAction}>
-          <input type="hidden" name="routeId" value={route.id} />
-          <input type="hidden" name="contributorAccountId" value={route.contributorAccountId} />
-          <input type="hidden" name="decision" value="accepted" />
-          <SubmitButton variant="secondary">
-            <span className="inline-flex items-center gap-2">
-              <Check className="h-4 w-4" aria-hidden="true" />
-              Accept
-            </span>
-          </SubmitButton>
-        </form>
-        <form action={decideRouteAction}>
-          <input type="hidden" name="routeId" value={route.id} />
-          <input type="hidden" name="contributorAccountId" value={route.contributorAccountId} />
-          <input type="hidden" name="decision" value="declined" />
-          <SubmitButton variant="secondary">
-            <span className="inline-flex items-center gap-2">
-              <X className="h-4 w-4" aria-hidden="true" />
-              Decline
-            </span>
-          </SubmitButton>
-        </form>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        {!accepted && !declined ? (
+          <>
+            <form action={decideRouteAction}>
+              <input type="hidden" name="routeId" value={route.id} />
+              <input type="hidden" name="contributorAccountId" value={route.contributorAccountId} />
+              <input type="hidden" name="decision" value="accepted" />
+              <SubmitButton variant="secondary">
+                <span className="inline-flex items-center gap-2">
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  Accept
+                </span>
+              </SubmitButton>
+            </form>
+            <form action={decideRouteAction}>
+              <input type="hidden" name="routeId" value={route.id} />
+              <input type="hidden" name="contributorAccountId" value={route.contributorAccountId} />
+              <input type="hidden" name="decision" value="declined" />
+              <SubmitButton variant="secondary">
+                <span className="inline-flex items-center gap-2">
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  Decline
+                </span>
+              </SubmitButton>
+            </form>
+          </>
+        ) : null}
         {accepted ? (
           <form action={recordContributionAction}>
             <input type="hidden" name="routeId" value={route.id} />
@@ -358,8 +373,8 @@ function RouteCard({ route }: { route: ExperienceRoute }) {
           </form>
         ) : null}
       </div>
-      {accepted ? <p className="mt-3 text-sm text-[var(--accent)]">Accepted. You can now coordinate privately.</p> : null}
-      {declined ? <p className="mt-3 text-sm text-[var(--muted)]">Declined. That is okay; this is not a judgment.</p> : null}
+      {accepted ? <p className="mt-3 text-sm leading-6 text-[var(--accent)]">Accepted. Coordinate privately, then mark help given when finished.</p> : null}
+      {declined ? <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Declined. That is okay; no contribution or judgment is recorded.</p> : null}
     </article>
   );
 }
@@ -410,6 +425,10 @@ async function offerHelpAction(formData: FormData) {
 
   const accountId = requiredString(formData, "accountId");
   const services = formData.getAll("services").map(String).filter(Boolean);
+
+  if (services.length === 0) {
+    redirect("/?notice=Choose%20at%20least%20one%20kind%20of%20help%20before%20saving%20an%20offer.");
+  }
   const availabilityPreference = requiredString(formData, "availabilityPreference") as "unavailable" | "available" | "limited" | "time-sensitive-capable";
   const availableNow = availabilityPreference !== "unavailable";
   const prisma = createPrismaClient();
