@@ -225,6 +225,54 @@ test("accepted request can produce a privacy-safe contribution summary", async (
   assert.equal(JSON.stringify(contribution.privacyEnvelope).includes("excludesRecipientIdentity"), true);
 });
 
+
+test("group privacy constraints override requester public preference", async () => {
+  const fixture = await createFixture("privacy_group");
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_privacy_group_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    requestType: "food dropoff",
+    requestedServices: [{ serviceType: "food dropoff", trustRequirement: "lightweight" }],
+    description: "Requester asked for public, but group defaults stay private.",
+    privacyLevel: "public",
+    expiresAt: futureDate(),
+  });
+
+  const envelope = await prisma.privacyEnvelope.findUnique({
+    where: { targetType_targetId: { targetType: "SupportRequest", targetId: request.id } },
+  });
+
+  assert.equal(request.privacyLevel, "private");
+  assert.equal(envelope?.level, "private");
+});
+
+test("route notification payload does not expose requester identity or description", async () => {
+  const fixture = await createFixture("privacy_route");
+  await declareServiceCapability(prisma, {
+    accountId: fixture.alice.id,
+    serviceType: "medical accompaniment",
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_privacy_route_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    requestType: "medical accompaniment",
+    requestedServices: [{ serviceType: "medical accompaniment", trustRequirement: "lightweight" }],
+    description: "Private medical detail that must not be routed as notification payload.",
+    expiresAt: futureDate(),
+  });
+
+  const [route] = await routeSupportRequest(prisma, { supportRequestId: request.id });
+  const serialized = JSON.stringify(route.notificationPayload);
+
+  assert.equal(route.notificationPayload.sensitiveDetailsIncluded, false);
+  assert.equal(serialized.includes(fixture.mary.id), false);
+  assert.equal(serialized.includes("Private medical detail"), false);
+});
 async function createFixture(suffix: string) {
   const prefix = `caproute_${suffix}`;
   await cleanupFixture(prefix);

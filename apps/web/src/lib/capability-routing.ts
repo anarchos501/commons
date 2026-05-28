@@ -1,5 +1,13 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { ServiceCapabilityStatus } from "../generated/prisma/enums";
+import {
+  buildContributionPrivacyEnvelope,
+  buildRouteNotificationPayload,
+  isSensitiveSupportRequest,
+  parsePreferences,
+  resolveEffectivePrivacy,
+  resolveSupportRequestPrivacy,
+} from "./privacy-resolver";
 
 export type TrustRequirementValue = "lightweight" | "elevated";
 export type VisibilityLevelValue = "private" | "group" | "project" | "public";
@@ -50,6 +58,8 @@ export type RouteDecisionInput = {
   decisionNote?: string;
   decidedAt?: Date;
 };
+
+export type RouteNotification = Awaited<ReturnType<typeof routeSupportRequest>>[number];
 
 export type CreateContributionFromRouteInput = {
   routeId: string;
@@ -113,6 +123,21 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
     trustRequirement: service.trustRequirement ?? "lightweight",
   }));
 
+  const [group, project] = await Promise.all([
+    prisma.group.findUnique({ where: { id: input.groupId }, include: { node: true } }),
+    input.projectId ? prisma.project.findUnique({ where: { id: input.projectId } }) : Promise.resolve(null),
+  ]);
+  const sensitive = isSensitiveSupportRequest({ requestType: input.requestType, requestedServices });
+  const privacyResolution = resolveEffectivePrivacy({
+    dataClass: "support_request",
+    requestedPrivacy: input.privacyLevel,
+    requestedVisibility: input.privacyLevel,
+    groupPreferences: parsePreferences(group?.privacyPreferences),
+    projectPreferences: parsePreferences(project?.privacyPreferences),
+    nodeConstraints: parsePreferences(group?.node.constitutionalPreferences),
+    sensitive,
+  });
+
   const supportRequest = await prisma.supportRequest.create({
     data: {
       id: input.id,
@@ -123,9 +148,41 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
       requestedServices,
       description: input.description,
       urgency: input.urgency ?? "normal",
-      privacyLevel: input.privacyLevel ?? "private",
+      privacyLevel: privacyResolution.privacyLevel,
       status: "open",
       expiresAt: input.expiresAt ?? null,
+    },
+  });
+
+  await prisma.privacyEnvelope.upsert({
+    where: { targetType_targetId: { targetType: "SupportRequest", targetId: supportRequest.id } },
+    update: {
+      level: privacyResolution.privacyLevel,
+      rules: {
+        dataClass: "support_request",
+        visibility: privacyResolution.visibility,
+        federationAllowed: privacyResolution.federationAllowed,
+        p2pAllowed: privacyResolution.p2pAllowed,
+        retentionDays: privacyResolution.retentionDays,
+        requiresEncryption: privacyResolution.requiresEncryption,
+        explanation: privacyResolution.explanation,
+      },
+      createdBy: input.submittedByAccountId ?? null,
+    },
+    create: {
+      targetType: "SupportRequest",
+      targetId: supportRequest.id,
+      level: privacyResolution.privacyLevel,
+      rules: {
+        dataClass: "support_request",
+        visibility: privacyResolution.visibility,
+        federationAllowed: privacyResolution.federationAllowed,
+        p2pAllowed: privacyResolution.p2pAllowed,
+        retentionDays: privacyResolution.retentionDays,
+        requiresEncryption: privacyResolution.requiresEncryption,
+        explanation: privacyResolution.explanation,
+      },
+      createdBy: input.submittedByAccountId ?? null,
     },
   });
 
@@ -157,6 +214,16 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
     return [];
   }
 
+  const privacyResolution = await resolveSupportRequestPrivacy(prisma, supportRequest.id);
+  const routePayloadRequest = {
+    id: supportRequest.id,
+    requestType: supportRequest.requestType,
+    requestedServices: supportRequest.services.map((service) => ({ serviceType: service.serviceType, trustRequirement: service.trustRequirement })),
+    urgency: supportRequest.urgency,
+    privacyLevel: supportRequest.privacyLevel,
+    description: supportRequest.description,
+    submittedByAccountId: supportRequest.submittedByAccountId,
+  };
   const routes = [];
 
   for (const requestedService of supportRequest.services) {
@@ -219,7 +286,10 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         },
       });
 
-      routes.push(route);
+      routes.push({
+        ...route,
+        notificationPayload: buildRouteNotificationPayload(routePayloadRequest, privacyResolution),
+      });
     }
   }
 
@@ -288,11 +358,7 @@ export async function createContributionFromAcceptedRoute(prisma: PrismaClient, 
       quantity: input.quantity ?? null,
       occurredAt: input.occurredAt ?? new Date(),
       visibility: "group",
-      privacyEnvelope: {
-        excludesRecipientIdentity: true,
-        source: "accepted_request_route",
-        supportRequestId: route.supportRequestId,
-      },
+      privacyEnvelope: buildContributionPrivacyEnvelope(route.id),
     },
   });
 
