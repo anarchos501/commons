@@ -2,6 +2,8 @@
 
 Commons contributions should strengthen cooperation, consent, privacy, auditability, and local autonomy.
 
+Before proposing a major feature, read the [Commons Charter](docs/charter.md). Before implementing interface work, read the [Commons Experience Principles](docs/experience-principles.md).
+
 ## Code Standards
 
 - Keep core behavior understandable before making it clever.
@@ -9,6 +11,18 @@ Commons contributions should strengthen cooperation, consent, privacy, auditabil
 - Treat privacy envelopes, governance preferences, retention, and deletion behavior as part of the feature, not cleanup.
 - Add tests for sensitive flows, permission boundaries, routing logic, and data deletion.
 - Avoid hidden authority paths and global scoring systems.
+
+## Feature Review Filter
+
+Every significant change should answer:
+
+- Does this help communities coordinate themselves?
+- Does it avoid unnecessary surveillance, bureaucracy, dependency, or hidden power?
+- Does it preserve deletion, expiration, revocation, correction, and consent withdrawal where appropriate?
+- Does it keep shared coordination visible and accountable while keeping personal life private and sovereign?
+- For interface work, does it feel calm, understandable, dignified, privacy-visible, mobile-friendly, and low-pressure?
+
+If a feature increases power, retention, identity requirements, or administrative reach, its benefits and limits should be explicit.
 
 ## Contribution Process
 

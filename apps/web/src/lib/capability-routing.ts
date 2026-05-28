@@ -17,6 +17,7 @@ export type SimpleAvailability = {
   days?: string[];
   windows?: string[];
   availableNow?: boolean;
+  preference?: "unavailable" | "available" | "limited" | "time-sensitive-capable";
 };
 
 export type DeclareServiceCapabilityInput = {
@@ -203,7 +204,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
   const now = input.now ?? new Date();
   const supportRequest = await prisma.supportRequest.findUnique({
     where: { id: input.supportRequestId },
-    include: { services: true },
+    include: { group: true, services: true },
   });
 
   if (!supportRequest || supportRequest.status !== "open") {
@@ -233,6 +234,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         serviceType: requestedService.serviceType,
         trustRequirement: requestedService.trustRequirement,
         approvalStatus: { in: capabilityStatuses },
+        account: { homeNodeId: supportRequest.group.nodeId },
         accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
       },
       include: {

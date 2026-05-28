@@ -1,16 +1,29 @@
 # Roadmap
 
+Commons development should stay anchored to the minimum social loop:
+
+1. A community need appears.
+2. Trusted people coordinate.
+3. Help is delivered.
+4. Contribution is remembered.
+5. Vulnerability is not archived.
+6. Trust in the commons grows.
+
+Near-term work should make that loop usable on one healthy local node before adding heavier infrastructure.
+
 ## Phase 1
 
 Core models: Node, Account, PortableIdentity, Group, Project, ServiceCapability, TrustedServiceCapability, Contribution, SupportRequest, Offer, Proposal, Role, GovernancePreference, and PrivacyEnvelope.
 
 ## Phase 2
 
-Core web app: dashboards, group and project pages, service directory, request intake, contribution logging, and proposal system.
+Core web app: request intake, service directory, route review, contributor accept/decline flows, contribution logging, group/project pages, lightweight dashboards, and proposals.
 
 ## Phase 3
 
 Routing and trust: service notifications, contributor availability, trust petitions, trust approvals, and request routing.
+
+Contributor availability should stay private, revocable, and low-pressure. Future controls may support preferences such as unavailable, available, limited, and time-sensitive capable, but must avoid creating an on-call culture, urgency pressure, public reliability signals, or implied obligation.
 
 ## Phase 4
 
@@ -18,7 +31,8 @@ Mobile and PWA: installable app, offline drafts, encrypted local storage, sync q
 
 ## Later
 
-Governance resolver, privacy engine, security audits, federation readiness, portable identity migration, and plugin foundations.
+Security audits, deletion/export workflows, federation readiness, portable identity migration, offline sync, and plugin foundations.
+
 ## Hybrid Architecture Preparation
 
-Prepare a split-by-data-class architecture with lightweight signed events, local sync state, and replication policies before implementing full federation, P2P, CRDTs, or browser encryption.
+Prepare a split-by-data-class architecture with lightweight signed events, local sync state, and replication policies before implementing full federation, P2P, CRDTs, or browser encryption. Signed events are accountability and migration preparation, not blockchain architecture, total event sourcing, or immutable surveillance history.

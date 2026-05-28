@@ -1,10 +1,12 @@
 # Commons
 
-Commons is a simple, secure, decentralized mutual aid coordination app for real-world groups.
+Commons is a simple, secure mutual aid coordination app for real-world groups.
 
-It is not a social network, charity management platform, surveillance system, or automated governance engine. Commons is a cooperation substrate for communities that need to coordinate support, projects, decisions, trusted services, and local infrastructure without surrendering autonomy to outside platforms.
+It is not a social network, charity management platform, surveillance system, automated governance engine, or generalized distributed governance framework. Commons is coordination infrastructure for communities that need to organize care, labor, resources, trust, projects, and decisions without surrendering autonomy to centralized authority.
 
 The guiding standard is: make cooperation easier and domination harder.
+
+The project charter is the main product compass: [docs/charter.md](docs/charter.md). UI work is governed by the [Commons Experience Principles](docs/experience-principles.md).
 
 ## Principles
 
@@ -14,6 +16,7 @@ The guiding standard is: make cooperation easier and domination harder.
 - Make privacy envelopes and governance preferences first-class architecture.
 - Avoid global reputation scores, hidden super-admin access, AI dependency, and permanent recipient records.
 - Build one healthy local node before federation, plugins, or advanced syncing.
+- Keep the core social loop in view: need appears, trusted people coordinate, help is delivered, contribution is remembered, vulnerability is not archived, and trust in the commons grows.
 
 ## Architecture Goals
 

@@ -1,8 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f4ef;
+  --foreground: #24211d;
+  --page: #f7f4ef;
+  --surface: #fffdf8;
+  --subtle: #f0ebe2;
+  --hover: #ebe4d8;
+  --text: #24211d;
+  --soft-text: #5f574d;
+  --muted: #6f6558;
+  --border: #d8d0c3;
+  --border-strong: #c9c0b2;
+  --accent: #496b5d;
+  --accent-hover: #385549;
+  --accent-text: #ffffff;
+  --notice: #edf5ef;
+  --notice-border: #b8c7bd;
+  --notice-text: #294236;
 }
 
 @theme inline {
@@ -12,15 +27,65 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #151411;
+    --foreground: #f0ece3;
+    --page: #151411;
+    --surface: #211f1a;
+    --subtle: #2a2721;
+    --hover: #343026;
+    --text: #f0ece3;
+    --soft-text: #c8c0b4;
+    --muted: #aaa092;
+    --border: #403a31;
+    --border-strong: #5b5246;
+    --accent: #86a792;
+    --accent-hover: #9bb9a4;
+    --accent-text: #111713;
+    --notice: #1f3028;
+    --notice-border: #42624f;
+    --notice-text: #c7e7d0;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.field-input {
+  min-height: 2.75rem;
+  width: 100%;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  padding: 0.55rem 0.75rem;
+  color: var(--text);
+  outline: none;
+}
+
+.field-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(73, 107, 93, 0.22);
 }
