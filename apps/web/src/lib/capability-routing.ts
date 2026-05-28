@@ -1,0 +1,326 @@
+import type { PrismaClient } from "../generated/prisma/client";
+import type { ServiceCapabilityStatus } from "../generated/prisma/enums";
+
+export type TrustRequirementValue = "lightweight" | "elevated";
+export type VisibilityLevelValue = "private" | "group" | "project" | "public";
+export type RouteDecision = "accepted" | "declined";
+
+export type SimpleAvailability = {
+  days?: string[];
+  windows?: string[];
+  availableNow?: boolean;
+};
+
+export type DeclareServiceCapabilityInput = {
+  accountId: string;
+  serviceType: string;
+  description?: string;
+  availability?: SimpleAvailability;
+  visibility?: VisibilityLevelValue;
+  trustRequirement?: TrustRequirementValue;
+};
+
+export type RequestedServiceInput = {
+  serviceType: string;
+  trustRequirement?: TrustRequirementValue;
+};
+
+export type CreateSupportRequestInput = {
+  id?: string;
+  submittedByAccountId?: string | null;
+  groupId: string;
+  projectId?: string | null;
+  requestType: string;
+  requestedServices: RequestedServiceInput[];
+  description: string;
+  urgency?: "low" | "normal" | "high" | "urgent";
+  privacyLevel?: "private" | "group" | "project" | "public";
+  expiresAt?: Date | null;
+};
+
+export type RouteSupportRequestInput = {
+  supportRequestId: string;
+  now?: Date;
+};
+
+export type RouteDecisionInput = {
+  routeId: string;
+  contributorAccountId: string;
+  decision: RouteDecision;
+  decisionNote?: string;
+  decidedAt?: Date;
+};
+
+export type CreateContributionFromRouteInput = {
+  routeId: string;
+  occurredAt?: Date;
+  quantity?: string;
+  id?: string;
+};
+
+export async function declareServiceCapability(prisma: PrismaClient, input: DeclareServiceCapabilityInput) {
+  const trustRequirement = input.trustRequirement ?? "lightweight";
+  const visibility = input.visibility ?? "group";
+  const approvalStatus = trustRequirement === "lightweight" ? "available" : "petitioned";
+
+  const capability = await prisma.serviceCapability.upsert({
+    where: {
+      accountId_serviceType_trustRequirement: {
+        accountId: input.accountId,
+        serviceType: input.serviceType,
+        trustRequirement,
+      },
+    },
+    update: {
+      description: input.description,
+      availability: input.availability,
+      visibility,
+      approvalStatus,
+    },
+    create: {
+      accountId: input.accountId,
+      serviceType: input.serviceType,
+      description: input.description,
+      availability: input.availability,
+      visibility,
+      trustRequirement,
+      approvalStatus,
+    },
+  });
+
+  await prisma.contributorAvailability.upsert({
+    where: { accountId_serviceType: { accountId: input.accountId, serviceType: input.serviceType } },
+    update: {
+      serviceCapabilityId: capability.id,
+      availability: input.availability ?? {},
+      active: true,
+    },
+    create: {
+      accountId: input.accountId,
+      serviceCapabilityId: capability.id,
+      serviceType: input.serviceType,
+      availability: input.availability ?? {},
+      active: true,
+    },
+  });
+
+  return capability;
+}
+
+export async function createSupportRequest(prisma: PrismaClient, input: CreateSupportRequestInput) {
+  const requestedServices = input.requestedServices.map((service) => ({
+    serviceType: service.serviceType,
+    trustRequirement: service.trustRequirement ?? "lightweight",
+  }));
+
+  const supportRequest = await prisma.supportRequest.create({
+    data: {
+      id: input.id,
+      submittedByAccountId: input.submittedByAccountId ?? null,
+      groupId: input.groupId,
+      projectId: input.projectId ?? null,
+      requestType: input.requestType,
+      requestedServices,
+      description: input.description,
+      urgency: input.urgency ?? "normal",
+      privacyLevel: input.privacyLevel ?? "private",
+      status: "open",
+      expiresAt: input.expiresAt ?? null,
+    },
+  });
+
+  for (const service of requestedServices) {
+    await prisma.supportRequestService.create({
+      data: {
+        supportRequestId: supportRequest.id,
+        serviceType: service.serviceType,
+        trustRequirement: service.trustRequirement,
+      },
+    });
+  }
+
+  return supportRequest;
+}
+
+export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupportRequestInput) {
+  const now = input.now ?? new Date();
+  const supportRequest = await prisma.supportRequest.findUnique({
+    where: { id: input.supportRequestId },
+    include: { services: true },
+  });
+
+  if (!supportRequest || supportRequest.status !== "open") {
+    return [];
+  }
+
+  if (supportRequest.expiresAt && supportRequest.expiresAt <= now) {
+    return [];
+  }
+
+  const routes = [];
+
+  for (const requestedService of supportRequest.services) {
+    const capabilityStatuses: ServiceCapabilityStatus[] = requestedService.trustRequirement === "lightweight" ? ["available", "approved"] : ["approved"];
+    const capabilities = await prisma.serviceCapability.findMany({
+      where: {
+        serviceType: requestedService.serviceType,
+        trustRequirement: requestedService.trustRequirement,
+        approvalStatus: { in: capabilityStatuses },
+        accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
+      },
+      include: {
+        trustedRecords: true,
+        availabilityRecords: true,
+      },
+      orderBy: [{ createdAt: "asc" }, { accountId: "asc" }],
+    });
+
+    for (const capability of capabilities) {
+      if (!isCapabilityAvailable(capability.availability, capability.availabilityRecords)) {
+        continue;
+      }
+
+      if (requestedService.trustRequirement === "elevated" && !hasApprovedGroupTrust(capability.trustedRecords, supportRequest.groupId, requestedService.serviceType)) {
+        continue;
+      }
+
+      const existingRoute = await prisma.requestRoute.findUnique({
+        where: {
+          supportRequestId_contributorAccountId_serviceType_trustRequirement: {
+            supportRequestId: supportRequest.id,
+            contributorAccountId: capability.accountId,
+            serviceType: requestedService.serviceType,
+            trustRequirement: requestedService.trustRequirement,
+          },
+        },
+      });
+
+      if (existingRoute?.status === "declined") {
+        continue;
+      }
+
+      const route = await prisma.requestRoute.upsert({
+        where: {
+          supportRequestId_contributorAccountId_serviceType_trustRequirement: {
+            supportRequestId: supportRequest.id,
+            contributorAccountId: capability.accountId,
+            serviceType: requestedService.serviceType,
+            trustRequirement: requestedService.trustRequirement,
+          },
+        },
+        update: existingRoute ? {} : { status: "notified" },
+        create: {
+          supportRequestId: supportRequest.id,
+          contributorAccountId: capability.accountId,
+          serviceCapabilityId: capability.id,
+          serviceType: requestedService.serviceType,
+          trustRequirement: requestedService.trustRequirement,
+          status: "notified",
+        },
+      });
+
+      routes.push(route);
+    }
+  }
+
+  return routes.sort((left, right) => {
+    if (left.createdAt.getTime() !== right.createdAt.getTime()) {
+      return left.createdAt.getTime() - right.createdAt.getTime();
+    }
+
+    return left.contributorAccountId.localeCompare(right.contributorAccountId);
+  });
+}
+
+export async function decideRequestRoute(prisma: PrismaClient, input: RouteDecisionInput) {
+  const route = await prisma.requestRoute.findUnique({ where: { id: input.routeId } });
+
+  if (!route || route.contributorAccountId !== input.contributorAccountId) {
+    throw new Error("Only the routed contributor can decide this route.");
+  }
+
+  if (!["notified", "accepted", "declined"].includes(route.status)) {
+    throw new Error(`Route cannot be decided from status ${route.status}.`);
+  }
+
+  const status = input.decision === "accepted" ? "accepted" : "declined";
+
+  const updatedRoute = await prisma.requestRoute.update({
+    where: { id: route.id },
+    data: {
+      status,
+      decisionNote: input.decisionNote,
+      decidedAt: input.decidedAt ?? new Date(),
+    },
+  });
+
+  if (status === "accepted") {
+    await prisma.supportRequest.update({
+      where: { id: route.supportRequestId },
+      data: { status: "matched" },
+    });
+  }
+
+  return updatedRoute;
+}
+
+export async function createContributionFromAcceptedRoute(prisma: PrismaClient, input: CreateContributionFromRouteInput) {
+  const route = await prisma.requestRoute.findUnique({
+    where: { id: input.routeId },
+    include: {
+      contributor: true,
+      supportRequest: true,
+    },
+  });
+
+  if (!route || route.status !== "accepted") {
+    throw new Error("A contribution can only be created from an accepted route.");
+  }
+
+  const contribution = await prisma.contribution.create({
+    data: {
+      id: input.id,
+      contributorAccountId: route.contributorAccountId,
+      groupId: route.supportRequest.groupId,
+      projectId: route.supportRequest.projectId,
+      contributionType: route.serviceType,
+      description: `${route.contributor.displayName} provided ${route.serviceType} support.`,
+      quantity: input.quantity ?? null,
+      occurredAt: input.occurredAt ?? new Date(),
+      visibility: "group",
+      privacyEnvelope: {
+        excludesRecipientIdentity: true,
+        source: "accepted_request_route",
+        supportRequestId: route.supportRequestId,
+      },
+    },
+  });
+
+  await prisma.supportRequest.update({
+    where: { id: route.supportRequestId },
+    data: { status: "fulfilled" },
+  });
+
+  return contribution;
+}
+
+type AvailabilityRecord = {
+  active: boolean;
+  availability: unknown;
+};
+
+function isCapabilityAvailable(capabilityAvailability: unknown, availabilityRecords: AvailabilityRecord[]): boolean {
+  if (availabilityHasAvailableNowFalse(capabilityAvailability)) {
+    return false;
+  }
+
+  return !availabilityRecords.some((record) => record.active && availabilityHasAvailableNowFalse(record.availability));
+}
+
+function availabilityHasAvailableNowFalse(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "availableNow" in value && (value as { availableNow?: unknown }).availableNow === false);
+}
+
+function hasApprovedGroupTrust(records: Array<{ groupId: string; trustContext: string; status: string }>, groupId: string, trustContext: string): boolean {
+  return records.some((record) => record.groupId === groupId && record.trustContext === trustContext && record.status === "approved");
+}

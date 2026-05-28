@@ -175,6 +175,14 @@ enum LocalStoragePolicy {
   sync_queue
 }
 
+enum RequestRouteStatus {
+  notified
+  accepted
+  declined
+  expired
+  cancelled
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -240,6 +248,8 @@ model Account {
   actionLogs          ActionLog[]
   signedEvents        SignedEvent[]
   localSyncStates     LocalSyncState[]
+  requestRoutes       RequestRoute[]
+  availability        ContributorAvailability[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -306,8 +316,10 @@ model ServiceCapability {
   approvalStatus   ServiceCapabilityStatus @default(available)
   createdAt        DateTime                @default(now())
 
-  account        Account                    @relation(fields: [accountId], references: [id])
-  trustedRecords TrustedServiceCapability[]
+  account             Account                    @relation(fields: [accountId], references: [id])
+  trustedRecords      TrustedServiceCapability[]
+  requestRoutes       RequestRoute[]
+  availabilityRecords ContributorAvailability[]
 
   @@unique([accountId, serviceType, trustRequirement])
   @@index([accountId])
@@ -356,6 +368,7 @@ model SupportRequest {
   project     Project?                @relation(fields: [projectId], references: [id])
   offers      Offer[]
   services    SupportRequestService[]
+  routes      RequestRoute[]
 
   @@index([submittedByAccountId])
   @@index([groupId])
@@ -377,6 +390,53 @@ model SupportRequestService {
   @@unique([supportRequestId, serviceType, trustRequirement])
   @@index([serviceType])
   @@index([trustRequirement])
+}
+
+model RequestRoute {
+  id                   String             @id @default(cuid())
+  supportRequestId     String
+  contributorAccountId String
+  serviceCapabilityId  String
+  serviceType          String
+  trustRequirement     TrustRequirement   @default(lightweight)
+  status               RequestRouteStatus @default(notified)
+  decisionNote         String?
+  decidedAt            DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  supportRequest    SupportRequest    @relation(fields: [supportRequestId], references: [id], onDelete: Cascade)
+  contributor       Account           @relation(fields: [contributorAccountId], references: [id], onDelete: Cascade)
+  serviceCapability ServiceCapability @relation(fields: [serviceCapabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([supportRequestId, contributorAccountId, serviceType, trustRequirement])
+  @@index([supportRequestId])
+  @@index([contributorAccountId])
+  @@index([serviceCapabilityId])
+  @@index([serviceType])
+  @@index([trustRequirement])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ContributorAvailability {
+  id                  String   @id @default(cuid())
+  accountId           String
+  serviceCapabilityId String?
+  serviceType         String
+  availability        Json
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  account           Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  serviceCapability ServiceCapability? @relation(fields: [serviceCapabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, serviceType])
+  @@index([accountId])
+  @@index([serviceCapabilityId])
+  @@index([serviceType])
+  @@index([active])
 }
 
 model Offer {
