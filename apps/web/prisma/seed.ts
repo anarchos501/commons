@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { createSignedEventRecord } from "../src/lib/signed-events";
@@ -13,6 +14,8 @@ const adapter = new PrismaPg(connectionString);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
+  const demoPasswordHash = await bcrypt.hash("demo1234", 10);
+
   const node = await prisma.node.upsert({
     where: { domain: "localhost" },
     update: {
@@ -145,12 +148,14 @@ async function main() {
 
   const mary = await prisma.account.upsert({
     where: { id: "acct_mary" },
-    update: { displayName: "Mary", accountType: "participant", profileVisibility: "private" },
+    update: { displayName: "Mary", email: "mary@example.com", passwordHash: demoPasswordHash, accountType: "participant", profileVisibility: "private" },
     create: {
       id: "acct_mary",
       portableIdentityId: maryIdentity.id,
       homeNodeId: node.id,
       displayName: "Mary",
+      email: "mary@example.com",
+      passwordHash: demoPasswordHash,
       accountType: "participant",
       publicKey: "dev-account-key-mary",
       profileVisibility: "private",
@@ -159,12 +164,14 @@ async function main() {
 
   const alice = await prisma.account.upsert({
     where: { id: "acct_alice" },
-    update: { displayName: "Alice", accountType: "member", profileVisibility: "group" },
+    update: { displayName: "Alice", email: "alice@example.com", passwordHash: demoPasswordHash, accountType: "member", profileVisibility: "group" },
     create: {
       id: "acct_alice",
       portableIdentityId: aliceIdentity.id,
       homeNodeId: node.id,
       displayName: "Alice",
+      email: "alice@example.com",
+      passwordHash: demoPasswordHash,
       accountType: "member",
       publicKey: "dev-account-key-alice",
       profileVisibility: "group",
@@ -173,12 +180,14 @@ async function main() {
 
   const joe = await prisma.account.upsert({
     where: { id: "acct_joe" },
-    update: { displayName: "Joe", accountType: "member", profileVisibility: "group" },
+    update: { displayName: "Joe", email: "joe@example.com", passwordHash: demoPasswordHash, accountType: "member", profileVisibility: "group" },
     create: {
       id: "acct_joe",
       portableIdentityId: joeIdentity.id,
       homeNodeId: node.id,
       displayName: "Joe",
+      email: "joe@example.com",
+      passwordHash: demoPasswordHash,
       accountType: "member",
       publicKey: "dev-account-key-joe",
       profileVisibility: "group",
@@ -187,12 +196,14 @@ async function main() {
 
   const zora = await prisma.account.upsert({
     where: { id: "acct_zora" },
-    update: { displayName: "Zora", accountType: "member", profileVisibility: "group" },
+    update: { displayName: "Zora", email: "zora@example.com", passwordHash: demoPasswordHash, accountType: "member", profileVisibility: "group" },
     create: {
       id: "acct_zora",
       portableIdentityId: zoraIdentity.id,
       homeNodeId: node.id,
       displayName: "Zora",
+      email: "zora@example.com",
+      passwordHash: demoPasswordHash,
       accountType: "member",
       publicKey: "dev-account-key-zora",
       profileVisibility: "group",
@@ -485,6 +496,30 @@ async function main() {
     },
   });
 
+
+  const serviceOfferings = [
+    { serviceType: "rides", minimumContributorTrust: "lightweight" },
+    { serviceType: "food delivery", minimumContributorTrust: "lightweight" },
+    { serviceType: "translation", minimumContributorTrust: "lightweight" },
+    { serviceType: "childcare", minimumContributorTrust: "elevated" },
+    { serviceType: "repairs", minimumContributorTrust: "lightweight" },
+    { serviceType: "emotional support", minimumContributorTrust: "lightweight" },
+    { serviceType: "medical accompaniment", minimumContributorTrust: "elevated" },
+    { serviceType: "carpentry", minimumContributorTrust: "lightweight" },
+  ];
+
+  for (const offering of serviceOfferings) {
+    await prisma.groupServiceOffering.upsert({
+      where: { groupId_serviceType: { groupId: group.id, serviceType: offering.serviceType } },
+      update: { status: "active", minimumContributorTrust: offering.minimumContributorTrust },
+      create: {
+        groupId: group.id,
+        serviceType: offering.serviceType,
+        status: "active",
+        minimumContributorTrust: offering.minimumContributorTrust,
+      },
+    });
+  }
 
   for (const policy of defaultReplicationPolicies) {
     await prisma.dataReplicationPolicy.upsert({

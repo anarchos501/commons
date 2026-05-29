@@ -231,6 +231,8 @@ model Account {
   portableIdentityId String?
   homeNodeId         String
   displayName        String
+  email              String?         @unique
+  passwordHash       String?
   accountType        AccountType     @default(guest)
   publicKey          String?
   profileVisibility  VisibilityLevel @default(private)
@@ -266,19 +268,35 @@ model Group {
   privacyPreferences    Json?
   createdAt             DateTime @default(now())
 
-  node            Node                       @relation(fields: [nodeId], references: [id])
-  projects        Project[]
-  trustApprovals  TrustedServiceCapability[]
-  supportRequests SupportRequest[]
-  offers          Offer[]
-  contributions   Contribution[]
-  proposals       Proposal[]
-  roles           Role[]
-  actionLogs      ActionLog[]
-  signedEvents    SignedEvent[]
+  node             Node                       @relation(fields: [nodeId], references: [id])
+  projects         Project[]
+  trustApprovals   TrustedServiceCapability[]
+  supportRequests  SupportRequest[]
+  offers           Offer[]
+  contributions    Contribution[]
+  proposals        Proposal[]
+  roles            Role[]
+  actionLogs       ActionLog[]
+  signedEvents     SignedEvent[]
+  serviceOfferings GroupServiceOffering[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
+}
+
+model GroupServiceOffering {
+  id                    String   @id @default(cuid())
+  groupId               String
+  serviceType           String
+  status                String   @default("active")
+  minimumContributorTrust String @default("lightweight")
+  createdAt             DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id])
+
+  @@unique([groupId, serviceType])
+  @@index([groupId])
+  @@index([status])
 }
 
 model Project {
@@ -352,6 +370,7 @@ model TrustedServiceCapability {
 model SupportRequest {
   id                   String               @id @default(cuid())
   submittedByAccountId String?
+  guestRequestId       String?
   groupId              String
   projectId            String?
   requestType          String

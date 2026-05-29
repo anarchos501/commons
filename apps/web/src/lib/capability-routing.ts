@@ -37,6 +37,7 @@ export type RequestedServiceInput = {
 export type CreateSupportRequestInput = {
   id?: string;
   submittedByAccountId?: string | null;
+  guestRequestId?: string;
   groupId: string;
   projectId?: string | null;
   requestType: string;
@@ -143,6 +144,7 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
     data: {
       id: input.id,
       submittedByAccountId: input.submittedByAccountId ?? null,
+      guestRequestId: input.guestRequestId ?? null,
       groupId: input.groupId,
       projectId: input.projectId ?? null,
       requestType: input.requestType,
@@ -228,11 +230,20 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
   const routes = [];
 
   for (const requestedService of supportRequest.services) {
-    const capabilityStatuses: ServiceCapabilityStatus[] = requestedService.trustRequirement === "lightweight" ? ["available", "approved"] : ["approved"];
+    const offering = await prisma.groupServiceOffering.findUnique({
+      where: { groupId_serviceType: { groupId: supportRequest.groupId, serviceType: requestedService.serviceType } },
+    });
+
+    if (!offering || offering.status !== "active") {
+      continue;
+    }
+
+    const effectiveTrust = resolveTrustThreshold(requestedService.trustRequirement, offering.minimumContributorTrust);
+    const capabilityStatuses: ServiceCapabilityStatus[] = effectiveTrust === "lightweight" ? ["available", "approved"] : ["approved"];
     const capabilities = await prisma.serviceCapability.findMany({
       where: {
         serviceType: requestedService.serviceType,
-        trustRequirement: requestedService.trustRequirement,
+        trustRequirement: effectiveTrust,
         approvalStatus: { in: capabilityStatuses },
         account: { homeNodeId: supportRequest.group.nodeId },
         accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
@@ -259,7 +270,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
             supportRequestId: supportRequest.id,
             contributorAccountId: capability.accountId,
             serviceType: requestedService.serviceType,
-            trustRequirement: requestedService.trustRequirement,
+            trustRequirement: effectiveTrust,
           },
         },
       });
@@ -274,7 +285,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
             supportRequestId: supportRequest.id,
             contributorAccountId: capability.accountId,
             serviceType: requestedService.serviceType,
-            trustRequirement: requestedService.trustRequirement,
+            trustRequirement: effectiveTrust,
           },
         },
         update: existingRoute ? {} : { status: "notified" },
@@ -283,7 +294,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
           contributorAccountId: capability.accountId,
           serviceCapabilityId: capability.id,
           serviceType: requestedService.serviceType,
-          trustRequirement: requestedService.trustRequirement,
+          trustRequirement: effectiveTrust,
           status: "notified",
         },
       });
@@ -391,4 +402,11 @@ function availabilityHasAvailableNowFalse(value: unknown): boolean {
 
 function hasApprovedGroupTrust(records: Array<{ groupId: string; trustContext: string; status: string }>, groupId: string, trustContext: string): boolean {
   return records.some((record) => record.groupId === groupId && record.trustContext === trustContext && record.status === "approved");
+}
+
+function resolveTrustThreshold(requesterPreference: string, groupMinimum: string): TrustRequirementValue {
+  if (requesterPreference === "elevated" || groupMinimum === "elevated") {
+    return "elevated";
+  }
+  return "lightweight";
 }

@@ -334,6 +334,18 @@ async function createFixture(suffix: string) {
     },
   });
 
+  for (const serviceType of ["food dropoff", "rides", "childcare", "food delivery", "meal delivery", "grocery pickup", "supply dropoff", "medical accompaniment"]) {
+    await prisma.groupServiceOffering.create({
+      data: {
+        id: `${prefix}_offering_${serviceType.replace(/ /g, "_")}`,
+        groupId: group.id,
+        serviceType,
+        status: "active",
+        minimumContributorTrust: "lightweight",
+      },
+    });
+  }
+
   const project = await prisma.project.create({
     data: {
       id: `${prefix}_project`,
@@ -384,6 +396,7 @@ async function cleanupFixture(prefix: string) {
   await prisma.trustedServiceCapability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.contributorAvailability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.serviceCapability.deleteMany({ where: { accountId: { startsWith: prefix } } });
+  await prisma.groupServiceOffering.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.project.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
