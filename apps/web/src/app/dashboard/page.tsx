@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   Check,
   Clock,
+  FolderOpen,
   HandHeart,
   HeartHandshake,
   HelpCircle,
@@ -23,13 +24,9 @@ import {
   routeSupportRequest,
 } from "../../lib/capability-routing";
 import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/group-membership";
+import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../lib/support-form";
 
 export const dynamic = "force-dynamic";
-
-const trustPreferenceOptions = [
-  { value: "lightweight", label: "Any available contributor" },
-  { value: "elevated", label: "Trusted contributors only" },
-];
 
 const availabilityOptions = [
   {
@@ -100,7 +97,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               </form>
             </div>
           </div>
-          <nav aria-label="Primary actions" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <nav aria-label="Primary actions" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <JumpLink href="#request" icon={<HelpCircle className="h-4 w-4" />}>
               Request Help
             </JumpLink>
@@ -110,6 +107,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             <JumpLink href="#groups" icon={<HeartHandshake className="h-4 w-4" />}>
               My Groups
             </JumpLink>
+            {data.group ? (
+              <JumpLink href="#projects" icon={<FolderOpen className="h-4 w-4" />}>
+                Projects
+              </JumpLink>
+            ) : null}
             <JumpLink href="#routes" icon={<Inbox className="h-4 w-4" />}>
               Notifications
             </JumpLink>
@@ -241,32 +243,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                     <h3 className="text-lg font-semibold">{data.group.name}</h3>
                     <p className="mt-1 text-sm leading-6 text-[var(--soft-text)]">{data.group.description}</p>
                   </div>
-                  <div className="grid gap-2">
-                    {data.projects.map((project) => (
-                      <div key={project.id} className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium">{project.name}</p>
-                          <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{project.status}</span>
-                        </div>
-                        {project.description ? (
-                          <p className="text-xs leading-5 text-[var(--muted)]">{project.description}</p>
-                        ) : null}
-                        {project.services.length > 0 ? (
-                          <p className="text-xs text-[var(--muted)]">{project.services.map(capitalize).join(" · ")}</p>
-                        ) : null}
-                        {project.contributions.length > 0 ? (
-                          <div className="space-y-1 border-t border-[var(--border)] pt-2">
-                            {project.contributions.map((c) => (
-                              <div key={c.type} className="flex items-center justify-between">
-                                <span className="text-xs capitalize text-[var(--soft-text)]">{c.type}</span>
-                                <span className="text-xs text-[var(--muted)]">{c.count} logged</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
                   {data.memberships.length > 1 ? (
                     <div className="space-y-2 border-t border-[var(--border)] pt-4">
                       <p className="text-xs font-medium text-[var(--muted)]">Your groups</p>
@@ -335,6 +311,41 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               )}
             </Section>
 
+            {data.group ? (
+            <Section id="projects" title="Projects" eyebrow="Active coordination">
+              {data.projects.length > 0 ? (
+                <div className="grid gap-2">
+                  {data.projects.map((project) => (
+                    <div key={project.id} className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium">{project.name}</p>
+                        <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{project.status}</span>
+                      </div>
+                      {project.description ? (
+                        <p className="text-xs leading-5 text-[var(--muted)]">{project.description}</p>
+                      ) : null}
+                      {project.services.length > 0 ? (
+                        <p className="text-xs text-[var(--muted)]">{project.services.map(capitalize).join(" · ")}</p>
+                      ) : null}
+                      {project.contributions.length > 0 ? (
+                        <div className="space-y-1 border-t border-[var(--border)] pt-2">
+                          {project.contributions.map((c) => (
+                            <div key={c.type} className="flex items-center justify-between">
+                              <span className="text-xs capitalize text-[var(--soft-text)]">{c.type}</span>
+                              <span className="text-xs text-[var(--muted)]">{c.count} logged</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No active projects in this group yet." />
+              )}
+            </Section>
+            ) : null}
+
             <Section id="routes" title="Requests You Can Help With" eyebrow="Private matching">
               <form action={routeOpenRequestsAction} className="mb-4">
                 <SubmitButton variant="secondary" disabled={!data.group}>Check for matching requests</SubmitButton>
@@ -380,6 +391,50 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               ) : (
                 <EmptyState text="When help is finished, it can be remembered here without naming who received it." />
               )}
+            </Section>
+            ) : null}
+
+            {data.group ? (
+            <Section id="concerns" title="Concerns" eyebrow="Shared accountability">
+              {data.groupOpenConcernCount > 0 ? (
+                <p className="mb-4 text-sm leading-6 text-[var(--soft-text)]">
+                  {data.groupOpenConcernCount} open concern{data.groupOpenConcernCount !== 1 ? "s" : ""} in this group.
+                </p>
+              ) : null}
+              {data.myReports.length > 0 ? (
+                <div className="mb-5 space-y-3">
+                  <p className="text-xs font-medium text-[var(--muted)]">Your concerns</p>
+                  {data.myReports.map((report) => (
+                    <div key={report.id} className="space-y-1 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium">{report.subject}</p>
+                        <span className="shrink-0 text-xs capitalize text-[var(--muted)]">
+                          {report.status.replace("_", " ")}
+                        </span>
+                      </div>
+                      {report.context ? (
+                        <p className="text-xs text-[var(--muted)]">{report.context}</p>
+                      ) : null}
+                      <p className="text-xs leading-5 text-[var(--soft-text)]">{report.description}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <form action={submitConcernAction} className="space-y-4">
+                <label className="block">
+                  <span className="field-label">What is the concern about?</span>
+                  <input name="subject" type="text" required className="field-input" placeholder="A brief subject" />
+                </label>
+                <label className="block">
+                  <span className="field-label">What happened?</span>
+                  <textarea name="description" required rows={4} className="field-input resize-none" placeholder="Describe what happened or what is concerning." />
+                </label>
+                <label className="block">
+                  <span className="field-label">Additional context (optional)</span>
+                  <textarea name="context" rows={2} className="field-input resize-none" placeholder="Anything else that helps." />
+                </label>
+                <SubmitButton variant="secondary">Submit concern</SubmitButton>
+              </form>
             </Section>
             ) : null}
           </aside>
@@ -669,7 +724,7 @@ async function offerHelpAction(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
-async function routeOpenRequestsAction(formData: FormData) {
+async function routeOpenRequestsAction() {
   "use server";
 
   const session = await getSession();
@@ -747,6 +802,40 @@ async function recordContributionAction(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+async function submitConcernAction(formData: FormData) {
+  "use server";
+
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+
+  const subject = requiredString(formData, "subject");
+  const description = requiredString(formData, "description");
+  const context = optionalString(formData, "context");
+  const prisma = createPrismaClient();
+
+  try {
+    await requireGroupMembership(prisma, session.accountId, groupId);
+    await prisma.report.create({
+      data: {
+        reportedByAccountId: session.accountId,
+        groupId,
+        subject,
+        description,
+        context: context ?? null,
+        status: "open",
+        visibility: "private",
+      },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  redirect("/dashboard#concerns");
+}
+
 async function getDashboardData(accountId: string, groupId: string | null) {
   const prisma = createPrismaClient();
 
@@ -766,7 +855,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions] = await Promise.all([
+    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: {
@@ -819,6 +908,16 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             orderBy: { _count: { contributionType: "desc" } },
           })
         : Promise.resolve([]),
+      group
+        ? prisma.report.findMany({
+            where: { reportedByAccountId: accountId, groupId: group.id },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, subject: true, context: true, description: true, status: true, createdAt: true },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.report.count({ where: { groupId: group.id, status: "open" } })
+        : Promise.resolve(0),
     ]);
 
     return {
@@ -850,38 +949,14 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       })),
       groupContributions: groupContributions.map((r) => ({ type: r.contributionType, count: r._count.contributionType })),
       personalContributions: personalContributions.map((r) => ({ type: r.contributionType, count: r._count.contributionType })),
+      myReports,
+      groupOpenConcernCount,
     };
   } finally {
     await prisma.$disconnect();
   }
 }
 
-
-function buildRequestDescription(input: { contact: string; location?: string; language?: string }) {
-  return [
-    `Private contact note: ${input.contact}`,
-    input.location ? `Rough location: ${input.location}` : null,
-    input.language ? `Language preference: ${input.language}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-
-function requiredString(formData: FormData, key: string) {
-  const value = formData.get(key);
-
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`${key} is required.`);
-  }
-
-  return value.trim();
-}
-
-function optionalString(formData: FormData, key: string) {
-  const value = formData.get(key);
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 function urgencyLabel(urgency: string) {
   if (urgency === "urgent") return "Time-sensitive, but not broadcast publicly.";
@@ -891,10 +966,6 @@ function urgencyLabel(urgency: string) {
 
 function formatRelativeDate(date: Date) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
-}
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 type ExperienceRoute = {

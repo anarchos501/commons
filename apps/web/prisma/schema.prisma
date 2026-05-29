@@ -190,6 +190,13 @@ enum MembershipStatus {
   revoked
 }
 
+enum ReportStatus {
+  open
+  under_review
+  resolved
+  dismissed
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -260,6 +267,7 @@ model Account {
   requestRoutes       RequestRoute[]
   availability        ContributorAvailability[]
   groupMemberships    GroupMembership[]
+  reportsSubmitted    Report[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -288,6 +296,7 @@ model Group {
   signedEvents     SignedEvent[]
   serviceOfferings GroupServiceOffering[]
   memberships      GroupMembership[]
+  reports          Report[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -571,6 +580,27 @@ model Proposal {
   @@index([groupId])
   @@index([projectId])
   @@index([createdByAccountId])
+  @@index([status])
+}
+
+model Report {
+  id                  String       @id @default(cuid())
+  reportedByAccountId String
+  groupId             String
+  subject             String
+  context             String?
+  description         String
+  status              ReportStatus @default(open)
+  visibility          String       @default("private")
+  resolvedAt          DateTime?
+  resolvedNote        String?
+  createdAt           DateTime     @default(now())
+
+  reportedBy Account @relation(fields: [reportedByAccountId], references: [id])
+  group      Group   @relation(fields: [groupId], references: [id])
+
+  @@index([reportedByAccountId])
+  @@index([groupId])
   @@index([status])
 }
 

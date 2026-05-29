@@ -4,13 +4,9 @@ import { ArrowLeft, HelpCircle, Languages, MapPin, Shield } from "lucide-react";
 import { createPrismaClient } from "../../lib/prisma";
 import { createSupportRequest, routeSupportRequest } from "../../lib/capability-routing";
 import { randomUUID } from "crypto";
+import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../lib/support-form";
 
 export const dynamic = "force-dynamic";
-
-const trustPreferenceOptions = [
-  { value: "lightweight", label: "Any available contributor" },
-  { value: "elevated", label: "Trusted contributors only" },
-];
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -204,13 +200,11 @@ async function submitGuestRequestAction(formData: FormData) {
   try {
     const group = await prisma.group.findFirstOrThrow({ orderBy: { createdAt: "asc" } });
 
-    const description = [
-      `Private contact note: ${contact.trim()}`,
-      location && typeof location === "string" && location.trim() ? `Rough location: ${location.trim()}` : null,
-      language && typeof language === "string" && language.trim() ? `Language preference: ${language.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const description = buildRequestDescription({
+      contact: contact.trim(),
+      location: location && typeof location === "string" && location.trim() ? location.trim() : undefined,
+      language: language && typeof language === "string" && language.trim() ? language.trim() : undefined,
+    });
 
     const request = await createSupportRequest(prisma, {
       guestRequestId: randomUUID(),
@@ -230,8 +224,4 @@ async function submitGuestRequestAction(formData: FormData) {
   }
 
   redirect("/request?submitted=1");
-}
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }

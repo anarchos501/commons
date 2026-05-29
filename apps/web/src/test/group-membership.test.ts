@@ -42,6 +42,47 @@ test("joinOpenGroup is idempotent", async () => {
   }
 });
 
+test("joinOpenGroup reactivates an inactive membership", async () => {
+  const { account, group } = await createFixture("gm_rejoin_inactive");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "inactive" },
+    });
+
+    await joinOpenGroup(prisma, account.id, group.id);
+
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true },
+    });
+    assert.equal(membership?.status, "active");
+  } finally {
+    await cleanupFixture("gm_rejoin_inactive");
+  }
+});
+
+test("joinOpenGroup does not reactivate a revoked membership", async () => {
+  const { account, group } = await createFixture("gm_join_revoked");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "revoked" },
+    });
+
+    await assert.rejects(
+      () => joinOpenGroup(prisma, account.id, group.id),
+      /Revoked memberships cannot be reactivated/,
+    );
+
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true },
+    });
+    assert.equal(membership?.status, "revoked");
+  } finally {
+    await cleanupFixture("gm_join_revoked");
+  }
+});
+
 test("joinOpenGroup rejects a non-open group", async () => {
   const { account, group } = await createFixture("gm_closed");
   await prisma.group.update({ where: { id: group.id }, data: { membershipPolicy: "invite-only" } });

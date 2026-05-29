@@ -28,11 +28,26 @@ export async function joinOpenGroup(
   if (!group) throw new Error("Group not found.");
   if (group.membershipPolicy !== "open") throw new Error("This group is not open to join.");
 
-  await prisma.groupMembership.upsert({
+  const existingMembership = await prisma.groupMembership.findUnique({
     where: { accountId_groupId: { accountId, groupId } },
-    update: { status: "active" },
-    create: { accountId, groupId, status: "active" },
+    select: { status: true },
   });
+
+  if (existingMembership?.status === "revoked") {
+    throw new Error("Revoked memberships cannot be reactivated through open join.");
+  }
+
+  if (existingMembership?.status === "pending") {
+    throw new Error("Pending memberships cannot be activated through open join.");
+  }
+
+  if (existingMembership?.status !== "active") {
+    await prisma.groupMembership.upsert({
+      where: { accountId_groupId: { accountId, groupId } },
+      update: { status: "active" },
+      create: { accountId, groupId, status: "active" },
+    });
+  }
 
   return { groupId };
 }

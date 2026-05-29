@@ -538,6 +538,21 @@ async function main() {
   });
 
 
+  await prisma.report.upsert({
+    where: { id: "report_demo_concern" },
+    update: { status: "open" },
+    create: {
+      id: "report_demo_concern",
+      reportedByAccountId: mary.id,
+      groupId: group.id,
+      subject: "Availability mismatch during urgent request",
+      context: "Request was urgent but contributor was marked as available.",
+      description: "I submitted an urgent ride request and was routed to a contributor who had marked themselves available but did not respond within 24 hours.",
+      status: "open",
+      visibility: "private",
+    },
+  });
+
   const serviceOfferings = [
     { serviceType: "rides",                 minimumContributorTrust: "lightweight", projectId: ridesProject.id },
     { serviceType: "food delivery",         minimumContributorTrust: "lightweight", projectId: foodProject.id },
