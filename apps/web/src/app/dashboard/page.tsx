@@ -22,7 +22,7 @@ import {
   declareServiceCapability,
   routeSupportRequest,
 } from "../../lib/capability-routing";
-import { joinOpenGroup, requireGroupMembership } from "../../lib/group-membership";
+import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/group-membership";
 
 export const dynamic = "force-dynamic";
 
@@ -280,6 +280,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       })}
                     </div>
                   ) : null}
+                  <div className="border-t border-[var(--border)] pt-4">
+                    <form action={leaveGroupAction}>
+                      <input type="hidden" name="groupId" value={data.group.id} />
+                      <button
+                        type="submit"
+                        className="text-xs text-[var(--muted)] transition hover:text-[var(--soft-text)]"
+                      >
+                        Leave {data.group.name}
+                      </button>
+                    </form>
+                  </div>
                 </div>
               ) : data.openGroups.length > 0 ? (
                 <div className="space-y-3">
@@ -321,18 +332,36 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
 
             {data.group ? (
             <Section id="summary" title="Help Given" eyebrow="Private people, shared memory">
-              <div className="space-y-3">
-                {data.contributionSummary.length > 0 ? (
-                  data.contributionSummary.map((item) => (
-                    <div key={item.type} className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-                      <span className="text-sm font-medium capitalize">{item.type}</span>
-                      <span className="text-sm text-[var(--soft-text)]">{item.count} logged</span>
+              {data.groupContributions.length > 0 ? (
+                <div className="space-y-4">
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-[var(--muted)]">{data.group.name}</p>
+                    <div className="space-y-2">
+                      {data.groupContributions.map((item) => (
+                        <div key={item.type} className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                          <span className="text-sm font-medium capitalize">{item.type}</span>
+                          <span className="text-sm text-[var(--soft-text)]">{item.count} logged</span>
+                        </div>
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <EmptyState text="When help is finished, it can be remembered here without naming who received it." />
-                )}
-              </div>
+                  </div>
+                  {data.personalContributions.length > 0 ? (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-[var(--muted)]">Your contributions</p>
+                      <div className="space-y-2">
+                        {data.personalContributions.map((item) => (
+                          <div key={item.type} className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                            <span className="text-sm font-medium capitalize">{item.type}</span>
+                            <span className="text-sm text-[var(--soft-text)]">{item.count} logged</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <EmptyState text="When help is finished, it can be remembered here without naming who received it." />
+              )}
             </Section>
             ) : null}
           </aside>
@@ -482,6 +511,41 @@ async function joinGroupAction(formData: FormData) {
   try {
     const result = await joinOpenGroup(prisma, session.accountId, groupId);
     session.activeGroupId = result.groupId;
+    await session.save();
+
+    // Route any open requests that existed before this account joined.
+    const openRequests = await prisma.supportRequest.findMany({
+      where: { status: "open", groupId },
+      select: { id: true },
+    });
+    for (const request of openRequests) {
+      await routeSupportRequest(prisma, { supportRequestId: request.id });
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  redirect("/dashboard");
+}
+
+async function leaveGroupAction(formData: FormData) {
+  "use server";
+
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+
+  const groupId = requiredString(formData, "groupId");
+  const prisma = createPrismaClient();
+
+  try {
+    await leaveGroup(prisma, session.accountId, groupId);
+    // Switch to the next active membership, or clear the active group.
+    const nextMembership = await prisma.groupMembership.findFirst({
+      where: { accountId: session.accountId, status: "active", NOT: { groupId } },
+      orderBy: { joinedAt: "asc" },
+      select: { groupId: true },
+    });
+    session.activeGroupId = nextMembership?.groupId ?? null;
     await session.save();
   } finally {
     await prisma.$disconnect();
@@ -681,17 +745,17 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, contributions, serviceOfferings, openGroups] = await Promise.all([
+    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
-        where: { contributorAccountId: accountId },
+        where: {
+          contributorAccountId: accountId,
+          ...(groupId ? { supportRequest: { groupId } } : {}),
+        },
         include: { contributor: true, supportRequest: true },
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
         take: 8,
       }),
-      group
-        ? prisma.contribution.findMany({ where: { contributorAccountId: accountId, groupId: group.id, visibility: "group" }, orderBy: { occurredAt: "desc" }, take: 20 })
-        : Promise.resolve([]),
       prisma.groupServiceOffering.findMany({
         where: { status: "active", group: { nodeId } },
         distinct: ["serviceType"],
@@ -702,6 +766,22 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             where: { nodeId: account.homeNodeId, membershipPolicy: "open" },
             orderBy: { createdAt: "asc" },
             select: { id: true, name: true, description: true },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.contribution.groupBy({
+            by: ["contributionType"],
+            where: { groupId: group.id, visibility: "group" },
+            _count: { contributionType: true },
+            orderBy: { _count: { contributionType: "desc" } },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.contribution.groupBy({
+            by: ["contributionType"],
+            where: { contributorAccountId: accountId, groupId: group.id, visibility: "group" },
+            _count: { contributionType: true },
+            orderBy: { _count: { contributionType: "desc" } },
           })
         : Promise.resolve([]),
     ]);
@@ -722,7 +802,8 @@ async function getDashboardData(accountId: string, groupId: string | null) {
         urgencyLabel: urgencyLabel(route.supportRequest.urgency),
         createdAtLabel: formatRelativeDate(route.createdAt),
       })),
-      contributionSummary: summarizeContributions(contributions),
+      groupContributions: groupContributions.map((r) => ({ type: r.contributionType, count: r._count.contributionType })),
+      personalContributions: personalContributions.map((r) => ({ type: r.contributionType, count: r._count.contributionType })),
     };
   } finally {
     await prisma.$disconnect();
@@ -753,15 +834,6 @@ function buildRequestDescription(input: { contact: string; location?: string; la
     .join("\n");
 }
 
-function summarizeContributions(contributions: Array<{ contributionType: string }>) {
-  const counts = new Map<string, number>();
-
-  for (const contribution of contributions) {
-    counts.set(contribution.contributionType, (counts.get(contribution.contributionType) ?? 0) + 1);
-  }
-
-  return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
-}
 
 function requiredString(formData: FormData, key: string) {
   const value = formData.get(key);

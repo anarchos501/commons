@@ -36,3 +36,14 @@ export async function joinOpenGroup(
 
   return { groupId };
 }
+
+export async function leaveGroup(
+  prisma: PrismaClient,
+  accountId: string,
+  groupId: string,
+): Promise<void> {
+  await prisma.groupMembership.update({
+    where: { accountId_groupId: { accountId, groupId } },
+    data: { status: "inactive" },
+  });
+}

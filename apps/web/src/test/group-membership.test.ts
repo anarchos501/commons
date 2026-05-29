@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import bcrypt from "bcryptjs";
 import { createPrismaClient } from "../lib/prisma";
-import { joinOpenGroup, requireGroupMembership } from "../lib/group-membership";
+import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../lib/group-membership";
 import { loginAccount } from "../lib/auth";
 
 const prisma = createPrismaClient();
@@ -125,6 +125,34 @@ test("loginAccount returns activeGroupId null for account with no membership", a
     assert.equal(session.activeGroupId, null);
   } finally {
     await cleanupFixture("gm_login_nomember");
+  }
+});
+
+test("leaveGroup sets membership status to inactive", async () => {
+  const { account, group } = await createFixture("gm_leave");
+  try {
+    await prisma.groupMembership.create({ data: { accountId: account.id, groupId: group.id, status: "active" } });
+    await leaveGroup(prisma, account.id, group.id);
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true },
+    });
+    assert.equal(membership?.status, "inactive");
+  } finally {
+    await cleanupFixture("gm_leave");
+  }
+});
+
+test("requireGroupMembership throws for an inactive membership", async () => {
+  const { account, group } = await createFixture("gm_inactive_guard");
+  try {
+    await prisma.groupMembership.create({ data: { accountId: account.id, groupId: group.id, status: "inactive" } });
+    await assert.rejects(
+      () => requireGroupMembership(prisma, account.id, group.id),
+      /Active group membership required/,
+    );
+  } finally {
+    await cleanupFixture("gm_inactive_guard");
   }
 });
 
