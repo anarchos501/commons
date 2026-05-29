@@ -309,18 +309,21 @@ model GroupMembership {
 }
 
 model GroupServiceOffering {
-  id                    String   @id @default(cuid())
-  groupId               String
-  serviceType           String
-  status                String   @default("active")
-  minimumContributorTrust String @default("lightweight")
-  createdAt             DateTime @default(now())
+  id                      String   @id @default(cuid())
+  groupId                 String
+  serviceType             String
+  status                  String   @default("active")
+  minimumContributorTrust String   @default("lightweight")
+  projectId               String?
+  createdAt               DateTime @default(now())
 
-  group Group @relation(fields: [groupId], references: [id])
+  group   Group    @relation(fields: [groupId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
 
   @@unique([groupId, serviceType])
   @@index([groupId])
   @@index([status])
+  @@index([projectId])
 }
 
 model Project {
@@ -333,14 +336,15 @@ model Project {
   privacyPreferences    Json?
   createdAt             DateTime      @default(now())
 
-  group           Group            @relation(fields: [groupId], references: [id])
-  supportRequests SupportRequest[]
-  offers          Offer[]
-  contributions   Contribution[]
-  proposals       Proposal[]
-  roles           Role[]
-  actionLogs      ActionLog[]
-  signedEvents    SignedEvent[]
+  group            Group                  @relation(fields: [groupId], references: [id])
+  serviceOfferings GroupServiceOffering[]
+  supportRequests  SupportRequest[]
+  offers           Offer[]
+  contributions    Contribution[]
+  proposals        Proposal[]
+  roles            Role[]
+  actionLogs       ActionLog[]
+  signedEvents     SignedEvent[]
 
   @@unique([groupId, name])
   @@index([groupId])

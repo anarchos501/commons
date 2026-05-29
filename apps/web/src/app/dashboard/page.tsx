@@ -243,9 +243,27 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   </div>
                   <div className="grid gap-2">
                     {data.projects.map((project) => (
-                      <div key={project.id} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-                        <p className="text-sm font-medium">{project.name}</p>
-                        <p className="text-xs text-[var(--muted)]">{project.description}</p>
+                      <div key={project.id} className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium">{project.name}</p>
+                          <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{project.status}</span>
+                        </div>
+                        {project.description ? (
+                          <p className="text-xs leading-5 text-[var(--muted)]">{project.description}</p>
+                        ) : null}
+                        {project.services.length > 0 ? (
+                          <p className="text-xs text-[var(--muted)]">{project.services.map(capitalize).join(" · ")}</p>
+                        ) : null}
+                        {project.contributions.length > 0 ? (
+                          <div className="space-y-1 border-t border-[var(--border)] pt-2">
+                            {project.contributions.map((c) => (
+                              <div key={c.type} className="flex items-center justify-between">
+                                <span className="text-xs capitalize text-[var(--soft-text)]">{c.type}</span>
+                                <span className="text-xs text-[var(--muted)]">{c.count} logged</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -594,11 +612,14 @@ async function requestHelpAction(formData: FormData) {
 
   try {
     await requireGroupMembership(prisma, session.accountId, groupId);
-    const project = await findProjectForService(prisma, groupId, serviceType);
+    const offering = await prisma.groupServiceOffering.findFirst({
+      where: { groupId, serviceType, status: "active" },
+      select: { projectId: true },
+    });
     const request = await createSupportRequest(prisma, {
       submittedByAccountId: session.accountId,
       groupId,
-      projectId: project?.id ?? null,
+      projectId: offering?.projectId ?? null,
       requestType: serviceType,
       requestedServices: [{ serviceType, trustRequirement: trustPreference }],
       description: buildRequestDescription({ contact, location, language }),
@@ -745,7 +766,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions] = await Promise.all([
+    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: {
@@ -784,6 +805,20 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             orderBy: { _count: { contributionType: "desc" } },
           })
         : Promise.resolve([]),
+      group
+        ? prisma.groupServiceOffering.findMany({
+            where: { groupId: group.id, status: "active", projectId: { not: null } },
+            select: { projectId: true, serviceType: true },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.contribution.groupBy({
+            by: ["projectId", "contributionType"],
+            where: { groupId: group.id, visibility: "group", projectId: { not: null } },
+            _count: { contributionType: true },
+            orderBy: { _count: { contributionType: "desc" } },
+          })
+        : Promise.resolve([]),
     ]);
 
     return {
@@ -791,7 +826,18 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       group,
       memberships,
       openGroups,
-      projects,
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        services: projectServices
+          .filter((s) => s.projectId === p.id)
+          .map((s) => s.serviceType),
+        contributions: projectContributions
+          .filter((c) => c.projectId === p.id)
+          .map((c) => ({ type: c.contributionType, count: c._count.contributionType })),
+      })),
       serviceOfferings,
       routes: routes.map((route) => ({
         id: route.id,
@@ -810,19 +856,6 @@ async function getDashboardData(accountId: string, groupId: string | null) {
   }
 }
 
-async function findProjectForService(prisma: ReturnType<typeof createPrismaClient>, groupId: string, serviceType: string) {
-  const projectName = serviceType.includes("ride")
-    ? "Rides"
-    : serviceType.includes("food")
-      ? "Food Distribution"
-      : serviceType.includes("translation")
-        ? "Translation Support"
-        : null;
-
-  if (!projectName) return null;
-
-  return prisma.project.findUnique({ where: { groupId_name: { groupId, name: projectName } } });
-}
 
 function buildRequestDescription(input: { contact: string; location?: string; language?: string }) {
   return [

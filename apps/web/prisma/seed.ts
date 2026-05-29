@@ -104,7 +104,7 @@ async function main() {
     },
   });
 
-  await prisma.project.upsert({
+  const foodProject = await prisma.project.upsert({
     where: { groupId_name: { groupId: group.id, name: "Food Distribution" } },
     update: { description: "Shared food pickup, packing, and delivery support.", status: "active" },
     create: {
@@ -539,25 +539,26 @@ async function main() {
 
 
   const serviceOfferings = [
-    { serviceType: "rides", minimumContributorTrust: "lightweight" },
-    { serviceType: "food delivery", minimumContributorTrust: "lightweight" },
-    { serviceType: "translation", minimumContributorTrust: "lightweight" },
-    { serviceType: "childcare", minimumContributorTrust: "elevated" },
-    { serviceType: "repairs", minimumContributorTrust: "lightweight" },
-    { serviceType: "emotional support", minimumContributorTrust: "lightweight" },
-    { serviceType: "medical accompaniment", minimumContributorTrust: "elevated" },
-    { serviceType: "carpentry", minimumContributorTrust: "lightweight" },
+    { serviceType: "rides",                 minimumContributorTrust: "lightweight", projectId: ridesProject.id },
+    { serviceType: "food delivery",         minimumContributorTrust: "lightweight", projectId: foodProject.id },
+    { serviceType: "translation",           minimumContributorTrust: "lightweight", projectId: translationProject.id },
+    { serviceType: "childcare",             minimumContributorTrust: "elevated",    projectId: null },
+    { serviceType: "repairs",               minimumContributorTrust: "lightweight", projectId: null },
+    { serviceType: "emotional support",     minimumContributorTrust: "lightweight", projectId: null },
+    { serviceType: "medical accompaniment", minimumContributorTrust: "elevated",    projectId: null },
+    { serviceType: "carpentry",             minimumContributorTrust: "lightweight", projectId: null },
   ];
 
   for (const offering of serviceOfferings) {
     await prisma.groupServiceOffering.upsert({
       where: { groupId_serviceType: { groupId: group.id, serviceType: offering.serviceType } },
-      update: { status: "active", minimumContributorTrust: offering.minimumContributorTrust },
+      update: { status: "active", minimumContributorTrust: offering.minimumContributorTrust, projectId: offering.projectId },
       create: {
         groupId: group.id,
         serviceType: offering.serviceType,
         status: "active",
         minimumContributorTrust: offering.minimumContributorTrust,
+        projectId: offering.projectId,
       },
     });
   }

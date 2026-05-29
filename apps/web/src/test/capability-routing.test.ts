@@ -309,6 +309,47 @@ test("route notification payload does not expose requester identity or descripti
   assert.equal(serialized.includes(fixture.mary.id), false);
   assert.equal(serialized.includes("Private medical detail"), false);
 });
+
+test("createContributionFromAcceptedRoute inherits projectId from the support request", async () => {
+  const fixture = await createFixture("project_inherit");
+  await declareServiceCapability(prisma, {
+    accountId: fixture.alice.id,
+    serviceType: "rides",
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+
+  const project = await prisma.project.create({
+    data: {
+      id: "caproute_project_inherit_rides",
+      groupId: fixture.group.id,
+      name: "Test Rides project_inherit",
+      status: "active",
+    },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_project_inherit_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    projectId: project.id,
+    requestType: "rides",
+    requestedServices: [{ serviceType: "rides", trustRequirement: "lightweight" }],
+    description: "Ride needed.",
+    expiresAt: futureDate(),
+  });
+
+  const [route] = await routeSupportRequest(prisma, { supportRequestId: request.id });
+  await decideRequestRoute(prisma, { routeId: route.id, contributorAccountId: fixture.alice.id, decision: "accepted" });
+  const contribution = await createContributionFromAcceptedRoute(prisma, { routeId: route.id });
+
+  assert.equal(contribution.projectId, project.id);
+
+  await prisma.contribution.deleteMany({ where: { id: contribution.id } });
+  await prisma.project.deleteMany({ where: { id: project.id } });
+  await cleanupFixture("caproute_project_inherit");
+});
+
 async function createFixture(suffix: string) {
   const prefix = `caproute_${suffix}`;
   await cleanupFixture(prefix);
@@ -390,6 +431,7 @@ async function createFixture(suffix: string) {
 
 async function cleanupFixture(prefix: string) {
   await prisma.contribution.deleteMany({ where: { id: { startsWith: prefix } } });
+  await prisma.contribution.deleteMany({ where: { projectId: { startsWith: prefix } } });
   await prisma.requestRoute.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.supportRequestService.deleteMany({ where: { supportRequestId: { startsWith: prefix } } });
   await prisma.supportRequest.deleteMany({ where: { id: { startsWith: prefix } } });
