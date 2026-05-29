@@ -65,7 +65,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
 
   const params = await searchParams;
   const notice = typeof params.notice === "string" ? params.notice : null;
-  const data = await getDashboardData(session.accountId, session.groupId ?? null);
+  const data = await getDashboardData(session.accountId, session.activeGroupId ?? null);
 
   return (
     <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
@@ -249,6 +249,37 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       </div>
                     ))}
                   </div>
+                  {data.memberships.length > 1 ? (
+                    <div className="space-y-2 border-t border-[var(--border)] pt-4">
+                      <p className="text-xs font-medium text-[var(--muted)]">Your groups</p>
+                      {data.memberships.map((m) => {
+                        const isActive = m.groupId === data.group!.id;
+                        return (
+                          <div
+                            key={m.groupId}
+                            className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{m.group.name}</p>
+                              {m.group.description ? (
+                                <p className="text-xs text-[var(--muted)]">{m.group.description}</p>
+                              ) : null}
+                            </div>
+                            {isActive ? (
+                              <span className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium text-[var(--soft-text)]">
+                                Active
+                              </span>
+                            ) : (
+                              <form action={switchGroupAction} className="shrink-0">
+                                <input type="hidden" name="groupId" value={m.groupId} />
+                                <SubmitButton variant="secondary">Switch</SubmitButton>
+                              </form>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ) : data.openGroups.length > 0 ? (
                 <div className="space-y-3">
@@ -450,7 +481,27 @@ async function joinGroupAction(formData: FormData) {
 
   try {
     const result = await joinOpenGroup(prisma, session.accountId, groupId);
-    session.groupId = result.groupId;
+    session.activeGroupId = result.groupId;
+    await session.save();
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  redirect("/dashboard");
+}
+
+async function switchGroupAction(formData: FormData) {
+  "use server";
+
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+
+  const groupId = requiredString(formData, "groupId");
+  const prisma = createPrismaClient();
+
+  try {
+    await requireGroupMembership(prisma, session.accountId, groupId);
+    session.activeGroupId = groupId;
     await session.save();
   } finally {
     await prisma.$disconnect();
@@ -471,7 +522,7 @@ async function requestHelpAction(formData: FormData) {
   const language = optionalString(formData, "language");
   const urgency = requiredString(formData, "urgency") as "low" | "normal" | "high" | "urgent";
   const trustPreference = requiredString(formData, "trustPreference") as "lightweight" | "elevated";
-  const groupId = session.groupId;
+  const groupId = session.activeGroupId;
 
   if (!groupId) redirect("/dashboard");
 
@@ -539,7 +590,7 @@ async function routeOpenRequestsAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
 
-  const groupId = session.groupId;
+  const groupId = session.activeGroupId;
   if (!groupId) return;
 
   const prisma = createPrismaClient();
@@ -615,9 +666,17 @@ async function getDashboardData(accountId: string, groupId: string | null) {
   const prisma = createPrismaClient();
 
   try {
-    const [account, group] = await Promise.all([
+    const [account, group, memberships] = await Promise.all([
       prisma.account.findUniqueOrThrow({ where: { id: accountId } }),
       groupId ? prisma.group.findUnique({ where: { id: groupId }, include: { node: true } }) : Promise.resolve(null),
+      prisma.groupMembership.findMany({
+        where: { accountId, status: "active" },
+        orderBy: { joinedAt: "asc" },
+        select: {
+          groupId: true,
+          group: { select: { id: true, name: true, description: true } },
+        },
+      }),
     ]);
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
@@ -650,6 +709,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
     return {
       account,
       group,
+      memberships,
       openGroups,
       projects,
       serviceOfferings,

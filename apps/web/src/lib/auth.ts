@@ -30,7 +30,7 @@ export async function registerAccount(
     accountId: account.id,
     displayName: account.displayName,
     nodeId: node.id,
-    groupId: null,
+    activeGroupId: null,
   };
 }
 
@@ -50,17 +50,23 @@ export async function loginAccount(
     throw new Error("Invalid email or password.");
   }
 
+  // Temporary default:
+  // choose earliest active membership as the initial active context.
+  //
+  // Future:
+  // Account.lastActiveGroupId should become the preferred source.
+  // This is only a fallback until active context persistence exists.
   const membership = await prisma.groupMembership.findFirst({
     where: { accountId: account.id, status: "active" },
     orderBy: { joinedAt: "asc" },
     select: { groupId: true },
   });
-  const groupId = membership?.groupId ?? null;
+  const activeGroupId = membership?.groupId ?? null;
 
   return {
     accountId: account.id,
     displayName: account.displayName,
     nodeId: account.homeNodeId,
-    groupId,
+    activeGroupId,
   };
 }

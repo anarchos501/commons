@@ -5,7 +5,7 @@ export type SessionData = {
   accountId: string;
   displayName: string;
   nodeId: string;
-  groupId: string | null;
+  activeGroupId: string | null;
 };
 
 if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {

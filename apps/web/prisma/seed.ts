@@ -73,6 +73,25 @@ async function main() {
     },
   });
 
+  const group2 = await prisma.group.upsert({
+    where: { nodeId_name: { nodeId: node.id, name: "Eastside Commons" } },
+    update: {
+      description: "Eastside neighborhood coordination and mutual support.",
+      membershipPolicy: "open",
+      governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
+      privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
+    },
+    create: {
+      id: "group_eastside_commons",
+      nodeId: node.id,
+      name: "Eastside Commons",
+      description: "Eastside neighborhood coordination and mutual support.",
+      membershipPolicy: "open",
+      governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
+      privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
+    },
+  });
+
   const ridesProject = await prisma.project.upsert({
     where: { groupId_name: { groupId: group.id, name: "Rides" } },
     update: { description: "Appointment, grocery, and community transport coordination.", status: "active" },
@@ -222,6 +241,15 @@ async function main() {
       create: { id, accountId, groupId: group.id, status: "active" },
     });
   }
+
+  // Alice belongs to both groups for the group switcher demo (Slice 3).
+  // joinedAt defaults to now(), so her Gotham membership (seeded above) will be earlier.
+  // loginAccount will therefore land her on Gotham by default on login.
+  await prisma.groupMembership.upsert({
+    where: { accountId_groupId: { accountId: alice.id, groupId: group2.id } },
+    update: { status: "active" },
+    create: { id: "membership_alice_eastside", accountId: alice.id, groupId: group2.id, status: "active" },
+  });
 
   const aliceRides = await prisma.serviceCapability.upsert({
     where: { accountId_serviceType_trustRequirement: { accountId: alice.id, serviceType: "rides", trustRequirement: "lightweight" } },

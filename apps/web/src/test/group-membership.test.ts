@@ -106,14 +106,14 @@ test("loginAccount populates groupId from GroupMembership", async () => {
   });
   try {
     const session = await loginAccount(prisma, { email: "gm_login_member@test.local", password: "testpass" });
-    assert.equal(session.groupId, group.id);
+    assert.equal(session.activeGroupId, group.id);
     assert.equal(session.nodeId, node.id);
   } finally {
     await cleanupFixture("gm_login_member");
   }
 });
 
-test("loginAccount returns groupId null for account with no membership", async () => {
+test("loginAccount returns activeGroupId null for account with no membership", async () => {
   const { account } = await createFixture("gm_login_nomember");
   const passwordHash = await bcrypt.hash("testpass", 10);
   await prisma.account.update({
@@ -122,9 +122,70 @@ test("loginAccount returns groupId null for account with no membership", async (
   });
   try {
     const session = await loginAccount(prisma, { email: "gm_login_nomember@test.local", password: "testpass" });
-    assert.equal(session.groupId, null);
+    assert.equal(session.activeGroupId, null);
   } finally {
     await cleanupFixture("gm_login_nomember");
+  }
+});
+
+test("loginAccount with multiple memberships sets activeGroupId to earliest-joined", async () => {
+  const { node, account } = await createFixture("gm_multi_login");
+  const passwordHash = await bcrypt.hash("testpass", 10);
+  await prisma.account.update({
+    where: { id: account.id },
+    data: { email: "gm_multi_login@test.local", passwordHash },
+  });
+  const group1 = await prisma.group.create({
+    data: { id: "gm_multi_login_group1", nodeId: node.id, name: "Group A multi_login", membershipPolicy: "open" },
+  });
+  const group2 = await prisma.group.create({
+    data: { id: "gm_multi_login_group2", nodeId: node.id, name: "Group B multi_login", membershipPolicy: "open" },
+  });
+  await prisma.groupMembership.create({
+    data: { accountId: account.id, groupId: group1.id, status: "active", joinedAt: new Date("2026-01-01T00:00:00Z") },
+  });
+  await prisma.groupMembership.create({
+    data: { accountId: account.id, groupId: group2.id, status: "active", joinedAt: new Date("2026-02-01T00:00:00Z") },
+  });
+  try {
+    const session = await loginAccount(prisma, { email: "gm_multi_login@test.local", password: "testpass" });
+    assert.equal(session.activeGroupId, group1.id);
+  } finally {
+    await cleanupFixture("gm_multi_login");
+  }
+});
+
+test("requireGroupMembership passes for member of a second group", async () => {
+  const { account, group } = await createFixture("gm_second_group");
+  const group2 = await prisma.group.create({
+    data: { id: "gm_second_group_g2", nodeId: `gm_second_group_node`, name: "Second group for member", membershipPolicy: "open" },
+  });
+  try {
+    await prisma.groupMembership.create({ data: { accountId: account.id, groupId: group.id, status: "active" } });
+    await prisma.groupMembership.create({ data: { accountId: account.id, groupId: group2.id, status: "active" } });
+    await assert.doesNotReject(() => requireGroupMembership(prisma, account.id, group2.id));
+  } finally {
+    await prisma.groupMembership.deleteMany({ where: { groupId: group2.id } });
+    await prisma.group.deleteMany({ where: { id: group2.id } });
+    await cleanupFixture("gm_second_group");
+  }
+});
+
+test("requireGroupMembership rejects switch to a group with no membership", async () => {
+  const { account, group } = await createFixture("gm_switch_guard");
+  const otherGroup = await prisma.group.create({
+    data: { id: "gm_switch_guard_g2", nodeId: `gm_switch_guard_node`, name: "Other group switch guard", membershipPolicy: "open" },
+  });
+  try {
+    await prisma.groupMembership.create({ data: { accountId: account.id, groupId: group.id, status: "active" } });
+    await assert.rejects(
+      () => requireGroupMembership(prisma, account.id, otherGroup.id),
+      /Active group membership required/,
+    );
+  } finally {
+    await prisma.groupMembership.deleteMany({ where: { groupId: otherGroup.id } });
+    await prisma.group.deleteMany({ where: { id: otherGroup.id } });
+    await cleanupFixture("gm_switch_guard");
   }
 });
 
