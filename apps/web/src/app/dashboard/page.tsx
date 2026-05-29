@@ -285,6 +285,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       </button>
                     </form>
                   </div>
+                  {data.openGroups.length > 0 ? (
+                    <div className="space-y-2 border-t border-[var(--border)] pt-4">
+                      <p className="text-xs font-medium text-[var(--muted)]">Other open groups</p>
+                      {data.openGroups.map((g) => (
+                        <form key={g.id} action={joinGroupAction}>
+                          <input type="hidden" name="groupId" value={g.id} />
+                          <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                            <p className="text-sm font-medium">{g.name}</p>
+                            {g.description ? (
+                              <p className="mt-1 text-xs text-[var(--muted)]">{g.description}</p>
+                            ) : null}
+                            <div className="mt-3">
+                              <SubmitButton variant="secondary">Join {g.name}</SubmitButton>
+                            </div>
+                          </div>
+                        </form>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : data.openGroups.length > 0 ? (
                 <div className="space-y-3">
@@ -871,13 +890,15 @@ async function getDashboardData(accountId: string, groupId: string | null) {
         distinct: ["serviceType"],
         orderBy: { serviceType: "asc" },
       }),
-      !group
-        ? prisma.group.findMany({
-            where: { nodeId: account.homeNodeId, membershipPolicy: "open" },
-            orderBy: { createdAt: "asc" },
-            select: { id: true, name: true, description: true },
-          })
-        : Promise.resolve([]),
+      prisma.group.findMany({
+        where: {
+          nodeId: account.homeNodeId,
+          membershipPolicy: "open",
+          memberships: { none: { accountId, status: { in: ["active", "pending"] } } },
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, name: true, description: true },
+      }),
       group
         ? prisma.contribution.groupBy({
             by: ["contributionType"],
