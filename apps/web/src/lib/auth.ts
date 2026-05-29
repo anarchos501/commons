@@ -50,12 +50,12 @@ export async function loginAccount(
     throw new Error("Invalid email or password.");
   }
 
-  // Interim proxy until GroupMembership (Slice 2): members get their node's first group,
-  // participants get null. GroupMembership query replaces this in Slice 2.
-  const groupId =
-    account.accountType === "member"
-      ? (await prisma.group.findFirst({ where: { nodeId: account.homeNodeId }, orderBy: { createdAt: "asc" } }))?.id ?? null
-      : null;
+  const membership = await prisma.groupMembership.findFirst({
+    where: { accountId: account.id, status: "active" },
+    orderBy: { joinedAt: "asc" },
+    select: { groupId: true },
+  });
+  const groupId = membership?.groupId ?? null;
 
   return {
     accountId: account.id,

@@ -22,6 +22,7 @@ import {
   declareServiceCapability,
   routeSupportRequest,
 } from "../../lib/capability-routing";
+import { joinOpenGroup, requireGroupMembership } from "../../lib/group-membership";
 
 export const dynamic = "force-dynamic";
 
@@ -249,8 +250,28 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                     ))}
                   </div>
                 </div>
+              ) : data.openGroups.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm leading-6 text-[var(--soft-text)]">
+                    You are not yet a member of any group. You can join an open group below.
+                  </p>
+                  {data.openGroups.map((g) => (
+                    <form key={g.id} action={joinGroupAction}>
+                      <input type="hidden" name="groupId" value={g.id} />
+                      <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                        <p className="text-sm font-medium">{g.name}</p>
+                        {g.description ? (
+                          <p className="mt-1 text-xs text-[var(--muted)]">{g.description}</p>
+                        ) : null}
+                        <div className="mt-3">
+                          <SubmitButton variant="secondary">Join {g.name}</SubmitButton>
+                        </div>
+                      </div>
+                    </form>
+                  ))}
+                </div>
               ) : (
-                <EmptyState text="You are not yet a member of any group. Group joining will be available soon." />
+                <EmptyState text="You are not yet a member of any group. No open groups are currently available." />
               )}
             </Section>
 
@@ -418,6 +439,26 @@ async function logoutAction() {
   redirect("/");
 }
 
+async function joinGroupAction(formData: FormData) {
+  "use server";
+
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+
+  const groupId = requiredString(formData, "groupId");
+  const prisma = createPrismaClient();
+
+  try {
+    const result = await joinOpenGroup(prisma, session.accountId, groupId);
+    session.groupId = result.groupId;
+    await session.save();
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  redirect("/dashboard");
+}
+
 async function requestHelpAction(formData: FormData) {
   "use server";
 
@@ -437,6 +478,7 @@ async function requestHelpAction(formData: FormData) {
   const prisma = createPrismaClient();
 
   try {
+    await requireGroupMembership(prisma, session.accountId, groupId);
     const project = await findProjectForService(prisma, groupId, serviceType);
     const request = await createSupportRequest(prisma, {
       submittedByAccountId: session.accountId,
@@ -503,6 +545,7 @@ async function routeOpenRequestsAction(formData: FormData) {
   const prisma = createPrismaClient();
 
   try {
+    await requireGroupMembership(prisma, session.accountId, groupId);
     const requests = await prisma.supportRequest.findMany({ where: { status: "open", groupId }, select: { id: true } });
 
     for (const request of requests) {
@@ -526,6 +569,11 @@ async function decideRouteAction(formData: FormData) {
   const prisma = createPrismaClient();
 
   try {
+    const route = await prisma.requestRoute.findUniqueOrThrow({
+      where: { id: routeId },
+      select: { supportRequest: { select: { groupId: true } } },
+    });
+    await requireGroupMembership(prisma, session.accountId, route.supportRequest.groupId);
     await decideRequestRoute(prisma, { routeId, contributorAccountId: session.accountId, decision });
   } finally {
     await prisma.$disconnect();
@@ -544,6 +592,11 @@ async function recordContributionAction(formData: FormData) {
   const prisma = createPrismaClient();
 
   try {
+    const route = await prisma.requestRoute.findUniqueOrThrow({
+      where: { id: routeId },
+      select: { supportRequest: { select: { groupId: true } } },
+    });
+    await requireGroupMembership(prisma, session.accountId, route.supportRequest.groupId);
     const existing = await prisma.contribution.findFirst({
       where: { privacyEnvelope: { path: ["requestRouteId"], equals: routeId } },
     });
@@ -569,7 +622,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, contributions, serviceOfferings] = await Promise.all([
+    const [projects, routes, contributions, serviceOfferings, openGroups] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: { contributorAccountId: accountId },
@@ -585,11 +638,19 @@ async function getDashboardData(accountId: string, groupId: string | null) {
         distinct: ["serviceType"],
         orderBy: { serviceType: "asc" },
       }),
+      !group
+        ? prisma.group.findMany({
+            where: { nodeId: account.homeNodeId, membershipPolicy: "open" },
+            orderBy: { createdAt: "asc" },
+            select: { id: true, name: true, description: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     return {
       account,
       group,
+      openGroups,
       projects,
       serviceOfferings,
       routes: routes.map((route) => ({

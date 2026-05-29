@@ -210,6 +210,19 @@ async function main() {
     },
   });
 
+  // Seed group memberships (Slice 2). Mary gets none — she uses the join flow.
+  for (const [id, accountId] of [
+    ["membership_alice_gotham", alice.id],
+    ["membership_joe_gotham", joe.id],
+    ["membership_zora_gotham", zora.id],
+  ] as const) {
+    await prisma.groupMembership.upsert({
+      where: { accountId_groupId: { accountId, groupId: group.id } },
+      update: { status: "active" },
+      create: { id, accountId, groupId: group.id, status: "active" },
+    });
+  }
+
   const aliceRides = await prisma.serviceCapability.upsert({
     where: { accountId_serviceType_trustRequirement: { accountId: alice.id, serviceType: "rides", trustRequirement: "lightweight" } },
     update: { description: "Rides to appointments when available.", visibility: "group", approvalStatus: "available" },

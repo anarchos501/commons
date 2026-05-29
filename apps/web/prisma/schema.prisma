@@ -183,6 +183,13 @@ enum RequestRouteStatus {
   cancelled
 }
 
+enum MembershipStatus {
+  active
+  pending
+  inactive
+  revoked
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -252,6 +259,7 @@ model Account {
   localSyncStates     LocalSyncState[]
   requestRoutes       RequestRoute[]
   availability        ContributorAvailability[]
+  groupMemberships    GroupMembership[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -279,9 +287,25 @@ model Group {
   actionLogs       ActionLog[]
   signedEvents     SignedEvent[]
   serviceOfferings GroupServiceOffering[]
+  memberships      GroupMembership[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
+}
+
+model GroupMembership {
+  id        String           @id @default(cuid())
+  accountId String
+  groupId   String
+  joinedAt  DateTime         @default(now())
+  status    MembershipStatus @default(active)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId])
+  @@index([accountId])
+  @@index([groupId])
 }
 
 model GroupServiceOffering {
