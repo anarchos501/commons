@@ -27,6 +27,7 @@ import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/gro
 import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../lib/request-lifecycle";
 import { logAction } from "../../lib/action-log";
+import { applyParticipationTransitions, recordGroupPresence } from "../../lib/participation";
 
 export const dynamic = "force-dynamic";
 
@@ -950,6 +951,11 @@ async function getDashboardData(accountId: string, groupId: string | null) {
   const prisma = createPrismaClient();
 
   try {
+    if (groupId) {
+      await recordGroupPresence(prisma, accountId, groupId);
+      await applyParticipationTransitions(prisma, groupId);
+    }
+
     const [account, group, memberships] = await Promise.all([
       prisma.account.findUniqueOrThrow({ where: { id: accountId } }),
       groupId ? prisma.group.findUnique({ where: { id: groupId }, include: { node: true } }) : Promise.resolve(null),

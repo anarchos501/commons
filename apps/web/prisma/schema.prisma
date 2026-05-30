@@ -191,6 +191,12 @@ enum MembershipStatus {
   revoked
 }
 
+enum ParticipationStatus {
+  active
+  quiet
+  dormant
+}
+
 enum ReportStatus {
   open
   under_review
@@ -304,11 +310,13 @@ model Group {
 }
 
 model GroupMembership {
-  id        String           @id @default(cuid())
-  accountId String
-  groupId   String
-  joinedAt  DateTime         @default(now())
-  status    MembershipStatus @default(active)
+  id                  String              @id @default(cuid())
+  accountId           String
+  groupId             String
+  joinedAt            DateTime            @default(now())
+  status              MembershipStatus    @default(active)
+  participationStatus ParticipationStatus @default(active)
+  lastSeenAt          DateTime?
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
   group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -316,6 +324,7 @@ model GroupMembership {
   @@unique([accountId, groupId])
   @@index([accountId])
   @@index([groupId])
+  @@index([groupId, participationStatus])
 }
 
 model GroupServiceOffering {
