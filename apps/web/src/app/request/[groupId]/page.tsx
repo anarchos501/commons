@@ -3,7 +3,7 @@
 // is designed. Do not treat the URL segment as the canonical group identity model.
 
 import Link from "next/link";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-react";
 import { randomUUID } from "crypto";
@@ -49,7 +49,8 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
     }
 
     if (resolvedSearch.submitted === "1") {
-      const rawToken = typeof resolvedSearch.token === "string" ? resolvedSearch.token : null;
+      const cookieStore = await cookies();
+      const rawToken = cookieStore.get("pending_request_token")?.value ?? null;
       const headersList = await headers();
       const host = headersList.get("host") ?? "";
       const proto = headersList.get("x-forwarded-proto") ?? (host.split(":")[0] === "localhost" ? "http" : "https");
@@ -170,14 +171,22 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           expiresAt,
         });
 
-        rawToken = await generateGuestAccessToken(actionPrisma, request.id);
+        rawToken = await generateGuestAccessToken(actionPrisma, request.id, expiresAt);
         await routeSupportRequest(actionPrisma, { supportRequestId: request.id });
       } finally {
         await actionPrisma.$disconnect();
       }
 
-      const tokenParam = rawToken ? `&token=${encodeURIComponent(rawToken)}` : "";
-      redirect(`/request/${groupId}?submitted=1${tokenParam}`);
+      // Pass the raw token via a short-lived cookie so it never appears in the URL.
+      if (rawToken) {
+        (await cookies()).set("pending_request_token", rawToken, {
+          httpOnly: true,
+          maxAge: 120,
+          sameSite: "strict",
+          path: "/",
+        });
+      }
+      redirect(`/request/${groupId}?submitted=1`);
     }
 
     return (

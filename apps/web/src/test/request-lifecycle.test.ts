@@ -7,6 +7,7 @@ import {
   deleteSupportRequest,
   fulfillSupportRequest,
   generateGuestAccessToken,
+  redactSupportRequestIfEligible,
   validateGuestAccessToken,
 } from "../lib/request-lifecycle";
 import { createSupportRequest, routeSupportRequest } from "../lib/capability-routing";
@@ -97,14 +98,45 @@ async function makeRequest(prefix: string, groupId: string, requesterId: string)
 // generateGuestAccessToken
 // ---------------------------------------------------------------------------
 
+test("generateGuestAccessToken sets expiresAt to requestExpiresAt + DEFAULT_ACCOUNTABILITY_DAYS", async () => {
+  const { group, requester, prefix } = await createFixture("token_expiry_set");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    assert.ok(request.expiresAt !== null, "fixture request must have expiresAt");
+    await generateGuestAccessToken(prisma, request.id, request.expiresAt);
+    const record = await prisma.guestAccessToken.findUnique({ where: { supportRequestId: request.id } });
+    assert.ok(record?.expiresAt !== null, "token expiresAt must be set at creation");
+    const expectedMs = request.expiresAt!.getTime() + DEFAULT_ACCOUNTABILITY_DAYS * 24 * 60 * 60 * 1000;
+    assert.equal(record!.expiresAt!.getTime(), expectedMs);
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("generateGuestAccessToken with null requestExpiresAt applies defensive 2× fallback", async () => {
+  const { group, requester, prefix } = await createFixture("token_expiry_null");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    const before = new Date();
+    await generateGuestAccessToken(prisma, request.id, null);
+    const record = await prisma.guestAccessToken.findUnique({ where: { supportRequestId: request.id } });
+    assert.ok(record?.expiresAt !== null, "null requestExpiresAt must still produce a bounded token");
+    const expectedMs = before.getTime() + DEFAULT_ACCOUNTABILITY_DAYS * 2 * 24 * 60 * 60 * 1000;
+    const diffMs = Math.abs(record!.expiresAt!.getTime() - expectedMs);
+    assert.ok(diffMs < 5000, "token expiresAt should be approximately 2× DEFAULT_ACCOUNTABILITY_DAYS from now");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
 test("generateGuestAccessToken produces unique tokens for different requests", async () => {
   const { group, requester, prefix } = await createFixture("token_unique");
   try {
     const req1 = await makeRequest(`${prefix}_a`, group.id, requester.id);
     const req2 = await makeRequest(`${prefix}_b`, group.id, requester.id);
 
-    const token1 = await generateGuestAccessToken(prisma, req1.id);
-    const token2 = await generateGuestAccessToken(prisma, req2.id);
+    const token1 = await generateGuestAccessToken(prisma, req1.id, req1.expiresAt);
+    const token2 = await generateGuestAccessToken(prisma, req2.id, req2.expiresAt);
 
     assert.notEqual(token1, token2);
     assert.ok(token1.length >= 32);
@@ -119,7 +151,7 @@ test("generateGuestAccessToken stores only the hash, not the raw token", async (
   const { group, requester, prefix } = await createFixture("token_hash");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
 
     const record = await prisma.guestAccessToken.findUnique({ where: { supportRequestId: request.id } });
     assert.ok(record, "token record should exist");
@@ -138,7 +170,7 @@ test("validateGuestAccessToken accepts a valid token", async () => {
   const { group, requester, prefix } = await createFixture("validate_ok");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
     const result = await validateGuestAccessToken(prisma, rawToken);
     assert.equal(result.supportRequest.id, request.id);
   } finally {
@@ -157,7 +189,7 @@ test("validateGuestAccessToken rejects a revoked token", async () => {
   const { group, requester, prefix } = await createFixture("validate_revoked");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
     await prisma.guestAccessToken.update({
       where: { supportRequestId: request.id },
       data: { revokedAt: new Date() },
@@ -175,7 +207,7 @@ test("validateGuestAccessToken rejects an expired token", async () => {
   const { group, requester, prefix } = await createFixture("validate_expired");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
     await prisma.guestAccessToken.update({
       where: { supportRequestId: request.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
@@ -183,6 +215,23 @@ test("validateGuestAccessToken rejects an expired token", async () => {
     await assert.rejects(
       () => validateGuestAccessToken(prisma, rawToken),
       /expired/,
+    );
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("validateGuestAccessToken rejects deleted request even if revokedAt is unset", async () => {
+  const { group, requester, prefix } = await createFixture("validate_deleted_no_revoke");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
+    // Simulate deletion without revokedAt being set (e.g. direct DB update)
+    await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "deleted" } });
+    await prisma.guestAccessToken.update({ where: { supportRequestId: request.id }, data: { revokedAt: null } });
+    await assert.rejects(
+      () => validateGuestAccessToken(prisma, rawToken),
+      /invalid or has been revoked/,
     );
   } finally {
     await cleanupFixture(prefix);
@@ -257,7 +306,7 @@ test("fulfillSupportRequest updates guest token expiresAt to match accountabilit
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
     await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "matched" } });
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
     await fulfillSupportRequest(prisma, { supportRequestId: request.id, rawToken });
     const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
     const token = await prisma.guestAccessToken.findUnique({ where: { supportRequestId: request.id } });
@@ -300,7 +349,7 @@ test("deleteSupportRequest revokes guest access token immediately", async () => 
   const { group, requester, prefix } = await createFixture("delete_revokes_token");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
-    const rawToken = await generateGuestAccessToken(prisma, request.id);
+    const rawToken = await generateGuestAccessToken(prisma, request.id, request.expiresAt);
     await deleteSupportRequest(prisma, { supportRequestId: request.id, rawToken });
     const token = await prisma.guestAccessToken.findUnique({ where: { supportRequestId: request.id } });
     assert.ok(token?.revokedAt !== null, "token must be revoked on deletion");
@@ -387,6 +436,72 @@ test("routeSupportRequest sets status to routed when routes are created", async 
   assert.equal(updated.status, "routed", "status must be routed after routes are created");
 
   await cleanupFixture(prefix);
+});
+
+// ---------------------------------------------------------------------------
+// redactSupportRequestIfEligible
+// ---------------------------------------------------------------------------
+
+test("redactSupportRequestIfEligible redacts description after accountability window closes", async () => {
+  const { group, requester, prefix } = await createFixture("redact_ok");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    await generateGuestAccessToken(prisma, request.id, request.expiresAt);
+    // Simulate accountability window already closed
+    const past = new Date(Date.now() - 1000);
+    await prisma.supportRequest.update({
+      where: { id: request.id },
+      data: { status: "fulfilled", accountabilityEndsAt: past },
+    });
+    const result = await redactSupportRequestIfEligible(prisma, request.id);
+    assert.equal(result, "redacted");
+    const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
+    assert.equal(updated.description, "");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("redactSupportRequestIfEligible returns window_still_open when concern window is active", async () => {
+  const { group, requester, prefix } = await createFixture("redact_window_open");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    await generateGuestAccessToken(prisma, request.id, request.expiresAt);
+    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await prisma.supportRequest.update({
+      where: { id: request.id },
+      data: { status: "fulfilled", accountabilityEndsAt: future },
+    });
+    const result = await redactSupportRequestIfEligible(prisma, request.id);
+    assert.equal(result, "window_still_open");
+    const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
+    assert.notEqual(updated.description, "");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("redactSupportRequestIfEligible is idempotent", async () => {
+  const { group, requester, prefix } = await createFixture("redact_idempotent");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    await generateGuestAccessToken(prisma, request.id, request.expiresAt);
+    const past = new Date(Date.now() - 1000);
+    await prisma.supportRequest.update({
+      where: { id: request.id },
+      data: { status: "fulfilled", accountabilityEndsAt: past },
+    });
+    await redactSupportRequestIfEligible(prisma, request.id);
+    const result = await redactSupportRequestIfEligible(prisma, request.id);
+    assert.equal(result, "already_redacted");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("redactSupportRequestIfEligible returns not_found for unknown request", async () => {
+  const result = await redactSupportRequestIfEligible(prisma, "nonexistent_request_id");
+  assert.equal(result, "not_found");
 });
 
 // ---------------------------------------------------------------------------

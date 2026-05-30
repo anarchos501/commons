@@ -33,12 +33,23 @@ function hashToken(rawToken: string): string {
 export async function generateGuestAccessToken(
   prisma: PrismaClient,
   supportRequestId: string,
+  requestExpiresAt: Date | null,
 ): Promise<string> {
   const rawToken = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(rawToken);
 
+  // Anchor token expiry to request expiry + accountability window so the token
+  // is never indefinite. fulfillSupportRequest will later narrow this to the
+  // precise accountability deadline if the request is fulfilled.
+  // Defensive fallback: normal callers should always pass requestExpiresAt.
+  // If null is received, cap at 2× the accountability window rather than
+  // creating an indefinite token.
+  const tokenExpiresAt = requestExpiresAt
+    ? new Date(requestExpiresAt.getTime() + DEFAULT_ACCOUNTABILITY_DAYS * 24 * 60 * 60 * 1000)
+    : new Date(Date.now() + DEFAULT_ACCOUNTABILITY_DAYS * 2 * 24 * 60 * 60 * 1000);
+
   await prisma.guestAccessToken.create({
-    data: { tokenHash, supportRequestId },
+    data: { tokenHash, supportRequestId, expiresAt: tokenExpiresAt },
   });
 
   return rawToken;
@@ -61,6 +72,12 @@ export async function validateGuestAccessToken(
   const now = new Date();
   if (token.expiresAt !== null && token.expiresAt <= now) {
     throw new Error("Access token has expired.");
+  }
+
+  // Belt-and-suspenders: reject on request deletion regardless of whether
+  // revokedAt was written correctly (e.g. direct DB update or future migration).
+  if (token.supportRequest.status === "deleted") {
+    throw new Error("Access token is invalid or has been revoked.");
   }
 
   return { supportRequest: token.supportRequest, token };
@@ -176,7 +193,7 @@ export async function deleteSupportRequest(
   // status = deleted removes the request from all normal UI surfaces immediately.
   // Description and contact details are NOT cleared here — they remain available
   // for concern review during the accountability window. Vulnerable content is
-  // removed by a separate privacy-cleanup pass after the accountability window closes.
+  // removed by redactSupportRequestIfEligible after the accountability window closes.
   await prisma.supportRequest.update({
     where: { id: supportRequestId },
     data: { status: "deleted" },
@@ -188,4 +205,47 @@ export async function deleteSupportRequest(
       data: { revokedAt: new Date() },
     });
   }
+}
+
+/**
+ * Canonical privacy-cleanup boundary.
+ *
+ * Any SupportRequest field that stores vulnerability information must be
+ * reviewed and redacted here. If a future field is added that contains
+ * contact details, location data, or other personal information, it
+ * belongs in this function.
+ *
+ * Current field classification:
+ *   description          — REDACT (contact info, location, language via buildRequestDescription)
+ *   requestedServices    — keep (service type labels only, no personal data)
+ *   requestType          — keep (coordination metadata)
+ *   urgency              — keep (coordination metadata)
+ *   privacyLevel         — keep (coordination metadata)
+ *   guestRequestId       — keep (UUID, not sensitive)
+ *   submittedByAccountId — keep (coordination integrity)
+ *   groupId/projectId    — keep (structural metadata)
+ */
+export async function redactSupportRequestIfEligible(
+  prisma: PrismaClient,
+  supportRequestId: string,
+): Promise<"redacted" | "window_still_open" | "already_redacted" | "not_found"> {
+  const request = await prisma.supportRequest.findUnique({
+    where: { id: supportRequestId },
+    include: { guestAccessToken: true },
+  });
+
+  if (!request) return "not_found";
+  if (request.description === "") return "already_redacted";
+
+  const window = concernWindowEndsAt(request, request.guestAccessToken);
+  const now = new Date();
+
+  if (window !== null && window > now) return "window_still_open";
+
+  await prisma.supportRequest.update({
+    where: { id: supportRequestId },
+    data: { description: "" },
+  });
+
+  return "redacted";
 }
