@@ -350,6 +350,86 @@ test("createContributionFromAcceptedRoute inherits projectId from the support re
   await cleanupFixture("caproute_project_inherit");
 });
 
+test("provider on same node but different group is not routed", async () => {
+  const prefix = "caproute_isolation";
+  await cleanupFixture(prefix);
+
+  const node = await prisma.node.create({
+    data: {
+      id: `${prefix}_node`,
+      name: "Isolation Test Node",
+      domain: `${prefix}.localhost`,
+      federationPolicy: "disabled",
+      pluginPolicy: "disabled",
+    },
+  });
+
+  const groupA = await prisma.group.create({
+    data: {
+      id: `${prefix}_group_a`,
+      nodeId: node.id,
+      name: "Isolation Group A",
+      membershipPolicy: "open",
+      privacyPreferences: { supportRequests: "private" },
+    },
+  });
+
+  const groupB = await prisma.group.create({
+    data: {
+      id: `${prefix}_group_b`,
+      nodeId: node.id,
+      name: "Isolation Group B",
+      membershipPolicy: "open",
+      privacyPreferences: { supportRequests: "private" },
+    },
+  });
+
+  for (const group of [groupA, groupB]) {
+    await prisma.groupServiceOffering.create({
+      data: {
+        id: `${prefix}_offering_${group.id}`,
+        groupId: group.id,
+        serviceType: "translation",
+        status: "active",
+        minimumContributorTrust: "lightweight",
+      },
+    });
+  }
+
+  const requester = await prisma.account.create({
+    data: { id: `${prefix}_requester`, homeNodeId: node.id, displayName: "Requester", accountType: "participant", profileVisibility: "private" },
+  });
+
+  // Bob is only a member of group B — not group A
+  const bob = await prisma.account.create({
+    data: { id: `${prefix}_bob`, homeNodeId: node.id, displayName: "Bob", accountType: "member", profileVisibility: "group" },
+  });
+  await prisma.groupMembership.create({ data: { accountId: bob.id, groupId: groupB.id, status: "active" } });
+
+  await declareServiceCapability(prisma, {
+    accountId: bob.id,
+    serviceType: "translation",
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: `${prefix}_request`,
+    submittedByAccountId: requester.id,
+    groupId: groupA.id,
+    requestType: "translation",
+    requestedServices: [{ serviceType: "translation", trustRequirement: "lightweight" }],
+    description: "Needs translation help.",
+    expiresAt: futureDate(),
+  });
+
+  const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+
+  assert.equal(routes.length, 0, "provider from a different group on the same node must not be routed");
+
+  await cleanupFixture(prefix);
+});
+
 async function createFixture(suffix: string) {
   const prefix = `caproute_${suffix}`;
   await cleanupFixture(prefix);
@@ -426,6 +506,13 @@ async function createFixture(suffix: string) {
     },
   });
 
+  await prisma.groupMembership.createMany({
+    data: [
+      { accountId: alice.id, groupId: group.id, status: "active" },
+      { accountId: joe.id, groupId: group.id, status: "active" },
+    ],
+  });
+
   return { node, group, project, mary, alice, joe };
 }
 
@@ -438,6 +525,7 @@ async function cleanupFixture(prefix: string) {
   await prisma.trustedServiceCapability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.contributorAvailability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.serviceCapability.deleteMany({ where: { accountId: { startsWith: prefix } } });
+  await prisma.groupMembership.deleteMany({ where: { accountId: { startsWith: prefix } } });
   await prisma.groupServiceOffering.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.project.deleteMany({ where: { id: { startsWith: prefix } } });

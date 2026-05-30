@@ -47,17 +47,29 @@ export function hashSignedEventPayload(payload: SignedEventPayload): string {
   return createHash("sha256").update(stableStringify(payload)).digest("hex");
 }
 
+export type SigningProvider = {
+  sign(payloadHash: string, publicKey: string): string;
+  verify?(payloadHash: string, signature: string, publicKey: string): boolean;
+};
+
 export function createDevelopmentSignature(payloadHash: string, publicKey: string): string {
   return createHash("sha256").update(`commons-dev-signature:${publicKey}:${payloadHash}`).digest("hex");
 }
 
-export function createSignedEventRecord(input: SignedEventInput): SignedEventRecord {
+export const developmentSigningProvider: SigningProvider = {
+  sign: createDevelopmentSignature,
+};
+
+export function createSignedEventRecord(
+  input: SignedEventInput,
+  signer: SigningProvider = developmentSigningProvider,
+): SignedEventRecord {
   const payloadHash = hashSignedEventPayload(input.payload);
 
   return {
     ...input,
     payloadHash,
-    signature: createDevelopmentSignature(payloadHash, input.publicKey),
+    signature: signer.sign(payloadHash, input.publicKey),
     createdAt: input.createdAt ?? new Date(),
   };
 }

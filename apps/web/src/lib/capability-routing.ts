@@ -245,7 +245,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         serviceType: requestedService.serviceType,
         trustRequirement: effectiveTrust,
         approvalStatus: { in: capabilityStatuses },
-        account: { homeNodeId: supportRequest.group.nodeId },
+        account: { groupMemberships: { some: { groupId: supportRequest.groupId, status: "active" } } },
         accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
       },
       include: {

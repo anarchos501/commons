@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDevelopmentSignature, createSignedEventRecord, hashSignedEventPayload, stableStringify } from "../lib/signed-events";
+import { createDevelopmentSignature, createSignedEventRecord, developmentSigningProvider, hashSignedEventPayload, stableStringify } from "../lib/signed-events";
 
 test("stableStringify sorts object keys recursively", () => {
   assert.equal(stableStringify({ b: 2, a: { d: 4, c: 3 } }), '{"a":{"c":3,"d":4},"b":2}');
@@ -22,21 +22,49 @@ test("development signatures bind payload hash to public key", () => {
 
 test("createSignedEventRecord prepares a lightweight event record", () => {
   const createdAt = new Date("2026-05-27T12:00:00.000Z");
-  const event = createSignedEventRecord({
-    eventType: "proposal_created",
-    subjectType: "Proposal",
-    subjectId: "proposal_support_retention_30_days",
-    actorAccountId: "acct_zora",
-    portableIdentityId: "pid_zora",
-    nodeId: "node_northside_commons",
-    groupId: "group_gotham_mutual_aid",
-    payload: { title: "Keep support request retention to 30 days" },
-    publicKey: "dev-public-key-zora",
-    createdAt,
-  });
+  const event = createSignedEventRecord(
+    {
+      eventType: "proposal_created",
+      subjectType: "Proposal",
+      subjectId: "proposal_support_retention_30_days",
+      actorAccountId: "acct_zora",
+      portableIdentityId: "pid_zora",
+      nodeId: "node_northside_commons",
+      groupId: "group_gotham_mutual_aid",
+      payload: { title: "Keep support request retention to 30 days" },
+      publicKey: "dev-public-key-zora",
+      createdAt,
+    },
+    developmentSigningProvider,
+  );
 
   assert.equal(event.createdAt, createdAt);
   assert.equal(event.payloadHash.length, 64);
   assert.equal(event.signature.length, 64);
   assert.equal(event.subjectType, "Proposal");
+});
+
+test("createSignedEventRecord delegates signing to an injected provider", () => {
+  const calls: Array<{ payloadHash: string; publicKey: string }> = [];
+  const mockSigner = {
+    sign(payloadHash: string, publicKey: string): string {
+      calls.push({ payloadHash, publicKey });
+      return `mock-sig:${payloadHash}`;
+    },
+  };
+
+  const event = createSignedEventRecord(
+    {
+      eventType: "contribution_logged",
+      subjectType: "Contribution",
+      subjectId: "contrib_123",
+      payload: { hours: 2 },
+      publicKey: "pub-key-test",
+    },
+    mockSigner,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].publicKey, "pub-key-test");
+  assert.equal(event.signature, `mock-sig:${event.payloadHash}`);
 });
