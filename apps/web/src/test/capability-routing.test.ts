@@ -262,6 +262,48 @@ test("accepted request can produce a privacy-safe contribution summary", async (
 });
 
 
+test("createContributionFromAcceptedRoute leaves request matched and does not log request.fulfilled", async () => {
+  const fixture = await createFixture("bypass_check");
+  try {
+    await declareServiceCapability(prisma, {
+      accountId: fixture.alice.id,
+      serviceType: "food dropoff",
+      trustRequirement: "lightweight",
+      availability: { availableNow: true },
+    });
+
+    const request = await createSupportRequest(prisma, {
+      id: "caproute_bypass_check_request",
+      submittedByAccountId: fixture.mary.id,
+      groupId: fixture.group.id,
+      requestType: "food dropoff",
+      requestedServices: [{ serviceType: "food dropoff", trustRequirement: "lightweight" }],
+      description: "Needs food.",
+      expiresAt: futureDate(),
+    });
+
+    const [route] = await routeSupportRequest(prisma, { supportRequestId: request.id });
+    await decideRequestRoute(prisma, { routeId: route.id, contributorAccountId: fixture.alice.id, decision: "accepted" });
+
+    const contribution = await createContributionFromAcceptedRoute(prisma, {
+      id: "caproute_bypass_check_contribution",
+      routeId: route.id,
+    });
+
+    assert.ok(contribution.id);
+
+    const afterRequest = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
+    assert.equal(afterRequest.status, "matched");
+
+    const fulfilledLogs = await prisma.actionLog.findMany({
+      where: { targetId: request.id, action: "request.fulfilled" },
+    });
+    assert.equal(fulfilledLogs.length, 0);
+  } finally {
+    await cleanupFixture("caproute_bypass_check");
+  }
+});
+
 test("group privacy constraints override requester public preference", async () => {
   const fixture = await createFixture("privacy_group");
   const request = await createSupportRequest(prisma, {

@@ -256,7 +256,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         serviceType: requestedService.serviceType,
         trustRequirement: effectiveTrust,
         approvalStatus: { in: capabilityStatuses },
-        account: { groupMemberships: { some: { groupId: supportRequest.groupId, status: "active" } } },
+        account: { groupMemberships: { some: { groupId: supportRequest.groupId, status: "active", participationStatus: "active" } } },
         accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
       },
       include: {
@@ -412,11 +412,8 @@ export async function createContributionFromAcceptedRoute(prisma: PrismaClient, 
     },
   });
 
-  await prisma.supportRequest.update({
-    where: { id: route.supportRequestId },
-    data: { status: "fulfilled" },
-  });
-
+  // Request remains "matched" — fulfillment requires explicit requester confirmation
+  // via fulfillSupportRequest() in request-lifecycle.ts.
   return contribution;
 }
 

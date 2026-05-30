@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 
 type LogActionInput = {
   actorAccountId?: string | null;
@@ -7,7 +7,7 @@ type LogActionInput = {
   targetType: string;
   targetId: string;
   action: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Prisma.InputJsonObject;
 };
 
 /**
