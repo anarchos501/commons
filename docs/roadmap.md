@@ -33,6 +33,24 @@ Mobile and PWA: installable app, offline drafts, encrypted local storage, sync q
 
 Security audits, deletion/export workflows, federation readiness, portable identity migration, offline sync, and plugin foundations.
 
+## Scope Boundary: Resource Coordination
+
+Core Commons should remain focused on human coordination. For resource-related workflows, the platform should stop at:
+
+- Resource Needed
+- Resource Pledged
+- Resource Fulfilled
+
+Core Commons should not drift into:
+
+- inventory management
+- warehousing
+- asset management
+- procurement
+- accounting
+
+Communities that need those capabilities may add them through optional plugins. The core platform should remain self-contained for human coordination while avoiding responsibility for document storage, external workflow dependencies, and inventory administration.
+
 ## Hybrid Architecture Preparation
 
 Prepare a split-by-data-class architecture with lightweight signed events, local sync state, and replication policies before implementing full federation, P2P, CRDTs, or browser encryption. Signed events are accountability and migration preparation, not blockchain architecture, total event sourcing, or immutable surveillance history.

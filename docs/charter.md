@@ -88,6 +88,65 @@ The infrastructure layer preserves continuity, autonomy, survivability, and exit
 
 This layer should remain mostly invisible to ordinary users. It should support local autonomy and peaceful exit without becoming the main product.
 
+## Commons Is Not A File Repository
+
+Commons coordinates people, commitments, projects, and community memory.
+
+Commons is not intended to become a general-purpose document management system.
+
+Asking someone to upload a document in order to receive support is a form of gatekeeping. It assumes literacy, device access, and a willingness to hand over sensitive materials before help is offered. These assumptions are incompatible with the mutual aid context Commons is designed to serve.
+
+Implications:
+
+- No document uploads in core Commons.
+- No required attachments for support requests.
+- No assumption that users can provide documentation.
+- Vulnerability should not need to be proven through uploaded evidence.
+
+Ask only what is necessary to coordinate help.
+
+## Commons Is Self-Contained By Default
+
+Support requests, contributions, concerns, membership, trust, and accountability should remain fully understandable from within Commons itself.
+
+External systems should not become hidden dependencies for understanding what happened in a community.
+
+If resolving a concern, reviewing a contribution, or understanding a trust decision requires following an external link, then Commons has partially outsourced its accountability layer to an infrastructure it does not control, cannot audit, and cannot guarantee will remain available.
+
+Implications:
+
+- No external links in support requests.
+- No external links in concern reports.
+- No external links required for contributions.
+- No external links required for trust or accountability workflows.
+
+This protects transparency, accessibility, and the ability of communities to understand their own history without depending on third-party services.
+
+## Vulnerability Should Not Be Archived
+
+The fifth step of the minimum social loop is: vulnerability is not archived.
+
+This requires active architectural commitment, not only passive restraint.
+
+A document submitted as evidence of need often contains:
+
+- home addresses
+- medical information
+- legal information
+- financial information
+- family information
+
+Commons should be extremely cautious about becoming a storage location for these materials.
+
+Implications:
+
+- Sensitive documents should not be retained by default.
+- Future attachment systems should be optional plugins governed by explicit community consent.
+- Federation should never automatically replicate attachments.
+- Replication policies and privacy envelopes must apply to any document or file data at least as strictly as they apply to support request content.
+
+Community memory should hold contribution and coordination. It should not hold archived hardship.
+
 ## Anti-Capture Guardrails
 
 Commons must actively avoid becoming the kind of institution it was meant to soften.
