@@ -8,6 +8,7 @@ import {
   resolveEffectivePrivacy,
   resolveSupportRequestPrivacy,
 } from "./privacy-resolver";
+import { markSupportRequestRouted } from "./request-lifecycle";
 
 export type TrustRequirementValue = "lightweight" | "elevated";
 export type VisibilityLevelValue = "private" | "group" | "project" | "public";
@@ -209,7 +210,7 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
     include: { group: true, services: true },
   });
 
-  if (!supportRequest || supportRequest.status !== "open") {
+  if (!supportRequest || !["open", "routed"].includes(supportRequest.status)) {
     return [];
   }
 
@@ -304,6 +305,10 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         notificationPayload: buildRouteNotificationPayload(routePayloadRequest, privacyResolution),
       });
     }
+  }
+
+  if (routes.length > 0 && supportRequest.status === "open") {
+    await markSupportRequestRouted(prisma, supportRequest.id);
   }
 
   return routes.sort((left, right) => {

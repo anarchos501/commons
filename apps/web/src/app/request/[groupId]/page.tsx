@@ -3,15 +3,26 @@
 // is designed. Do not treat the URL segment as the canonical group identity model.
 
 import Link from "next/link";
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, HelpCircle, Languages, MapPin, Shield } from "lucide-react";
+import { ArrowLeft, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-react";
 import { randomUUID } from "crypto";
 import { createPrismaClient } from "../../../lib/prisma";
 import { resolveCurrentNode } from "../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../lib/capability-routing";
 import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../lib/support-form";
+import { generateGuestAccessToken } from "../../../lib/request-lifecycle";
 
 export const dynamic = "force-dynamic";
+
+const DURATION_OPTIONS = [
+  { value: "3", label: "3 days" },
+  { value: "7", label: "1 week" },
+  { value: "14", label: "2 weeks" },
+  { value: "30", label: "30 days" },
+  { value: "60", label: "60 days" },
+  { value: "90", label: "90 days" },
+];
 
 type PageProps = {
   params: Promise<{ groupId: string }>;
@@ -38,6 +49,10 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
     }
 
     if (resolvedSearch.submitted === "1") {
+      const rawToken = typeof resolvedSearch.token === "string" ? resolvedSearch.token : null;
+      const host = (await headers()).get("host") ?? "";
+      const privateLink = rawToken ? `https://${host}/request/status/${rawToken}` : null;
+
       return (
         <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
           <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
@@ -55,12 +70,28 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               <p className="mt-4 text-sm leading-7 text-[var(--soft-text)]">
                 Your request has been shared with people in {group.name} who may be able to help. Someone will reach out using the contact information you provided.
               </p>
+
+              {privateLink && (
+                <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm">
+                  <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+                    <Key className="h-4 w-4" aria-hidden="true" />
+                    Your private request link
+                  </div>
+                  <p className="mt-2 break-all font-mono text-xs text-[var(--muted)]">{privateLink}</p>
+                  <p className="mt-2 text-[var(--soft-text)]">Save this link. You can use it to check status, mark help received, delete the request, or report a concern — without creating an account.</p>
+                </div>
+              )}
+
               <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
                 <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                   <Shield className="h-4 w-4" aria-hidden="true" />
                   Privacy reminder
                 </div>
-                <p className="mt-1">Your contact information will not be stored after your request expires or is filled. No account was created.</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  <li>No account was created.</li>
+                  <li>Your request will only be shared with {group.name}.</li>
+                  <li>Contact details are removed after your request expires or is fulfilled.</li>
+                </ul>
               </div>
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 <Link
@@ -97,12 +128,14 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       const location = formData.get("location");
       const language = formData.get("language");
       const trustPreference = (formData.get("trustPreference") ?? "lightweight") as "lightweight" | "elevated";
+      const activeDays = Math.min(90, Math.max(3, parseInt((formData.get("activeDays") as string) ?? "30", 10) || 30));
 
       if (typeof serviceType !== "string" || typeof contact !== "string" || !contact.trim()) {
         redirect(`/request/${groupId}?error=1`);
       }
 
       const actionPrisma = createPrismaClient();
+      let rawToken: string | null = null;
       try {
         // groupId is closed over from page params — not user-controllable.
         // Re-validate node ownership inside the action as defense in depth.
@@ -121,6 +154,8 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           language: language && typeof language === "string" && language.trim() ? language.trim() : undefined,
         });
 
+        const expiresAt = new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000);
+
         const request = await createSupportRequest(actionPrisma, {
           guestRequestId: randomUUID(),
           submittedByAccountId: null,
@@ -130,15 +165,17 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           description,
           urgency: urgency ?? "normal",
           privacyLevel: "private",
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          expiresAt,
         });
 
+        rawToken = await generateGuestAccessToken(actionPrisma, request.id);
         await routeSupportRequest(actionPrisma, { supportRequestId: request.id });
       } finally {
         await actionPrisma.$disconnect();
       }
 
-      redirect(`/request/${groupId}?submitted=1`);
+      const tokenParam = rawToken ? `&token=${encodeURIComponent(rawToken)}` : "";
+      redirect(`/request/${groupId}?submitted=1${tokenParam}`);
     }
 
     return (
@@ -219,6 +256,16 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               <input name="location" className="field-input" placeholder="Neighborhood or nearby area (optional)" />
             </label>
 
+            <label className="block">
+              <span className="field-label">How long should this request stay active?</span>
+              <select name="activeDays" className="field-input" defaultValue="30">
+                {DURATION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-[var(--muted)]">Requests expire automatically. You can also delete yours at any time using your private link.</p>
+            </label>
+
             <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
               <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                 <Shield className="h-4 w-4" aria-hidden="true" />
@@ -226,8 +273,9 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               </div>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>No account is created.</li>
+                <li>Your request will only be shared with {group.name}.</li>
                 <li>Your contact note is only shared after someone accepts.</li>
-                <li>This request expires after 30 days.</li>
+                <li>You will receive a private link to manage or delete this request.</li>
               </ul>
             </div>
 

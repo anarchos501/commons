@@ -25,6 +25,7 @@ import {
 } from "../../lib/capability-routing";
 import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/group-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../lib/support-form";
+import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../lib/request-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -184,12 +185,24 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                     <input name="language" className="field-input" placeholder="Optional" />
                   </label>
                 </div>
+                <label className="block">
+                  <span className="field-label">How long should this request stay active?</span>
+                  <select name="activeDays" className="field-input" defaultValue="30">
+                    <option value="3">3 days</option>
+                    <option value="7">1 week</option>
+                    <option value="14">2 weeks</option>
+                    <option value="30">30 days</option>
+                    <option value="60">60 days</option>
+                    <option value="90">90 days</option>
+                  </select>
+                  <p className="mt-1 text-xs text-[var(--muted)]">Requests expire automatically. You can also close yours from My Requests at any time.</p>
+                </label>
                 <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
                   <p className="font-medium text-[var(--text)]">Privacy check</p>
                   <ul className="mt-2 list-disc space-y-1 pl-5">
                     <li>Your request is not posted as a public feed.</li>
                     <li>Only the minimum matching details are routed before someone accepts.</li>
-                    <li>Support requests expire after 30 days by default.</li>
+                    <li>Requests expire automatically. Contact details are removed after any accountability period has concluded.</li>
                   </ul>
                 </div>
                 <SubmitButton disabled={data.serviceOfferings.length === 0}>Ask for help</SubmitButton>
@@ -414,6 +427,75 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             ) : null}
 
             {data.group ? (
+            <>
+            <Section id="my-requests" title="My Requests" eyebrow="Requests you submitted">
+              {data.myRequests.length === 0 ? (
+                <p className="text-sm text-[var(--muted)]">No active requests.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {data.myRequests.map((request) => {
+                    const statusLabel = REQUEST_STATUS_LABELS[request.status] ?? request.status;
+                    const isActive = ["open", "routed", "matched"].includes(request.status);
+
+                    async function fulfillMyRequest() {
+                      "use server";
+                      const s = await getSession();
+                      if (!s.accountId) redirect("/login");
+                      const p = createPrismaClient();
+                      try { await fulfillSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
+                      finally { await p.$disconnect(); }
+                      revalidatePath("/dashboard");
+                    }
+
+                    async function deleteMyRequest() {
+                      "use server";
+                      const s = await getSession();
+                      if (!s.accountId) redirect("/login");
+                      const p = createPrismaClient();
+                      try { await deleteSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
+                      finally { await p.$disconnect(); }
+                      revalidatePath("/dashboard");
+                    }
+
+                    return (
+                      <li key={request.id} className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium capitalize">{request.requestType}</p>
+                          <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          Submitted {new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.createdAt)}
+                          {request.expiresAt && isActive ? ` · Expires ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.expiresAt)}` : ""}
+                          {request.accountabilityEndsAt ? ` · Accountability open until ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.accountabilityEndsAt)}` : ""}
+                        </p>
+                        {(isActive || request.status !== "deleted") && (
+                          <div className="mt-2 flex gap-2">
+                            {isActive && (
+                              <form action={fulfillMyRequest}>
+                                <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                                  Mark help received
+                                </button>
+                              </form>
+                            )}
+                            {request.status !== "fulfilled" && request.status !== "expired" && (
+                              <form action={deleteMyRequest}>
+                                <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--text)] hover:underline">
+                                  Delete
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="mt-3 text-xs text-[var(--muted)]">
+                Deleting a request removes it from active views. Contact details and descriptions are removed after any accountability period has concluded.
+              </p>
+            </Section>
+
             <Section id="concerns" title="Concerns" eyebrow="Shared accountability">
               {data.groupOpenConcernCount > 0 ? (
                 <p className="mb-4 text-sm leading-6 text-[var(--soft-text)]">
@@ -455,7 +537,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 <SubmitButton variant="secondary">Submit concern</SubmitButton>
               </form>
             </Section>
-            ) : null}
+            </>) : null}
           </aside>
         </div>
       </section>
@@ -678,6 +760,7 @@ async function requestHelpAction(formData: FormData) {
   const language = optionalString(formData, "language");
   const urgency = requiredString(formData, "urgency") as "low" | "normal" | "high" | "urgent";
   const trustPreference = requiredString(formData, "trustPreference") as "lightweight" | "elevated";
+  const activeDays = Math.min(90, Math.max(3, parseInt(optionalString(formData, "activeDays") ?? "30", 10) || 30));
   const groupId = session.activeGroupId;
 
   if (!groupId) redirect("/dashboard");
@@ -699,7 +782,7 @@ async function requestHelpAction(formData: FormData) {
       description: buildRequestDescription({ contact, location, language }),
       urgency,
       privacyLevel: "private",
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000),
     });
 
     await routeSupportRequest(prisma, { supportRequestId: request.id });
@@ -874,7 +957,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount] = await Promise.all([
+    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount, myRequests] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: {
@@ -939,6 +1022,14 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       group
         ? prisma.report.count({ where: { groupId: group.id, status: "open" } })
         : Promise.resolve(0),
+      group
+        ? prisma.supportRequest.findMany({
+            where: { submittedByAccountId: accountId, groupId: group.id, status: { notIn: ["deleted"] } },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, requestType: true, status: true, createdAt: true, expiresAt: true, accountabilityEndsAt: true },
+            take: 10,
+          })
+        : Promise.resolve([]),
     ]);
 
     return {
@@ -972,6 +1063,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       personalContributions: personalContributions.map((r) => ({ type: r.contributionType, count: r._count.contributionType })),
       myReports,
       groupOpenConcernCount,
+      myRequests,
     };
   } finally {
     await prisma.$disconnect();

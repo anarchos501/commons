@@ -80,6 +80,7 @@ enum UrgencyLevel {
 
 enum SupportRequestStatus {
   open
+  routed
   matched
   fulfilled
   expired
@@ -417,21 +418,36 @@ model SupportRequest {
   privacyLevel         PrivacyLevel         @default(private)
   status               SupportRequestStatus @default(open)
   expiresAt            DateTime?
+  accountabilityEndsAt DateTime?
   createdAt            DateTime             @default(now())
 
-  submittedBy Account?                @relation(fields: [submittedByAccountId], references: [id])
-  group       Group                   @relation(fields: [groupId], references: [id])
-  project     Project?                @relation(fields: [projectId], references: [id])
-  offers      Offer[]
-  services    SupportRequestService[]
-  routes      RequestRoute[]
+  submittedBy       Account?                @relation(fields: [submittedByAccountId], references: [id])
+  group             Group                   @relation(fields: [groupId], references: [id])
+  project           Project?                @relation(fields: [projectId], references: [id])
+  offers            Offer[]
+  services          SupportRequestService[]
+  routes            RequestRoute[]
+  guestAccessToken  GuestAccessToken?
 
   @@index([submittedByAccountId])
   @@index([groupId])
   @@index([projectId])
   @@index([status])
   @@index([expiresAt])
+  @@index([accountabilityEndsAt])
   @@index([urgency])
+}
+
+model GuestAccessToken {
+  id               String    @id @default(cuid())
+  tokenHash        String    @unique
+  supportRequestId String    @unique
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+
+  supportRequest SupportRequest @relation(fields: [supportRequestId], references: [id], onDelete: Cascade)
+  reports        Report[]
 }
 
 model SupportRequestService {
@@ -585,7 +601,8 @@ model Proposal {
 
 model Report {
   id                  String       @id @default(cuid())
-  reportedByAccountId String
+  reportedByAccountId String?
+  guestAccessTokenId  String?
   groupId             String
   subject             String
   context             String?
@@ -596,10 +613,12 @@ model Report {
   resolvedNote        String?
   createdAt           DateTime     @default(now())
 
-  reportedBy Account @relation(fields: [reportedByAccountId], references: [id])
-  group      Group   @relation(fields: [groupId], references: [id])
+  reportedBy       Account?          @relation(fields: [reportedByAccountId], references: [id])
+  guestAccessToken GuestAccessToken? @relation(fields: [guestAccessTokenId], references: [id])
+  group            Group             @relation(fields: [groupId], references: [id])
 
   @@index([reportedByAccountId])
+  @@index([guestAccessTokenId])
   @@index([groupId])
   @@index([status])
 }
