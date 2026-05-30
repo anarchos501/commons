@@ -1,5 +1,6 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { ServiceCapabilityStatus } from "../generated/prisma/enums";
+import { logAction } from "./action-log";
 import {
   buildContributionPrivacyEnvelope,
   buildRouteNotificationPayload,
@@ -200,6 +201,15 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
     });
   }
 
+  await logAction(prisma, {
+    actorAccountId: input.submittedByAccountId ?? null,
+    groupId: input.groupId,
+    projectId: input.projectId ?? null,
+    action: "request.created",
+    targetType: "support_request",
+    targetId: supportRequest.id,
+  });
+
   return supportRequest;
 }
 
@@ -300,6 +310,16 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
         },
       });
 
+      if (!existingRoute) {
+        await logAction(prisma, {
+          groupId: supportRequest.groupId,
+          action: "request.routed",
+          targetType: "request_route",
+          targetId: route.id,
+          metadata: { supportRequestId: supportRequest.id, serviceType: requestedService.serviceType },
+        });
+      }
+
       routes.push({
         ...route,
         notificationPayload: buildRouteNotificationPayload(routePayloadRequest, privacyResolution),
@@ -321,7 +341,10 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
 }
 
 export async function decideRequestRoute(prisma: PrismaClient, input: RouteDecisionInput) {
-  const route = await prisma.requestRoute.findUnique({ where: { id: input.routeId } });
+  const route = await prisma.requestRoute.findUnique({
+    where: { id: input.routeId },
+    include: { supportRequest: { select: { groupId: true } } },
+  });
 
   if (!route || route.contributorAccountId !== input.contributorAccountId) {
     throw new Error("Only the routed contributor can decide this route.");
@@ -348,6 +371,15 @@ export async function decideRequestRoute(prisma: PrismaClient, input: RouteDecis
       data: { status: "matched" },
     });
   }
+
+  await logAction(prisma, {
+    actorAccountId: input.contributorAccountId,
+    groupId: route.supportRequest?.groupId ?? null,
+    action: status === "accepted" ? "route.accepted" : "route.declined",
+    targetType: "request_route",
+    targetId: route.id,
+    metadata: { serviceType: route.serviceType, decisionNote: input.decisionNote },
+  });
 
   return updatedRoute;
 }

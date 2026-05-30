@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { GuestAccessToken, SupportRequest } from "../generated/prisma/client";
 import type { PrismaClient } from "../generated/prisma/client";
+import { logAction } from "./action-log";
 
 export const DEFAULT_ACCOUNTABILITY_DAYS = 30;
 
@@ -152,6 +153,15 @@ export async function fulfillSupportRequest(
       data: { expiresAt: accountabilityEndsAt },
     });
   }
+
+  await logAction(prisma, {
+    actorAccountId: actorAccountId ?? null,
+    groupId: request.groupId,
+    projectId: request.projectId,
+    action: "request.fulfilled",
+    targetType: "support_request",
+    targetId: supportRequestId,
+  });
 }
 
 export async function deleteSupportRequest(
@@ -205,6 +215,15 @@ export async function deleteSupportRequest(
       data: { revokedAt: new Date() },
     });
   }
+
+  await logAction(prisma, {
+    actorAccountId: actorAccountId ?? null,
+    groupId: request.groupId,
+    projectId: request.projectId,
+    action: "request.deleted",
+    targetType: "support_request",
+    targetId: supportRequestId,
+  });
 }
 
 /**

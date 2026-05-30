@@ -26,6 +26,7 @@ import {
 import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/group-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../lib/request-lifecycle";
+import { logAction } from "../../lib/action-log";
 
 export const dynamic = "force-dynamic";
 
@@ -920,7 +921,7 @@ async function submitConcernAction(formData: FormData) {
 
   try {
     await requireGroupMembership(prisma, session.accountId, groupId);
-    await prisma.report.create({
+    const report = await prisma.report.create({
       data: {
         reportedByAccountId: session.accountId,
         groupId,
@@ -930,6 +931,13 @@ async function submitConcernAction(formData: FormData) {
         status: "open",
         visibility: "private",
       },
+    });
+    await logAction(prisma, {
+      actorAccountId: session.accountId,
+      groupId,
+      action: "concern.submitted",
+      targetType: "report",
+      targetId: report.id,
     });
   } finally {
     await prisma.$disconnect();

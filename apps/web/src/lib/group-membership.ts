@@ -1,4 +1,5 @@
 import type { PrismaClient } from "../generated/prisma/client";
+import { logAction } from "./action-log";
 
 export async function requireGroupMembership(
   prisma: PrismaClient,
@@ -42,10 +43,18 @@ export async function joinOpenGroup(
   }
 
   if (existingMembership?.status !== "active") {
-    await prisma.groupMembership.upsert({
+    const membership = await prisma.groupMembership.upsert({
       where: { accountId_groupId: { accountId, groupId } },
       update: { status: "active" },
       create: { accountId, groupId, status: "active" },
+    });
+
+    await logAction(prisma, {
+      actorAccountId: accountId,
+      groupId,
+      action: "membership.joined",
+      targetType: "group_membership",
+      targetId: membership.id,
     });
   }
 
@@ -57,8 +66,16 @@ export async function leaveGroup(
   accountId: string,
   groupId: string,
 ): Promise<void> {
-  await prisma.groupMembership.update({
+  const membership = await prisma.groupMembership.update({
     where: { accountId_groupId: { accountId, groupId } },
     data: { status: "inactive" },
+  });
+
+  await logAction(prisma, {
+    actorAccountId: accountId,
+    groupId,
+    action: "membership.left",
+    targetType: "group_membership",
+    targetId: membership.id,
   });
 }

@@ -9,6 +9,7 @@ import {
   REQUEST_STATUS_LABELS,
   validateGuestAccessToken,
 } from "../../../../lib/request-lifecycle";
+import { logAction } from "../../../../lib/action-log";
 
 export const dynamic = "force-dynamic";
 
@@ -133,7 +134,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
         try {
           // Validate token again inside the action
           const result = await validateGuestAccessToken(actionPrisma, rawToken);
-          await actionPrisma.report.create({
+          const report = await actionPrisma.report.create({
             data: {
               reportedByAccountId: null,
               guestAccessTokenId: result.token.id,
@@ -141,6 +142,13 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               subject: subject.trim(),
               description: description.trim(),
             },
+          });
+          await logAction(actionPrisma, {
+            actorAccountId: null,
+            groupId: result.supportRequest.groupId,
+            action: "concern.submitted",
+            targetType: "report",
+            targetId: report.id,
           });
         } finally {
           await actionPrisma.$disconnect();
