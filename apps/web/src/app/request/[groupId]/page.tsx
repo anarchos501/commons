@@ -50,8 +50,10 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
 
     if (resolvedSearch.submitted === "1") {
       const rawToken = typeof resolvedSearch.token === "string" ? resolvedSearch.token : null;
-      const host = (await headers()).get("host") ?? "";
-      const privateLink = rawToken ? `https://${host}/request/status/${rawToken}` : null;
+      const headersList = await headers();
+      const host = headersList.get("host") ?? "";
+      const proto = headersList.get("x-forwarded-proto") ?? (host.split(":")[0] === "localhost" ? "http" : "https");
+      const privateLink = rawToken ? `${proto}://${host}/request/status/${rawToken}` : null;
 
       return (
         <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
@@ -77,7 +79,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                     <Key className="h-4 w-4" aria-hidden="true" />
                     Your private request link
                   </div>
-                  <p className="mt-2 break-all font-mono text-xs text-[var(--muted)]">{privateLink}</p>
+                  <a href={privateLink} className="mt-2 block break-all font-mono text-xs text-[var(--accent)] hover:underline">{privateLink}</a>
                   <p className="mt-2 text-[var(--soft-text)]">Save this link. You can use it to check status, mark help received, delete the request, or report a concern — without creating an account.</p>
                 </div>
               )}

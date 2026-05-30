@@ -470,7 +470,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                         </p>
                         {(isActive || request.status !== "deleted") && (
                           <div className="mt-2 flex gap-2">
-                            {isActive && (
+                            {request.status === "matched" && (
                               <form action={fulfillMyRequest}>
                                 <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">
                                   Mark help received

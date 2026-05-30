@@ -197,6 +197,7 @@ test("fulfillSupportRequest sets status and accountabilityEndsAt", async () => {
   const { group, requester, prefix } = await createFixture("fulfill_ok");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
+    await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "matched" } });
     const before = new Date();
     await fulfillSupportRequest(prisma, { supportRequestId: request.id, actorAccountId: requester.id });
     const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
@@ -213,6 +214,7 @@ test("fulfillSupportRequest is idempotent", async () => {
   const { group, requester, prefix } = await createFixture("fulfill_idempotent");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
+    await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "matched" } });
     await fulfillSupportRequest(prisma, { supportRequestId: request.id, actorAccountId: requester.id });
     await fulfillSupportRequest(prisma, { supportRequestId: request.id, actorAccountId: requester.id });
     const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });
@@ -222,10 +224,25 @@ test("fulfillSupportRequest is idempotent", async () => {
   }
 });
 
+test("fulfillSupportRequest rejects open and routed requests", async () => {
+  const { group, requester, prefix } = await createFixture("fulfill_requires_matched");
+  try {
+    const request = await makeRequest(prefix, group.id, requester.id);
+    assert.equal(request.status, "open");
+    await assert.rejects(
+      () => fulfillSupportRequest(prisma, { supportRequestId: request.id, actorAccountId: requester.id }),
+      /only be marked fulfilled after a contributor has accepted/,
+    );
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
 test("fulfillSupportRequest rejects a wrong actor", async () => {
   const { group, requester, prefix } = await createFixture("fulfill_wrong_actor");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
+    await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "matched" } });
     await assert.rejects(
       () => fulfillSupportRequest(prisma, { supportRequestId: request.id, actorAccountId: "wrong_account_id" }),
       /Only the requester/,
@@ -239,6 +256,7 @@ test("fulfillSupportRequest updates guest token expiresAt to match accountabilit
   const { group, requester, prefix } = await createFixture("fulfill_token_expiry");
   try {
     const request = await makeRequest(prefix, group.id, requester.id);
+    await prisma.supportRequest.update({ where: { id: request.id }, data: { status: "matched" } });
     const rawToken = await generateGuestAccessToken(prisma, request.id);
     await fulfillSupportRequest(prisma, { supportRequestId: request.id, rawToken });
     const updated = await prisma.supportRequest.findUniqueOrThrow({ where: { id: request.id } });

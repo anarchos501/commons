@@ -240,7 +240,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
             </dl>
 
             <div className="mt-6 flex flex-col gap-2">
-              {isActive && (
+              {supportRequest.status === "matched" && (
                 <Link
                   href={`/request/status/${rawToken}?action=fulfill`}
                   className="flex min-h-11 items-center justify-center rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]"

@@ -100,6 +100,9 @@ export async function fulfillSupportRequest(
 
   if (!request) throw new Error("Support request not found.");
   if (request.status === "fulfilled") return; // idempotent
+  if (request.status !== "matched") {
+    throw new Error("A request can only be marked fulfilled after a contributor has accepted.");
+  }
 
   // Validate actor: must be the submitting account or hold a valid token for this request
   if (actorAccountId) {
