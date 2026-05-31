@@ -28,6 +28,7 @@ import { buildRequestDescription, capitalize, optionalString, requiredString, tr
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../lib/request-lifecycle";
 import { logAction } from "../../lib/action-log";
 import { applyParticipationTransitions, recordGroupPresence } from "../../lib/participation";
+import { getCoverageStatus } from "../../lib/concerns";
 
 export const dynamic = "force-dynamic";
 
@@ -499,11 +500,47 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             </Section>
 
             <Section id="concerns" title="Concerns" eyebrow="Shared accountability">
-              {data.groupOpenConcernCount > 0 ? (
-                <p className="mb-4 text-sm leading-6 text-[var(--soft-text)]">
-                  {data.groupOpenConcernCount} open concern{data.groupOpenConcernCount !== 1 ? "s" : ""} in this group.
+              <div className="mb-4 flex items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                  Review Coverage: {data.coverageStatus === "available" ? "Available" : "Unavailable"}
+                </span>
+                {data.groupOpenConcernCount > 0 ? (
+                  <span className="text-xs text-[var(--muted)]">
+                    {data.groupOpenConcernCount} active concern{data.groupOpenConcernCount !== 1 ? "s" : ""}
+                  </span>
+                ) : null}
+              </div>
+
+              {data.coverageStatus === "unavailable" ? (
+                <p className="mb-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-xs text-[var(--muted)]">
+                  No active concern reviewers are currently available.
                 </p>
               ) : null}
+
+              {data.reviewerRole && data.reviewerQueue.length > 0 ? (
+                <div className="mb-5 space-y-3">
+                  <p className="text-xs font-medium text-[var(--muted)]">Reviewer queue</p>
+                  {data.reviewerQueue.map((concern) => (
+                    <div key={concern.id} className="space-y-1 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium">{concern.subject}</p>
+                        <span className="shrink-0 text-xs capitalize text-[var(--muted)]">
+                          {concern.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      {concern.findings.length > 0 ? (
+                        <p className="text-xs text-[var(--muted)]">
+                          {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
+                        </p>
+                      ) : null}
+                      {concern.actionProposals.filter((p) => p.status === "pending").length > 0 ? (
+                        <p className="text-xs text-[var(--muted)]">Pending proposal</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               {data.myReports.length > 0 ? (
                 <div className="mb-5 space-y-3">
                   <p className="text-xs font-medium text-[var(--muted)]">Your concerns</p>
@@ -512,9 +549,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-medium">{report.subject}</p>
                         <span className="shrink-0 text-xs capitalize text-[var(--muted)]">
-                          {report.status.replace("_", " ")}
+                          {report.status.replace(/_/g, " ")}
                         </span>
                       </div>
+                      {report.closureReason ? (
+                        <p className="text-xs text-[var(--muted)]">Closed: {report.closureReason.replace(/_/g, " ")}</p>
+                      ) : null}
                       {report.context ? (
                         <p className="text-xs text-[var(--muted)]">{report.context}</p>
                       ) : null}
@@ -523,6 +563,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   ))}
                 </div>
               ) : null}
+
               <form action={submitConcernAction} className="space-y-4">
                 <label className="block">
                   <span className="field-label">What is the concern about?</span>
@@ -1030,11 +1071,11 @@ async function getDashboardData(accountId: string, groupId: string | null) {
         ? prisma.report.findMany({
             where: { reportedByAccountId: accountId, groupId: group.id },
             orderBy: { createdAt: "desc" },
-            select: { id: true, subject: true, context: true, description: true, status: true, createdAt: true },
+            select: { id: true, subject: true, context: true, description: true, status: true, closureReason: true, createdAt: true },
           })
         : Promise.resolve([]),
       group
-        ? prisma.report.count({ where: { groupId: group.id, status: "open" } })
+        ? prisma.report.count({ where: { groupId: group.id, status: { in: ["open", "under_review", "findings_issued", "action_proposed"] } } })
         : Promise.resolve(0),
       group
         ? prisma.supportRequest.findMany({
@@ -1078,6 +1119,31 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       myReports,
       groupOpenConcernCount,
       myRequests,
+      coverageStatus: group ? await getCoverageStatus(prisma, group.id) : ("unavailable" as const),
+      reviewerRole: group
+        ? await prisma.role.findFirst({
+            where: { accountId, groupId: group.id, roleType: "reviewer", expiresAt: { gt: new Date() } },
+            select: { id: true },
+          })
+        : null,
+      reviewerQueue: group
+        ? await prisma.report.findMany({
+            where: {
+              groupId: group.id,
+              status: { in: ["open", "under_review", "findings_issued", "action_proposed"] },
+              reportedByAccountId: { not: accountId },
+            },
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              subject: true,
+              status: true,
+              createdAt: true,
+              findings: { select: { outcome: true, createdAt: true } },
+              actionProposals: { select: { proposedAction: true, status: true, iteration: true } },
+            },
+          })
+        : [],
     };
   } finally {
     await prisma.$disconnect();

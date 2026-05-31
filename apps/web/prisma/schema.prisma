@@ -200,8 +200,35 @@ enum ParticipationStatus {
 enum ReportStatus {
   open
   under_review
+  findings_issued
+  action_proposed
+  closed
+  // Legacy values preserved for backward compatibility
   resolved
   dismissed
+}
+
+enum ConcernFindingOutcome {
+  substantiated
+  partially_substantiated
+  unsubstantiated
+  insufficient_information
+  withdrawn
+}
+
+enum ConcernClosureReason {
+  reporter_withdrawal
+  review_complete_no_action
+  action_accepted_and_implemented
+  action_rejected_no_further_proposal
+  administrative_closure
+}
+
+enum ConcernProposalStatus {
+  pending
+  accepted
+  rejected
+  superseded
 }
 
 model Node {
@@ -275,6 +302,9 @@ model Account {
   availability        ContributorAvailability[]
   groupMemberships    GroupMembership[]
   reportsSubmitted    Report[]
+  concernReviews      ConcernReview[]
+  concernFindings     ConcernFinding[]
+  concernProposals    ConcernActionProposal[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -304,6 +334,9 @@ model Group {
   serviceOfferings GroupServiceOffering[]
   memberships      GroupMembership[]
   reports          Report[]
+  concernReviews   ConcernReview[]
+  concernFindings  ConcernFinding[]
+  concernProposals ConcernActionProposal[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -609,27 +642,87 @@ model Proposal {
 }
 
 model Report {
-  id                  String       @id @default(cuid())
+  id                  String                @id @default(cuid())
   reportedByAccountId String?
   guestAccessTokenId  String?
   groupId             String
   subject             String
   context             String?
   description         String
-  status              ReportStatus @default(open)
-  visibility          String       @default("private")
+  status              ReportStatus          @default(open)
+  visibility          String                @default("private")
+  closureReason       ConcernClosureReason?
+  closedAt            DateTime?
   resolvedAt          DateTime?
   resolvedNote        String?
-  createdAt           DateTime     @default(now())
+  createdAt           DateTime              @default(now())
 
-  reportedBy       Account?          @relation(fields: [reportedByAccountId], references: [id])
-  guestAccessToken GuestAccessToken? @relation(fields: [guestAccessTokenId], references: [id])
-  group            Group             @relation(fields: [groupId], references: [id])
+  reportedBy       Account?               @relation(fields: [reportedByAccountId], references: [id])
+  guestAccessToken GuestAccessToken?      @relation(fields: [guestAccessTokenId], references: [id])
+  group            Group                  @relation(fields: [groupId], references: [id])
+  reviews          ConcernReview[]
+  findings         ConcernFinding[]
+  actionProposals  ConcernActionProposal[]
 
   @@index([reportedByAccountId])
   @@index([guestAccessTokenId])
   @@index([groupId])
   @@index([status])
+}
+
+model ConcernReview {
+  id          String    @id @default(cuid())
+  reportId    String
+  reviewerId  String
+  groupId     String
+  notes       String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  report   Report  @relation(fields: [reportId], references: [id])
+  reviewer Account @relation(fields: [reviewerId], references: [id])
+  group    Group   @relation(fields: [groupId], references: [id])
+
+  @@index([reportId])
+  @@index([reviewerId])
+  @@index([groupId])
+}
+
+model ConcernFinding {
+  id         String                @id @default(cuid())
+  reportId   String
+  reviewerId String
+  groupId    String
+  outcome    ConcernFindingOutcome
+  summary    String
+  createdAt  DateTime              @default(now())
+
+  report   Report  @relation(fields: [reportId], references: [id])
+  reviewer Account @relation(fields: [reviewerId], references: [id])
+  group    Group   @relation(fields: [groupId], references: [id])
+
+  @@index([reportId])
+  @@index([reviewerId])
+}
+
+model ConcernActionProposal {
+  id             String                @id @default(cuid())
+  reportId       String
+  proposedById   String
+  groupId        String
+  proposedAction String
+  rationale      String
+  iteration      Int                   @default(1)
+  // Governance Decision layer connects here — deferred to future governance RFC
+  status         ConcernProposalStatus @default(pending)
+  createdAt      DateTime              @default(now())
+
+  report     Report  @relation(fields: [reportId], references: [id])
+  proposedBy Account @relation(fields: [proposedById], references: [id])
+  group      Group   @relation(fields: [groupId], references: [id])
+
+  @@index([reportId])
+  @@index([proposedById])
 }
 
 model Role {
