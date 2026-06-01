@@ -13,10 +13,5 @@
   },
   "devDependencies": {
     "turbo": "^2.6.1"
-  },
-  "dependencies": {
-    "date-fns": "^4.1.0",
-    "zod": "^4.1.12",
-    "zustand": "^5.0.8"
   }
 }

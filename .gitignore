@@ -129,6 +129,9 @@ dist
 # pnpm
 .pnpm-store
 
+# Turborepo
+.turbo/
+
 # yarn v3
 .pnp.*
 .yarn/*
