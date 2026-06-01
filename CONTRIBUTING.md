@@ -4,6 +4,24 @@ Commons contributions should strengthen cooperation, consent, privacy, auditabil
 
 Before proposing a major feature, read the [Commons Charter](docs/charter.md). Before implementing interface work, read the [Commons Experience Principles](docs/experience-principles.md).
 
+## Project Boundary
+
+This repository is independent.
+
+Do not import code, schemas, migrations, databases, or configuration from the other project.
+
+Any shared functionality must be explicitly copied or packaged.
+
+Before making schema, governance, roadmap, or implementation recommendations, verify which repository is currently open. Commons and Tribal Commons are independent projects. Similar concepts do not imply shared implementation.
+
+If this project identity conflicts with surrounding folder names, package names, database names, or prior context, stop and ask before proceeding.
+
+## Local Identity
+
+- Project folder: `C:\Users\Nico\commons`
+- Local database: `commons_local_dev`
+- Docker container name: `commons-postgres`
+
 ## Code Standards
 
 - Keep core behavior understandable before making it clever.
