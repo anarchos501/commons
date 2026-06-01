@@ -1,5 +1,6 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import { logAction } from "./action-log";
+import { endAssignmentsForMember } from "./responsibilities";
 
 const QUIET_THRESHOLD_DAYS = 90;
 const DORMANT_THRESHOLD_DAYS = 365;
@@ -30,7 +31,9 @@ export async function recordGroupPresence(
 
   if (!membership || membership.status !== "active") return;
 
-  // Reactivation: always immediate, bypasses the rate limit
+  // Reactivation: always immediate, bypasses the rate limit.
+  // RFC-004: returning to Active restores participation only.
+  // Responsibilities require re-volunteering — do not restore assignments here.
   if (membership.participationStatus !== "active") {
     await prisma.groupMembership.update({
       where: { accountId_groupId: { accountId, groupId } },
@@ -91,6 +94,7 @@ export async function applyParticipationTransitions(
       data: { participationStatus: "quiet" },
     });
     for (const m of toQuiet) {
+      await endAssignmentsForMember(prisma, m.id, "quiet");
       await logAction(prisma, {
         groupId,
         action: "participation.quieted",
@@ -121,6 +125,7 @@ export async function applyParticipationTransitions(
       data: { participationStatus: "dormant" },
     });
     for (const m of toDormant) {
+      await endAssignmentsForMember(prisma, m.id, "dormant");
       await logAction(prisma, {
         groupId,
         action: "participation.dormanted",

@@ -29,6 +29,7 @@ import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } fr
 import { logAction } from "../../lib/action-log";
 import { applyParticipationTransitions, recordGroupPresence } from "../../lib/participation";
 import { getCoverageStatus } from "../../lib/concerns";
+import { expireStaleAssignments, hasActiveEligibleAssignment } from "../../lib/responsibilities";
 
 export const dynamic = "force-dynamic";
 
@@ -995,6 +996,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
     if (groupId) {
       await recordGroupPresence(prisma, accountId, groupId);
       await applyParticipationTransitions(prisma, groupId);
+      await expireStaleAssignments(prisma, groupId);
     }
 
     const [account, group, memberships] = await Promise.all([
@@ -1121,11 +1123,14 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       myRequests,
       coverageStatus: group ? await getCoverageStatus(prisma, group.id) : ("unavailable" as const),
       reviewerRole: group
-        ? await prisma.role.findFirst({
-            where: { accountId, groupId: group.id, roleType: "reviewer", expiresAt: { gt: new Date() } },
-            select: { id: true },
-          })
-        : null,
+        ? await (async () => {
+            const m = await prisma.groupMembership.findUnique({
+              where: { accountId_groupId: { accountId, groupId: group.id } },
+              select: { id: true },
+            });
+            return m ? await hasActiveEligibleAssignment(prisma, m.id, "reviewer") : false;
+          })()
+        : false,
       reviewerQueue: group
         ? await prisma.report.findMany({
             where: {

@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { createSignedEventRecord } from "../src/lib/signed-events";
 import { defaultReplicationPolicies } from "../src/lib/replication-policies";
+import { createAssignment } from "../src/lib/responsibilities";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -24,7 +25,7 @@ async function main() {
       pluginPolicy: "disabled",
       constitutionalPreferences: {
         supportRequestRetentionDays: 30,
-        rolesMustExpire: true,
+        responsibilitiesMustExpire: true,
         pluginsCannotExposeRecipientIdentities: true,
       },
     },
@@ -36,7 +37,7 @@ async function main() {
       pluginPolicy: "disabled",
       constitutionalPreferences: {
         supportRequestRetentionDays: 30,
-        rolesMustExpire: true,
+        responsibilitiesMustExpire: true,
         pluginsCannotExposeRecipientIdentities: true,
       },
     },
@@ -459,28 +460,13 @@ async function main() {
     },
   });
 
-  await prisma.role.upsert({
-    where: { id: "role_zora_translation_coordinator" },
-    update: {
-      accountId: zora.id,
-      roleType: "translation coordinator",
-      permissions: ["coordinate.translation", "view.translation_project"],
-      groupId: group.id,
-      projectId: translationProject.id,
-      expiresAt: new Date("2026-06-26T12:00:00.000Z"),
-      recallPolicy: "proposal",
-    },
-    create: {
-      id: "role_zora_translation_coordinator",
-      accountId: zora.id,
-      roleType: "translation coordinator",
-      permissions: ["coordinate.translation", "view.translation_project"],
-      groupId: group.id,
-      projectId: translationProject.id,
-      expiresAt: new Date("2026-06-26T12:00:00.000Z"),
-      recallPolicy: "proposal",
-    },
+  // Seed Alice as reviewer for Gotham Mutual Aid (post-confirmation primitive).
+  // createAssignment is idempotent per membership+type — safe to re-run.
+  const aliceGothamMembership = await prisma.groupMembership.findUniqueOrThrow({
+    where: { accountId_groupId: { accountId: alice.id, groupId: group.id } },
+    select: { id: true },
   });
+  await createAssignment(prisma, aliceGothamMembership.id, "reviewer");
 
   await prisma.governancePreference.upsert({
     where: { id: "pref_group_support_retention" },

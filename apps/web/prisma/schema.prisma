@@ -104,10 +104,12 @@ enum ProposalStatus {
   implemented
 }
 
-enum RoleRecallPolicy {
-  proposal
-  consent
-  emergency
+enum AssignmentEndReason {
+  expired
+  quiet
+  dormant
+  recall
+  resigned
 }
 
 enum GovernanceScope {
@@ -289,13 +291,12 @@ model Account {
   portableIdentity PortableIdentity? @relation(fields: [portableIdentityId], references: [id])
   homeNode         Node              @relation(fields: [homeNodeId], references: [id])
 
-  serviceCapabilities ServiceCapability[]
-  supportRequests     SupportRequest[]
-  offers              Offer[]
-  contributions       Contribution[]
-  proposals           Proposal[]
-  roles               Role[]
-  actionLogs          ActionLog[]
+  serviceCapabilities       ServiceCapability[]
+  supportRequests           SupportRequest[]
+  offers                    Offer[]
+  contributions             Contribution[]
+  proposals                 Proposal[]
+  actionLogs                ActionLog[]
   signedEvents        SignedEvent[]
   localSyncStates     LocalSyncState[]
   requestRoutes       RequestRoute[]
@@ -328,7 +329,7 @@ model Group {
   offers           Offer[]
   contributions    Contribution[]
   proposals        Proposal[]
-  roles            Role[]
+  responsibilities Responsibility[]
   actionLogs       ActionLog[]
   signedEvents     SignedEvent[]
   serviceOfferings GroupServiceOffering[]
@@ -351,8 +352,9 @@ model GroupMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account                  Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group                    Group                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  responsibilityAssignments ResponsibilityAssignment[]
 
   @@unique([accountId, groupId])
   @@index([accountId])
@@ -394,7 +396,6 @@ model Project {
   offers           Offer[]
   contributions    Contribution[]
   proposals        Proposal[]
-  roles            Role[]
   actionLogs       ActionLog[]
   signedEvents     SignedEvent[]
 
@@ -725,25 +726,43 @@ model ConcernActionProposal {
   @@index([proposedById])
 }
 
-model Role {
-  id           String           @id @default(cuid())
-  accountId    String
-  roleType     String
-  permissions  Json
-  groupId      String?
-  projectId    String?
-  startsAt     DateTime         @default(now())
-  expiresAt    DateTime
-  recallPolicy RoleRecallPolicy @default(proposal)
-  createdAt    DateTime         @default(now())
+model Responsibility {
+  // first-class built-in: "reviewer" (platform understands this type)
+  // all other values are custom responsibility types created by group governance
+  // Custom responsibilities are the expected long-term coordination mechanism;
+  // reviewer is first-class only because the accountability system requires
+  // platform-level reviewer behavior.
+  id        String   @id @default(cuid())
+  groupId   String
+  type      String
+  termDays  Int      @default(365)
+  createdAt DateTime @default(now())
 
-  account Account  @relation(fields: [accountId], references: [id])
-  group   Group?   @relation(fields: [groupId], references: [id])
-  project Project? @relation(fields: [projectId], references: [id])
+  group       Group                     @relation(fields: [groupId], references: [id])
+  assignments ResponsibilityAssignment[]
 
-  @@index([accountId])
+  @@unique([groupId, type])
   @@index([groupId])
-  @@index([projectId])
+  @@index([type])
+}
+
+model ResponsibilityAssignment {
+  id               String               @id @default(cuid())
+  responsibilityId String
+  // FK to GroupMembership — responsibilities are group-scoped, not account-scoped.
+  // A member can be Active in Group A and Quiet in Group B simultaneously.
+  membershipId     String
+  startedAt        DateTime             @default(now())
+  expiresAt        DateTime             // derived from Responsibility.termDays at assignment time
+  endedAt          DateTime?
+  endReason        AssignmentEndReason?
+  createdAt        DateTime             @default(now())
+
+  responsibility Responsibility  @relation(fields: [responsibilityId], references: [id])
+  membership     GroupMembership @relation(fields: [membershipId], references: [id])
+
+  @@index([responsibilityId])
+  @@index([membershipId])
   @@index([expiresAt])
 }
 

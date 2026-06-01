@@ -377,9 +377,7 @@ Administrative Closure must:
 * preserve concern history
 * preserve review history
 
-Administrative Closure may not be invoked unilaterally by an eligible reviewer.
-
-Administrative Closure requires a designated coordinator responsibility and remains subject to future accountability review.
+Administrative Closure is performed by the holder of the Reviewer responsibility. The coordinator role type was removed in RFC-004; administrative closure authority was unified under reviewer (see RFC-004: Responsibilities, Recall, and Coverage). Administrative Closure remains subject to future accountability review.
 
 Administrative Closure is not a substitute for ordinary concern review.
 

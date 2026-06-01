@@ -12,7 +12,7 @@ test.after(async () => {
 // --- isEligibleReviewer ---
 
 test("isEligibleReviewer returns true for active member with reviewer role", async () => {
-  const { account, group, reviewerAccount, report, role } = await createFixture("cer_eligible");
+  const { account, group, reviewerAccount, report } = await createFixture("cer_eligible");
   try {
     const eligible = await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id);
     assert.equal(eligible, true);
@@ -52,7 +52,7 @@ test("isEligibleReviewer returns false when reviewer is the reporter", async () 
 });
 
 test("isEligibleReviewer returns false when participation is not active", async () => {
-  const { account, group, reviewerAccount, report, role } = await createFixture("cer_quiet");
+  const { account, group, reviewerAccount, report } = await createFixture("cer_quiet");
   try {
     await prisma.groupMembership.updateMany({
       where: { accountId: reviewerAccount.id, groupId: group.id },
@@ -66,7 +66,7 @@ test("isEligibleReviewer returns false when participation is not active", async 
 });
 
 test("filing an unrelated concern against a reviewer does not disable them globally", async () => {
-  const { account, group, reviewerAccount, report, role } = await createFixture("cer_unrelated");
+  const { account, group, reviewerAccount, report } = await createFixture("cer_unrelated");
   try {
     // File a concern against the reviewer (a different concern)
     const unrelatedReport = await prisma.report.create({
@@ -95,11 +95,18 @@ test("getCoverageStatus returns available when eligible reviewer exists", async 
   }
 });
 
-test("getCoverageStatus returns unavailable when no reviewer role exists", async () => {
-  const { group } = await createFixture("ccs_unavail");
+test("getCoverageStatus returns unavailable when no reviewer assignment exists", async () => {
+  const { group, reviewerAccount } = await createFixture("ccs_unavail");
   try {
-    // Fixture creates a reviewer, delete the role to simulate no coverage
-    await prisma.role.deleteMany({ where: { groupId: group.id, roleType: "reviewer" } });
+    // End all assignments for the reviewer to simulate no coverage
+    const membership = await prisma.groupMembership.findFirstOrThrow({
+      where: { accountId: reviewerAccount.id, groupId: group.id },
+      select: { id: true },
+    });
+    await prisma.responsibilityAssignment.updateMany({
+      where: { membershipId: membership.id },
+      data: { endedAt: new Date(), endReason: "resigned" },
+    });
     const status = await getCoverageStatus(prisma, group.id);
     assert.equal(status, "unavailable");
   } finally {
@@ -282,12 +289,13 @@ test("closeConcern allows reporter_withdrawal even when actionable finding exist
   }
 });
 
-test("administrative_closure rejected without coordinator role", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cc_admin_reject");
+test("administrative_closure rejected without reviewer authority", async () => {
+  const { account, group, report } = await createFixture("cc_admin_reject");
   try {
+    // account is the reporter (no reviewer assignment) — cannot do admin closure
     await assert.rejects(
-      () => closeConcern(prisma, reviewerAccount.id, group.id, report.id, "administrative_closure"),
-      /coordinator authority/i,
+      () => closeConcern(prisma, account.id, group.id, report.id, "administrative_closure"),
+      /reviewer authority/i,
     );
   } finally {
     await cleanupFixture("cc_admin_reject");
@@ -373,21 +381,23 @@ async function createFixture(prefix: string) {
     data: { id: `${prefix}_reviewer`, homeNodeId: node.id, displayName: `Reviewer ${prefix}`, accountType: "member", profileVisibility: "private" },
   });
 
-  await prisma.groupMembership.createMany({
-    data: [
-      { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
-      { accountId: reviewerAccount.id, groupId: group.id, status: "active", participationStatus: "active" },
-    ],
-  });
+  const [reporterMembership, reviewerMembership] = await Promise.all([
+    prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+    }),
+    prisma.groupMembership.create({
+      data: { accountId: reviewerAccount.id, groupId: group.id, status: "active", participationStatus: "active" },
+    }),
+  ]);
 
-  const role = await prisma.role.create({
+  const responsibility = await prisma.responsibility.create({
+    data: { groupId: group.id, type: "reviewer" },
+  });
+  const assignment = await prisma.responsibilityAssignment.create({
     data: {
-      accountId: reviewerAccount.id,
-      groupId: group.id,
-      roleType: "reviewer",
-      permissions: {},
+      responsibilityId: responsibility.id,
+      membershipId: reviewerMembership.id,
       expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      recallPolicy: "proposal",
     },
   });
 
@@ -395,7 +405,7 @@ async function createFixture(prefix: string) {
     data: { reportedByAccountId: account.id, groupId: group.id, subject: `Test concern ${prefix}`, description: "Something needs review." },
   });
 
-  return { node, group, account, reviewerAccount, report, role };
+  return { node, group, account, reviewerAccount, report, responsibility, assignment };
 }
 
 async function cleanupFixture(prefix: string) {
@@ -406,7 +416,10 @@ async function cleanupFixture(prefix: string) {
   await prisma.concernFinding.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.concernReview.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.report.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.role.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.responsibilityAssignment.deleteMany({
+    where: { membership: { groupId: { startsWith: prefix } } },
+  });
+  await prisma.responsibility.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });

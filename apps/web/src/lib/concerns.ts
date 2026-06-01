@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { ConcernClosureReason, ConcernFindingOutcome } from "../generated/prisma/enums";
 import { logAction } from "./action-log";
+import { getResponsibilityCoverage, hasActiveEligibleAssignment } from "./responsibilities";
 
 const ACTIONABLE_OUTCOMES: ConcernFindingOutcome[] = ["substantiated", "partially_substantiated"];
 
@@ -24,18 +25,10 @@ export async function isEligibleReviewer(
   groupId: string,
   reportId: string,
 ): Promise<boolean> {
-  const [membership, reviewerRole, report] = await Promise.all([
+  const [membership, report] = await Promise.all([
     prisma.groupMembership.findUnique({
       where: { accountId_groupId: { accountId, groupId } },
-      select: { status: true, participationStatus: true },
-    }),
-    prisma.role.findFirst({
-      where: {
-        accountId,
-        groupId,
-        roleType: "reviewer",
-        expiresAt: { gt: new Date() },
-      },
+      select: { id: true, status: true, participationStatus: true },
     }),
     prisma.report.findUnique({
       where: { id: reportId },
@@ -48,8 +41,9 @@ export async function isEligibleReviewer(
     return false;
   }
 
-  // Condition 2: Holds an unexpired reviewer role in this group
-  if (!reviewerRole) return false;
+  // Condition 2: Holds an active eligible reviewer assignment in this group
+  const hasReviewer = await hasActiveEligibleAssignment(prisma, membership.id, "reviewer");
+  if (!hasReviewer) return false;
 
   // Condition 3: No direct involvement in this specific concern
   if (!report) return false;
@@ -72,24 +66,8 @@ export async function getCoverageStatus(
   prisma: PrismaClient,
   groupId: string,
 ): Promise<"available" | "unavailable"> {
-  const eligible = await prisma.groupMembership.findFirst({
-    where: {
-      groupId,
-      status: "active",
-      participationStatus: "active",
-      account: {
-        roles: {
-          some: {
-            groupId,
-            roleType: "reviewer",
-            expiresAt: { gt: new Date() },
-          },
-        },
-      },
-    },
-  });
-
-  return eligible ? "available" : "unavailable";
+  const coverage = await getResponsibilityCoverage(prisma, groupId, "reviewer");
+  return coverage === "covered" ? "available" : "unavailable";
 }
 
 /**
@@ -235,7 +213,7 @@ export async function proposeAction(
 
 /**
  * Closes a concern with a recorded reason. Enforces two guardrails:
- * 1. Administrative closure requires coordinator authority.
+ * 1. Administrative closure requires reviewer authority (RFC-004).
  * 2. When actionable findings exist, only specific closure reasons are permitted.
  *
  * Note: reporter_withdrawal closes the concern immediately and blocks further
@@ -258,18 +236,15 @@ export async function closeConcern(
   if (report.groupId !== groupId) throw new Error("Concern does not belong to this group.");
   if (report.status === "closed") throw new Error("Concern is already closed.");
 
-  // Administrative closure requires coordinator authority
+  // Administrative closure requires reviewer authority (RFC-004)
   if (reason === "administrative_closure") {
-    const coordinatorRole = await prisma.role.findFirst({
-      where: {
-        accountId: actorId,
-        groupId,
-        roleType: "coordinator",
-        expiresAt: { gt: new Date() },
-      },
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: actorId, groupId } },
+      select: { id: true },
     });
-    if (!coordinatorRole) {
-      throw new Error("Administrative closure requires coordinator authority.");
+    const hasReviewer = membership ? await hasActiveEligibleAssignment(prisma, membership.id, "reviewer") : false;
+    if (!hasReviewer) {
+      throw new Error("Administrative closure requires reviewer authority.");
     }
   } else if (reason === "reporter_withdrawal") {
     // Reporter may close their own concern
