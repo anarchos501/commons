@@ -11,7 +11,7 @@ test.after(async () => {
 
 // --- isEligibleReviewer ---
 
-test("isEligibleReviewer returns true for active member with reviewer role", async () => {
+test("isEligibleReviewer returns true for active member with reviewer responsibility", async () => {
   const { account, group, reviewerAccount, report } = await createFixture("cer_eligible");
   try {
     const eligible = await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id);
@@ -21,7 +21,7 @@ test("isEligibleReviewer returns true for active member with reviewer role", asy
   }
 });
 
-test("isEligibleReviewer returns false when member lacks reviewer role", async () => {
+test("isEligibleReviewer returns false when member lacks reviewer responsibility", async () => {
   const { account, group, report } = await createFixture("cer_norole");
   try {
     const member = await prisma.account.create({

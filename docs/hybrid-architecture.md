@@ -4,9 +4,9 @@ Commons uses a split-by-data-class authority model. Community nodes are the firs
 
 ## Authority Boundaries
 
-Community nodes are authoritative for shared coordination records: groups, projects, proposals, accepted contribution summaries, scoped trust approvals, roles, governance preferences, action logs, and community memory.
+Community nodes are authoritative for shared coordination records: groups, projects, proposals, accepted contribution summaries, scoped trust approvals, responsibilities, governance preferences, action logs, and community memory.
 
-Groups are authoritative for group rules within node constitutional limits: membership policy, thresholds, trust rules, role duration, contribution visibility, retention defaults, and privacy preferences.
+Groups are authoritative for group rules within node constitutional limits: membership policy, thresholds, trust rules, responsibility terms, contribution visibility, retention defaults, and privacy preferences.
 
 Portable identities are authoritative for continuity: DIDs, public signing keys, linked node presences, migration proofs, and export/import continuity metadata.
 
@@ -26,7 +26,7 @@ Sensitive support data should not be broadly replicated. Raw support details, pr
 
 ## Local-First Behavior
 
-Offline users may draft support requests, offers, and contribution logs; view cached groups, projects, and role information; and queue submissions for later sync.
+Offline users may draft support requests, offers, and contribution logs; view cached groups, projects, and responsibility information; and queue submissions for later sync.
 
 Sync should convert local drafts into node records only after user confirmation, privacy-envelope checks, group rules, and constitutional constraints. When a sync conflict occurs, Commons should prefer a review state over silent overwrite. Sensitive records should prefer not syncing over unsafe merge.
 
@@ -34,7 +34,7 @@ Sync should convert local drafts into node records only after user confirmation,
 
 Commons is federation-first, not pure P2P-first. Federation is for node-to-node community coordination, migration, linked presence, and portable identity continuity. P2P may later support emergency resilience, encrypted handoff, or node-outage continuity among trusted participants.
 
-Governance, trust approvals, proposal history, role grants, and contribution memory should remain node-mediated for accountability. P2P should not become a way to bypass privacy envelopes, constitutional preferences, retention rules, or plugin constraints.
+Governance, trust approvals, proposal history, responsibility assignments, and contribution memory should remain node-mediated for accountability. P2P should not become a way to bypass privacy envelopes, constitutional preferences, retention rules, or plugin constraints.
 
 ## Signed Events
 

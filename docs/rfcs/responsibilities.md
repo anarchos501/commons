@@ -198,9 +198,9 @@ Holding the reviewer responsibility does not automatically make someone eligible
 
 Eligibility is concern-scoped. Filing an unrelated concern against a reviewer does not globally disable them.
 
-### Coordinator Type Removed
+### Legacy Coordinator Value Removed
 
-The previous `coordinator` role type that gated administrative closure has been removed. Administrative closure now belongs to reviewer responsibility, consistent with the principle that reviewer is the coordination function for the accountability system. No coordinator type exists anywhere in the codebase.
+The previous `coordinator` value that gated administrative closure has been removed. Administrative closure now belongs to reviewer responsibility, consistent with the principle that reviewer is the coordination function for the accountability system. No coordinator value exists anywhere in the current runtime codebase.
 
 ---
 
@@ -238,7 +238,7 @@ AssignmentEndReason (enum)
 
 **Implemented:**
 - `Responsibility` + `ResponsibilityAssignment` schema
-- Migration from `Role` model (reviewer migrated; coordinator removed)
+- Migration from legacy `Role` data (reviewer migrated; coordinator removed)
 - Multi-holder support
 - Term expiration (`expireStaleAssignments`)
 - Quiet/Dormant assignment ending

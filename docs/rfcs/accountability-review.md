@@ -174,8 +174,9 @@ Every closure requires a recorded reason.
 
 An eligible reviewer must satisfy all of the following:
 
+* Active Membership Status
 * Active Participation Status
-* Reviewer Responsibility
+* Unended, unexpired Reviewer Responsibility assignment
 * No Direct Involvement
 * No Active Conflict
 
@@ -200,7 +201,7 @@ Reviewers gather information, evaluate evidence, and document findings.
 
 Reviewers do not unilaterally impose consequences.
 
-Their role is investigative and facilitative.
+Their responsibility is investigative and facilitative.
 
 Reviewer conclusions are recommendations, not verdicts.
 
@@ -377,7 +378,7 @@ Administrative Closure must:
 * preserve concern history
 * preserve review history
 
-Administrative Closure is performed by the holder of the Reviewer responsibility. The coordinator role type was removed in RFC-004; administrative closure authority was unified under reviewer (see RFC-004: Responsibilities, Recall, and Coverage). Administrative Closure remains subject to future accountability review.
+Administrative Closure is performed by the holder of the Reviewer responsibility. RFC-004 removed the legacy `coordinator` value and unified administrative closure authority under reviewer responsibility (see RFC-004: Responsibilities, Recall, and Coverage). Administrative Closure remains subject to future accountability review.
 
 Administrative Closure is not a substitute for ordinary concern review.
 

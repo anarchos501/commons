@@ -500,7 +500,7 @@ RFC-001, RFC-002, and RFC-003 form the constitutional foundation for Commons' mu
 
 RFC-001: Participation Status defines who is considered an active participant.
 
-RFC-002: Accountability Review defines what happens when something goes wrong.
+RFC-002: Accountability Review defines what happens when something goes wrong. Review availability depends on eligible reviewers as defined by RFC-004: active members with active participation and an unended, unexpired Reviewer Responsibility assignment.
 
 RFC-003: Mutual Aid Lifecycle defines how mutual aid moves from need → assistance → accountability → privacy-preserving history.
 
@@ -510,7 +510,7 @@ RFC-003: Mutual Aid Lifecycle defines how mutual aid moves from need → assista
 
 This RFC intentionally does not define:
 
-* reviewer selection
+* reviewer responsibility assignment and selection
 * trust scoring
 * governance penalties
 * proposal thresholds

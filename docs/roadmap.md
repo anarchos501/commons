@@ -13,7 +13,7 @@ Near-term work should make that loop usable on one healthy local node before add
 
 ## Phase 1
 
-Core models: Node, Account, PortableIdentity, Group, Project, ServiceCapability, TrustedServiceCapability, Contribution, SupportRequest, Offer, Proposal, Responsibility, ResponsibilityAssignment, GovernancePreference, and PrivacyEnvelope. (Role was replaced by Responsibility + ResponsibilityAssignment in RFC-004.)
+Core models: Node, Account, PortableIdentity, Group, Project, ServiceCapability, TrustedServiceCapability, Contribution, SupportRequest, Offer, Proposal, Responsibility, ResponsibilityAssignment, GovernancePreference, and PrivacyEnvelope.
 
 ## Phase 2
 

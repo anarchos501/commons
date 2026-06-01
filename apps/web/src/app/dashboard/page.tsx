@@ -518,7 +518,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </p>
               ) : null}
 
-              {data.reviewerRole && data.reviewerQueue.length > 0 ? (
+              {data.reviewerResponsibility && data.reviewerQueue.length > 0 ? (
                 <div className="mb-5 space-y-3">
                   <p className="text-xs font-medium text-[var(--muted)]">Reviewer queue</p>
                   {data.reviewerQueue.map((concern) => (
@@ -1122,7 +1122,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       groupOpenConcernCount,
       myRequests,
       coverageStatus: group ? await getCoverageStatus(prisma, group.id) : ("unavailable" as const),
-      reviewerRole: group
+      reviewerResponsibility: group
         ? await (async () => {
             const m = await prisma.groupMembership.findUnique({
               where: { accountId_groupId: { accountId, groupId: group.id } },

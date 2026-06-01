@@ -173,7 +173,7 @@ Quiet members:
 * Are excluded from capability routing
 * Have contribution offers marked inactive
 * Have service availability marked inactive
-* Have operational responsibilities marked inactive
+* Have responsibility assignments ended under RFC-004
 
 The purpose of Quiet status is not to reduce influence.
 
@@ -200,7 +200,7 @@ However they no longer:
 * Count toward participation-based calculations
 * Participate in capability routing
 * Hold active contribution offers
-* Hold active operational responsibilities
+* Hold active responsibility assignments
 
 Dormancy is not punishment.
 
@@ -250,6 +250,8 @@ Occurs immediately upon visiting the group.
 
 Commons should assume good faith and welcome returning participants without friction.
 
+Returning to Active restores participation status only. It does not restore prior responsibility assignments. A returning member must volunteer again under the responsibility process defined in RFC-004.
+
 ---
 
 # Operational Availability
@@ -272,7 +274,7 @@ Commons should not advertise support that may no longer be available.
 
 ## Responsibilities
 
-Their responsibilities become operationally inactive.
+Their responsibility assignments end.
 
 The community should not assume they can:
 
@@ -283,13 +285,15 @@ The community should not assume they can:
 
 Historical records remain visible.
 
-Only operational assumptions change.
+Only the active assignment ends. Historical responsibility records remain visible, and returning to Active does not restore the prior assignment.
 
 ## Responsibility Coverage
 
-When members become Quiet, operational responsibilities may lose active coverage.
+When members become Quiet, responsibility coverage may fail.
 
-Commons intentionally prioritizes accurate availability assumptions over preserving responsibility assignments.
+RFC-004 defines coverage as a derived value. A responsibility is covered only when at least one active participant holds an unended, unexpired assignment for that responsibility.
+
+Commons intentionally prioritizes accurate availability assumptions over preserving active responsibility assignments.
 
 Future responsibility-management policies may provide:
 

@@ -53,7 +53,7 @@ The coordination layer is the app people use to organize work:
 - projects
 - proposals
 - contributions
-- temporary roles
+- temporary responsibilities
 - request routing
 - trust workflows
 
@@ -69,7 +69,7 @@ The constitutional layer prevents coordination from becoming coercive:
 - retention rules
 - replication policies
 - visibility rules
-- role expiration
+- responsibility expiration
 - constitutional constraints
 
 This layer should keep power visible, scoped, revocable, and understandable.

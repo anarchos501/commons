@@ -34,7 +34,7 @@ test("reporter can query their own report by accountId", async () => {
         reportedByAccountId: account.id,
         groupId: group.id,
         subject: "Availability mismatch",
-        description: "Coordinator did not respond within the expected window.",
+        description: "Assigned reviewer did not respond within the expected window.",
         context: "This was an urgent request.",
       },
     });
