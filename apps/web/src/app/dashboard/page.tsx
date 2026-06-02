@@ -1015,7 +1015,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
     const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount, myRequests] = await Promise.all([
-      group ? prisma.project.findMany({ where: { groupId: group.id, status: "active" }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+      group ? prisma.project.findMany({ where: { groupId: group.id, status: "active", archivedAt: null }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: {
           contributorAccountId: accountId,

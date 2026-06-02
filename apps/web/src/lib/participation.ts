@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import { endAssignmentsForMember } from "./responsibilities";
+import { applyGroupDormancyToProjectMemberships } from "./project-membership";
 
 const QUIET_THRESHOLD_DAYS = 90;
 const DORMANT_THRESHOLD_DAYS = 365;
@@ -134,6 +135,8 @@ export async function applyParticipationTransitions(
         metadata: { previousStatus: "quiet", thresholdDays: DORMANT_THRESHOLD_DAYS },
       });
     }
+    // RFC-005: remove project memberships for members now dormant in all host groups
+    await applyGroupDormancyToProjectMemberships(prisma, groupId, toDormant.map((m) => m.accountId));
   }
 }
 

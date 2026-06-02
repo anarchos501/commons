@@ -468,6 +468,31 @@ async function main() {
   });
   await createAssignment(prisma, aliceGothamMembership.id, "reviewer");
 
+  // Seed ProjectHosting rows (one per project — Gotham Mutual Aid is the founding host).
+  for (const [projectId, projectRef] of [
+    ["project_rides", ridesProject.id],
+    ["project_food_distribution", foodProject.id],
+    ["project_translation_support", translationProject.id],
+  ] as const) {
+    await prisma.projectHosting.upsert({
+      where: { projectId_groupId: { projectId: projectRef, groupId: group.id } },
+      update: {},
+      create: { projectId: projectRef, groupId: group.id },
+    });
+  }
+
+  // Seed Alice as an active member of the Rides project.
+  await prisma.projectMembership.upsert({
+    where: { accountId_projectId: { accountId: alice.id, projectId: ridesProject.id } },
+    update: { status: "active" },
+    create: {
+      id: "pm_alice_rides",
+      accountId: alice.id,
+      projectId: ridesProject.id,
+      status: "active",
+    },
+  });
+
   await prisma.governancePreference.upsert({
     where: { id: "pref_group_support_retention" },
     update: {

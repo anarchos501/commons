@@ -44,10 +44,11 @@ enum PluginPolicy {
 }
 
 enum ProjectStatus {
-  active
-  paused
-  completed
-  archived
+  active    // at least one active project member
+  quiet     // no active members; at least one quiet member remains
+  dormant   // no project members remain; at least one host group remains
+  completed // mission intentionally fulfilled by project members
+  closed    // automatic: no members AND no host groups
 }
 
 enum TrustRequirement {
@@ -302,6 +303,7 @@ model Account {
   requestRoutes       RequestRoute[]
   availability        ContributorAvailability[]
   groupMemberships    GroupMembership[]
+  projectMemberships  ProjectMembership[]
   reportsSubmitted    Report[]
   concernReviews      ConcernReview[]
   concernFindings     ConcernFinding[]
@@ -324,6 +326,7 @@ model Group {
 
   node             Node                       @relation(fields: [nodeId], references: [id])
   projects         Project[]
+  hostedProjects   ProjectHosting[]
   trustApprovals   TrustedServiceCapability[]
   supportRequests  SupportRequest[]
   offers           Offer[]
@@ -382,15 +385,20 @@ model GroupServiceOffering {
 
 model Project {
   id                    String        @id @default(cuid())
-  groupId               String
+  groupId               String        // founding/primary host group (kept for backward compat)
   name                  String
   description           String?
   status                ProjectStatus @default(active)
+  membershipPolicy      String        @default("petition") // petition = requires approval workflow
   governancePreferences Json?
   privacyPreferences    Json?
+  archivedAt            DateTime?     // visibility flag: archived ≠ closed/completed
+  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
   createdAt             DateTime      @default(now())
 
   group            Group                  @relation(fields: [groupId], references: [id])
+  hostings         ProjectHosting[]
+  memberships      ProjectMembership[]
   serviceOfferings GroupServiceOffering[]
   supportRequests  SupportRequest[]
   offers           Offer[]
@@ -402,6 +410,39 @@ model Project {
   @@unique([groupId, name])
   @@index([groupId])
   @@index([status])
+  @@index([archivedAt])
+}
+
+model ProjectHosting {
+  id        String   @id @default(cuid())
+  projectId String
+  groupId   String
+  hostedAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+  group   Group   @relation(fields: [groupId], references: [id])
+
+  @@unique([projectId, groupId])
+  @@index([projectId])
+  @@index([groupId])
+}
+
+model ProjectMembership {
+  id                  String              @id @default(cuid())
+  accountId           String
+  projectId           String
+  joinedAt            DateTime            @default(now())
+  status              MembershipStatus    @default(active)
+  participationStatus ParticipationStatus @default(active)
+  lastSeenAt          DateTime?
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, projectId])
+  @@index([accountId])
+  @@index([projectId])
+  @@index([projectId, participationStatus])
 }
 
 model ServiceCapability {
