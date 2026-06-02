@@ -31,6 +31,9 @@ UPDATE "Project" SET "status" = 'dormant', "archivedAt" = CURRENT_TIMESTAMP
 -- active and completed remain unchanged.
 
 -- Step 4: Remove old enum values by recreating the type.
+-- Must drop the column default first — PostgreSQL cannot auto-cast the default value.
+ALTER TABLE "Project" ALTER COLUMN "status" DROP DEFAULT;
+
 CREATE TYPE "ProjectStatus_new" AS ENUM ('active', 'quiet', 'dormant', 'completed', 'closed');
 
 ALTER TABLE "Project" ALTER COLUMN "status" TYPE "ProjectStatus_new"
@@ -38,6 +41,9 @@ ALTER TABLE "Project" ALTER COLUMN "status" TYPE "ProjectStatus_new"
 
 DROP TYPE "ProjectStatus";
 ALTER TYPE "ProjectStatus_new" RENAME TO "ProjectStatus";
+
+-- Restore the default after the type replacement.
+ALTER TABLE "Project" ALTER COLUMN "status" SET DEFAULT 'active';
 
 -- Step 5: Add membershipPolicy column and archivedAt index.
 ALTER TABLE "Project" ADD COLUMN "membershipPolicy" TEXT NOT NULL DEFAULT 'petition';

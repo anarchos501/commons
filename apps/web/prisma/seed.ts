@@ -4,6 +4,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { createSignedEventRecord } from "../src/lib/signed-events";
 import { defaultReplicationPolicies } from "../src/lib/replication-policies";
 import { createAssignment } from "../src/lib/responsibilities";
+import { grantAbility } from "../src/lib/responsibility-abilities";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -467,6 +468,19 @@ async function main() {
     select: { id: true },
   });
   await createAssignment(prisma, aliceGothamMembership.id, "reviewer");
+
+  // Seed reviewer accountability abilities (idempotent — grantAbility upserts).
+  const reviewerResponsibility = await prisma.responsibility.findUniqueOrThrow({
+    where: { groupId_type: { groupId: group.id, type: "reviewer" } },
+  });
+  for (const ability of [
+    "review_concerns",
+    "issue_findings",
+    "issue_action_proposals",
+    "administrative_closure",
+  ] as const) {
+    await grantAbility(prisma, reviewerResponsibility.id, ability);
+  }
 
   // Seed ProjectHosting rows (one per project — Gotham Mutual Aid is the founding host).
   for (const [projectId, projectRef] of [

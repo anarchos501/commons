@@ -113,6 +113,29 @@ enum AssignmentEndReason {
   resigned
 }
 
+enum CoordinationAbility {
+  // Communication — D3 implements the models; abilities recorded now
+  create_bulletins
+  create_publications
+  create_publication_entries
+  // Coordination
+  create_projects
+  issue_support_requests
+  issue_contribution_offers
+  approve_membership
+  // Accountability — in enum for completeness; NOT wired into platform behavior in D2.
+  // Reviewer checks continue using hasActiveEligibleAssignment (see concerns.ts).
+  review_concerns
+  issue_findings
+  issue_action_proposals
+  administrative_closure
+}
+
+enum AbilityAvailability {
+  always_available
+  available_during_emergency // activation mechanics deferred to Governance RFC
+}
+
 enum GovernanceScope {
   node
   group
@@ -781,6 +804,7 @@ model Responsibility {
 
   group       Group                     @relation(fields: [groupId], references: [id])
   assignments ResponsibilityAssignment[]
+  abilities   ResponsibilityAbility[]
 
   @@unique([groupId, type])
   @@index([groupId])
@@ -805,6 +829,19 @@ model ResponsibilityAssignment {
   @@index([responsibilityId])
   @@index([membershipId])
   @@index([expiresAt])
+}
+
+model ResponsibilityAbility {
+  id               String              @id @default(cuid())
+  responsibilityId String
+  ability          CoordinationAbility
+  availability     AbilityAvailability @default(always_available)
+  createdAt        DateTime            @default(now())
+
+  responsibility Responsibility @relation(fields: [responsibilityId], references: [id])
+
+  @@unique([responsibilityId, ability])
+  @@index([responsibilityId])
 }
 
 model GovernancePreference {
