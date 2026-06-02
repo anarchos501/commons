@@ -3,6 +3,8 @@
 // Adding entries never creates a new Publication -- only new PublicationEntry records.
 import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
+import { openPetition, requireApprovedPetition } from "./petitions";
+import { assertSpaceBelongsToGroup } from "./governance-ownership";
 
 /**
  * Creates a Publication in the given Coordination Space.
@@ -86,6 +88,91 @@ export async function listPublications(
       ...(opts.includeArchived ? {} : { archivedAt: null }),
     },
     orderBy: { createdAt: "desc" },
+  });
+}
+
+// --- RFC-006: Governance wrappers ---
+
+/**
+ * Opens a governance petition to archive a Publication.
+ * Direct path (archivePublication) remains valid for seed/admin use.
+ * Fix 3: verifies the publication's space belongs to groupId.
+ */
+export async function openPublicationArchivalPetition(
+  prisma: PrismaClient,
+  opts: { publicationId: string; createdByMembershipId: string; groupId: string },
+) {
+  // Fix 3: verify the publication belongs to the stated group
+  const pub = await prisma.publication.findUniqueOrThrow({
+    where: { id: opts.publicationId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, pub.spaceType, pub.spaceId, opts.groupId);
+
+  return openPetition(prisma, {
+    groupId: opts.groupId,
+    category: "archival",
+    subjectType: "publication_archive",
+    subjectId: opts.publicationId,
+    createdByMembershipId: opts.createdByMembershipId,
+  });
+}
+
+/** Called after a Publication archival petition is approved. Fix 3: re-verifies ownership. */
+export async function onPublicationArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "publication_archive");
+  const accountId = petition.createdByMembershipId ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null : null;
+
+  // Fix 3: verify the publication still belongs to the petition group
+  const pub = await prisma.publication.findUniqueOrThrow({ where: { id: petition.subjectId }, select: { spaceType: true, spaceId: true } });
+  await assertSpaceBelongsToGroup(prisma, pub.spaceType, pub.spaceId, petition.groupId);
+
+  await prisma.publication.updateMany({
+    where: { id: petition.subjectId, archivedAt: null },
+    data: { archivedAt: new Date(), archivedByAccountId: accountId, archiveProposalId: petitionId, archiveReason: "approved_by_community_petition" },
+  });
+}
+
+/**
+ * Opens a governance petition to archive a PublicationEntry.
+ * Direct path (archivePublicationEntry) remains valid for seed/admin use.
+ * Fix 3: verifies the entry's publication space belongs to groupId.
+ */
+export async function openPublicationEntryArchivalPetition(
+  prisma: PrismaClient,
+  opts: { entryId: string; createdByMembershipId: string; groupId: string },
+) {
+  // Fix 3: verify the entry's publication belongs to the stated group
+  const entry = await prisma.publicationEntry.findUniqueOrThrow({
+    where: { id: opts.entryId },
+    select: { publication: { select: { spaceType: true, spaceId: true } } },
+  });
+  await assertSpaceBelongsToGroup(prisma, entry.publication.spaceType, entry.publication.spaceId, opts.groupId);
+
+  return openPetition(prisma, {
+    groupId: opts.groupId,
+    category: "archival",
+    subjectType: "publication_entry_archive",
+    subjectId: opts.entryId,
+    createdByMembershipId: opts.createdByMembershipId,
+  });
+}
+
+/** Called after a PublicationEntry archival petition is approved. Fix 3: re-verifies ownership. */
+export async function onPublicationEntryArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "publication_entry_archive");
+  const accountId = petition.createdByMembershipId ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null : null;
+
+  // Fix 3: verify the entry's publication still belongs to the petition group
+  const entry = await prisma.publicationEntry.findUniqueOrThrow({
+    where: { id: petition.subjectId },
+    select: { publication: { select: { spaceType: true, spaceId: true } } },
+  });
+  await assertSpaceBelongsToGroup(prisma, entry.publication.spaceType, entry.publication.spaceId, petition.groupId);
+
+  await prisma.publicationEntry.updateMany({
+    where: { id: petition.subjectId, archivedAt: null },
+    data: { archivedAt: new Date(), archivedByAccountId: accountId, archiveProposalId: petitionId, archiveReason: "approved_by_community_petition" },
   });
 }
 

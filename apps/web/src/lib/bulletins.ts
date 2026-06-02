@@ -1,5 +1,7 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
+import { openPetition, requireApprovedPetition } from "./petitions";
+import { assertSpaceBelongsToGroup } from "./governance-ownership";
 
 /**
  * Creates a Bulletin in the given Coordination Space.
@@ -21,12 +23,68 @@ export async function createBulletin(
 /**
  * Archives a Bulletin. Preserves the first archivedAt -- if already archived,
  * returns without modifying the record.
- * Future: accept archivedByAccountId, archiveProposalId, archiveReason (Governance RFC).
+ * Direct path — valid for seed, admin, and internal use.
+ * Community-facing path uses openBulletinArchivalPetition + onBulletinArchivalPetitionApproved.
  */
 export async function archiveBulletin(prisma: PrismaClient, bulletinId: string): Promise<void> {
   await prisma.bulletin.updateMany({
     where: { id: bulletinId, archivedAt: null },
     data: { archivedAt: new Date() },
+  });
+}
+
+// --- RFC-006: Governance wrappers ---
+
+/**
+ * Opens a governance petition to archive a Bulletin.
+ * Fix 3: verifies the bulletin's space belongs to groupId.
+ */
+export async function openBulletinArchivalPetition(
+  prisma: PrismaClient,
+  opts: { bulletinId: string; createdByMembershipId: string; groupId: string },
+) {
+  // Fix 3: verify the bulletin belongs to the stated group before opening a petition
+  const bulletin = await prisma.bulletin.findUniqueOrThrow({
+    where: { id: opts.bulletinId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, bulletin.spaceType, bulletin.spaceId, opts.groupId);
+
+  return openPetition(prisma, {
+    groupId: opts.groupId,
+    category: "archival",
+    subjectType: "bulletin_archive",
+    subjectId: opts.bulletinId,
+    createdByMembershipId: opts.createdByMembershipId,
+  });
+}
+
+/**
+ * Called after a Bulletin archival petition is approved.
+ * Sets archivedAt and provenance fields. The petition subjectId is the bulletinId.
+ * Fix 3: re-verifies target ownership against petition.groupId before mutating.
+ */
+export async function onBulletinArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "bulletin_archive");
+
+  const accountId = petition.createdByMembershipId
+    ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
+    : null;
+
+  const bulletin = await prisma.bulletin.findUniqueOrThrow({
+    where: { id: petition.subjectId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, bulletin.spaceType, bulletin.spaceId, petition.groupId);
+
+  await prisma.bulletin.updateMany({
+    where: { id: petition.subjectId, archivedAt: null },
+    data: {
+      archivedAt: new Date(),
+      archivedByAccountId: accountId,
+      archiveProposalId: petitionId,
+      archiveReason: "approved_by_community_petition",
+    },
   });
 }
 

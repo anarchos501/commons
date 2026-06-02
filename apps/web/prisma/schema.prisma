@@ -369,11 +369,14 @@ model Group {
   actionLogs       ActionLog[]
   signedEvents     SignedEvent[]
   serviceOfferings GroupServiceOffering[]
-  memberships      GroupMembership[]
-  reports          Report[]
-  concernReviews   ConcernReview[]
-  concernFindings  ConcernFinding[]
-  concernProposals ConcernActionProposal[]
+  memberships        GroupMembership[]
+  reports            Report[]
+  concernReviews     ConcernReview[]
+  concernFindings    ConcernFinding[]
+  concernProposals   ConcernActionProposal[]
+  governanceSignals  MemberGovernanceSignal[]
+  petitions          Petition[]
+  emergencyPeriods   EmergencyPeriod[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -391,6 +394,9 @@ model GroupMembership {
   account                  Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
   group                    Group                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
   responsibilityAssignments ResponsibilityAssignment[]
+  governanceSignals        MemberGovernanceSignal[]
+  createdPetitions         Petition[]                 @relation("PetitionCreator")
+  petitionSupport          PetitionSupport[]
 
   @@unique([accountId, groupId])
   @@index([accountId])
@@ -868,6 +874,81 @@ model GovernancePreference {
   @@index([key])
 }
 
+// --- RFC-006: Governance Temperature ---
+
+model MemberGovernanceSignal {
+  id           String          @id @default(cuid())
+  membershipId String
+  groupId      String
+  category     String          // GovernanceCategory key, validated at service layer
+  signal       Int             // constrained to -1 | 0 | +1 at service layer
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  membership GroupMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  group      Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, category])
+  @@index([groupId, category])
+}
+
+// --- RFC-006: Emergency Period ---
+
+model EmergencyPeriod {
+  id                 String    @id @default(cuid())
+  groupId            String
+  petitionId         String?   // null when created via declareTempStewardship (no petition)
+  startedAt          DateTime  @default(now())
+  expiresAt          DateTime
+  endedAt            DateTime?
+  endedByPetitionId  String?   // set if ended via deactivation petition
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([expiresAt])
+}
+
+// --- RFC-006: Petition Infrastructure ---
+
+model Petition {
+  id                    String    @id @default(cuid())
+  groupId               String
+  category              String    // GovernanceCategory, validated at service layer
+  subjectType           String    // ProposalFamily, validated at service layer
+  subjectId             String
+  competitionKey        String?   // derived from subjectType+subjectId; null = non-competing
+  status                String    @default("open") // open | approved | rejected | withdrawn | superseded | blocked
+  governanceSnapshot    Json      // resolved parameters frozen at petition open time
+  opensAt               DateTime  @default(now())
+  closesAt              DateTime
+  resolvedAt            DateTime?
+  createdByMembershipId String?
+
+  group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy         GroupMembership? @relation("PetitionCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  support           PetitionSupport[]
+
+  @@index([groupId, status])
+  @@index([category])
+  @@index([competitionKey])
+  @@index([subjectType, subjectId])
+}
+
+model PetitionSupport {
+  id           String   @id @default(cuid())
+  petitionId   String
+  membershipId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  petition   Petition        @relation(fields: [petitionId], references: [id], onDelete: Cascade)
+  membership GroupMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([petitionId, membershipId])
+  @@index([petitionId])
+}
+
 model PrivacyEnvelope {
   id         String       @id @default(cuid())
   targetType String
@@ -982,16 +1063,18 @@ model DataReplicationPolicy {
 // (Group, Project, or Responsibility) without table-per-type duplication.
 
 model Bulletin {
-  id          String                @id @default(cuid())
-  spaceType   CoordinationSpaceType
-  spaceId     String
-  authorId    String
-  title       String
-  body        String
-  publishedAt DateTime              @default(now())
-  archivedAt  DateTime?
-  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
-  createdAt   DateTime              @default(now())
+  id                String                @id @default(cuid())
+  spaceType         CoordinationSpaceType
+  spaceId           String
+  authorId          String
+  title             String
+  body              String
+  publishedAt       DateTime              @default(now())
+  archivedAt        DateTime?
+  archivedByAccountId String?
+  archiveProposalId String?
+  archiveReason     String?
+  createdAt         DateTime              @default(now())
 
   author Account @relation(fields: [authorId], references: [id])
 
@@ -1001,14 +1084,16 @@ model Bulletin {
 }
 
 model Publication {
-  id                 String                @id @default(cuid())
-  spaceType          CoordinationSpaceType
-  spaceId            String
-  title              String
-  createdByAccountId String
-  archivedAt         DateTime?
-  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
-  createdAt          DateTime              @default(now())
+  id                  String                @id @default(cuid())
+  spaceType           CoordinationSpaceType
+  spaceId             String
+  title               String
+  createdByAccountId  String
+  archivedAt          DateTime?
+  archivedByAccountId String?
+  archiveProposalId   String?
+  archiveReason       String?
+  createdAt           DateTime              @default(now())
 
   creator Account          @relation(fields: [createdByAccountId], references: [id])
   entries PublicationEntry[]
@@ -1019,14 +1104,16 @@ model Publication {
 }
 
 model PublicationEntry {
-  id            String    @id @default(cuid())
-  publicationId String
-  authorId      String
-  title         String?
-  body          String
-  publishedAt   DateTime  @default(now())
-  archivedAt    DateTime?
-  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
+  id                  String    @id @default(cuid())
+  publicationId       String
+  authorId            String
+  title               String?
+  body                String
+  publishedAt         DateTime  @default(now())
+  archivedAt          DateTime?
+  archivedByAccountId String?
+  archiveProposalId   String?
+  archiveReason       String?
 
   publication Publication @relation(fields: [publicationId], references: [id])
   author      Account     @relation(fields: [authorId], references: [id])
@@ -1037,18 +1124,20 @@ model PublicationEntry {
 }
 
 model LivingDocument {
-  id            String                @id @default(cuid())
-  spaceType     CoordinationSpaceType
-  spaceId       String
-  title         String
-  currentBody   String
+  id                  String                @id @default(cuid())
+  spaceType           CoordinationSpaceType
+  spaceId             String
+  title               String
+  currentBody         String
   // currentBody is always the current accepted version.
   // LivingDocument identity persists across revisions: revisions create
   // LivingDocumentRevision records, never a new LivingDocument.
-  lastRevisedAt DateTime              @default(now())
-  archivedAt    DateTime?
-  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
-  createdAt     DateTime              @default(now())
+  lastRevisedAt       DateTime              @default(now())
+  archivedAt          DateTime?
+  archivedByAccountId String?
+  archiveProposalId   String?
+  archiveReason       String?
+  createdAt           DateTime              @default(now())
 
   revisions LivingDocumentRevision[]
 
@@ -1058,12 +1147,14 @@ model LivingDocument {
 }
 
 model LivingDocumentRevision {
-  id               String   @id @default(cuid())
-  livingDocumentId String
-  authorId         String
-  body             String
-  // Future: proposalId, approvedAt, approvedByAccountId (Governance RFC)
-  createdAt        DateTime @default(now())
+  id                   String    @id @default(cuid())
+  livingDocumentId     String
+  authorId             String
+  body                 String
+  proposalId           String?   // FK to Petition.id (set on approval)
+  approvedAt           DateTime?
+  approvedByAccountId  String?
+  createdAt            DateTime  @default(now())
 
   livingDocument LivingDocument @relation(fields: [livingDocumentId], references: [id])
   author         Account        @relation(fields: [authorId], references: [id])

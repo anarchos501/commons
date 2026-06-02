@@ -3,6 +3,8 @@
 // distinct from Bulletins, Publications, and LivingDocuments.
 import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
+import { openPetition, requireApprovedPetition } from "./petitions";
+import { assertSpaceBelongsToGroup } from "./governance-ownership";
 
 /**
  * Creates a LivingDocument and seeds its first revision in a single transaction.
@@ -87,12 +89,164 @@ export async function reviseLivingDocument(
 /**
  * Archives a LivingDocument. Preserves the first archivedAt -- if already
  * archived, returns without modifying the record.
- * Future: accept archivedByAccountId, archiveProposalId, archiveReason (Governance RFC).
+ * Direct path — valid for seed, admin, and internal use.
+ * Community-facing path uses openLivingDocumentArchivalPetition + onLivingDocumentArchivalPetitionApproved.
  */
 export async function archiveLivingDocument(prisma: PrismaClient, documentId: string): Promise<void> {
   await prisma.livingDocument.updateMany({
     where: { id: documentId, archivedAt: null },
     data: { archivedAt: new Date() },
+  });
+}
+
+// --- RFC-006: Governance wrappers ---
+
+/**
+ * Creates a LivingDocumentRevision as a draft awaiting community approval.
+ * Does NOT update currentBody. Use onRevisionPetitionApproved to promote on approval.
+ * Direct path (reviseLivingDocument) still updates currentBody immediately — valid for seed/admin.
+ */
+export async function draftLivingDocumentRevision(
+  prisma: PrismaClient,
+  opts: { livingDocumentId: string; authorId: string; body: string },
+) {
+  const document = await prisma.livingDocument.findUniqueOrThrow({
+    where: { id: opts.livingDocumentId },
+    select: { archivedAt: true },
+  });
+  if (document.archivedAt !== null) {
+    throw new Error("Cannot draft a revision for an archived living document.");
+  }
+  return prisma.livingDocumentRevision.create({
+    data: { livingDocumentId: opts.livingDocumentId, authorId: opts.authorId, body: opts.body },
+  });
+}
+
+/**
+ * Opens a governance petition for a living document revision.
+ * The revision must already exist (created via draftLivingDocumentRevision).
+ * Fix 3: verifies the document's space belongs to groupId.
+ */
+export async function openRevisionPetition(
+  prisma: PrismaClient,
+  opts: { livingDocumentId: string; revisionId: string; createdByMembershipId: string; groupId: string },
+) {
+  // Verify the revision belongs to the stated document (prevents petition claiming
+  // one document while targeting a revision that belongs to a different document).
+  const revision = await prisma.livingDocumentRevision.findUniqueOrThrow({
+    where: { id: opts.revisionId },
+    select: { livingDocumentId: true },
+  });
+  if (revision.livingDocumentId !== opts.livingDocumentId) {
+    throw new Error(
+      `Revision "${opts.revisionId}" belongs to document "${revision.livingDocumentId}", not "${opts.livingDocumentId}".`,
+    );
+  }
+
+  // Fix 3: verify the document belongs to the stated group before opening a petition
+  const document = await prisma.livingDocument.findUniqueOrThrow({
+    where: { id: opts.livingDocumentId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, document.spaceType, document.spaceId, opts.groupId);
+
+  return openPetition(prisma, {
+    groupId: opts.groupId,
+    category: "living_document",
+    subjectType: "living_document_revision",
+    subjectId: opts.revisionId,
+    createdByMembershipId: opts.createdByMembershipId,
+  });
+}
+
+/**
+ * Called after a revision petition is approved.
+ * Promotes the revision body to LivingDocument.currentBody and sets provenance fields.
+ * Does NOT create a new revision — the revision already exists; approval is promotion.
+ * Fix 3: re-verifies target ownership against petition.groupId before mutating.
+ */
+export async function onRevisionPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "living_document_revision");
+
+  const accountId = petition.createdByMembershipId
+    ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
+    : null;
+
+  const revision = await prisma.livingDocumentRevision.findUniqueOrThrow({
+    where: { id: petition.subjectId },
+    select: { livingDocumentId: true, body: true, livingDocument: { select: { spaceType: true, spaceId: true } } },
+  });
+
+  // Fix 3: verify the document's space still belongs to the petition group
+  await assertSpaceBelongsToGroup(
+    prisma,
+    revision.livingDocument.spaceType,
+    revision.livingDocument.spaceId,
+    petition.groupId,
+  );
+
+  await prisma.$transaction([
+    prisma.livingDocumentRevision.update({
+      where: { id: petition.subjectId },
+      data: { proposalId: petitionId, approvedAt: new Date(), approvedByAccountId: accountId },
+    }),
+    prisma.livingDocument.update({
+      where: { id: revision.livingDocumentId },
+      data: { currentBody: revision.body, lastRevisedAt: new Date() },
+    }),
+  ]);
+}
+
+/**
+ * Opens a governance petition to archive a LivingDocument.
+ * Fix 3: verifies the document's space belongs to groupId.
+ */
+export async function openLivingDocumentArchivalPetition(
+  prisma: PrismaClient,
+  opts: { documentId: string; createdByMembershipId: string; groupId: string },
+) {
+  // Fix 3: verify the document belongs to the stated group before opening a petition
+  const document = await prisma.livingDocument.findUniqueOrThrow({
+    where: { id: opts.documentId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, document.spaceType, document.spaceId, opts.groupId);
+
+  return openPetition(prisma, {
+    groupId: opts.groupId,
+    category: "archival",
+    subjectType: "living_document_archive",
+    subjectId: opts.documentId,
+    createdByMembershipId: opts.createdByMembershipId,
+  });
+}
+
+/**
+ * Called after a LivingDocument archival petition is approved.
+ * Sets archivedAt and provenance fields. The petition subjectId is the documentId.
+ * Fix 3: re-verifies target ownership against petition.groupId before mutating.
+ */
+export async function onLivingDocumentArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "living_document_archive");
+
+  const accountId = petition.createdByMembershipId
+    ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
+    : null;
+
+  const document = await prisma.livingDocument.findUniqueOrThrow({
+    where: { id: petition.subjectId },
+    select: { spaceType: true, spaceId: true },
+  });
+  await assertSpaceBelongsToGroup(prisma, document.spaceType, document.spaceId, petition.groupId);
+
+  await prisma.livingDocument.updateMany({
+    where: { id: petition.subjectId, archivedAt: null },
+    data: {
+      archivedAt: new Date(),
+      archivedByAccountId: accountId,
+      archiveProposalId: petitionId,
+      archiveReason: "approved_by_community_petition",
+    },
   });
 }
 

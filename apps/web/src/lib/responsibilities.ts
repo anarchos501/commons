@@ -1,5 +1,7 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { AssignmentEndReason } from "../generated/prisma/enums";
+import { openPetition, requireApprovedPetition } from "./petitions";
+import { resolveGovernanceParams } from "./governance-resolver";
 
 // An assignment is active when endedAt is null AND expiresAt is in the future.
 
@@ -207,10 +209,17 @@ export async function getResponsibilityCoverage(
 }
 
 /**
- * Emergency coverage declaration. Creates a 30-day assignment for an active
- * member ONLY when coverage has already failed. Multiple declarations are
- * allowed simultaneously (no single-seat logic). Refused when coverage is
- * already present to prevent bypassing normal confirmation.
+ * Emergency coverage declaration. Creates an assignment for an active member
+ * ONLY when coverage has already failed. Duration is resolver-driven via
+ * emergency.duration (resolved once at declaration time — never re-resolved).
+ * Default = 30 days at neutral temperature.
+ *
+ * Temporary stewardship is treated as an emergency governance mechanism.
+ * Its duration follows the same emergency.duration parameter as a declared
+ * emergency period, keeping the two mechanisms consistent.
+ *
+ * Multiple declarations are allowed (no single-seat logic). Refused when
+ * coverage is already present to prevent bypassing normal confirmation.
  */
 export async function declareTempStewardship(
   prisma: PrismaClient,
@@ -240,7 +249,87 @@ export async function declareTempStewardship(
     create: { groupId: membership.groupId, type },
   });
 
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  // Resolve duration once at declaration time. Never re-resolves after this point.
+  const { duration } = await resolveGovernanceParams(prisma, membership.groupId, "emergency");
+  const expiresAt = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
+
+  await prisma.responsibilityAssignment.create({
+    data: { responsibilityId: responsibility.id, membershipId, expiresAt },
+  });
+}
+
+// --- RFC-006: Governance wrappers ---
+
+/**
+ * Opens a community confirmation petition for a volunteer.
+ * Responsibilities are multi-holder by design — multiple volunteers may be
+ * confirmed simultaneously, so petitions do not compete (competitionKey = null).
+ *
+ * groupId is derived from the membership record, not supplied by the caller,
+ * preventing a petition in one group from approving an assignment in another.
+ *
+ * subjectId encodes both membershipId and responsibility type as "{membershipId}:{type}"
+ * so confirmResponsibilityAssignment can reconstruct both at approval time.
+ * Volunteer withdrawal: call withdrawPetitionBySubject with the same encoded subjectId.
+ */
+export async function volunteerForResponsibility(
+  prisma: PrismaClient,
+  { membershipId, type }: { membershipId: string; type: string },
+) {
+  const membership = await prisma.groupMembership.findUniqueOrThrow({
+    where: { id: membershipId },
+    select: { groupId: true },
+  });
+
+  return openPetition(prisma, {
+    groupId: membership.groupId,
+    category: "responsibility",
+    subjectType: "responsibility_proposal",
+    subjectId: `${membershipId}:${type}`,
+    createdByMembershipId: membershipId,
+  });
+}
+
+/**
+ * Called after a responsibility petition is approved.
+ * Creates the assignment using the petition snapshot's reconfirmationPeriod —
+ * does NOT mutate Responsibility.termDays.
+ *
+ * Verifies petition is approved and of the correct family before executing.
+ * For seed/admin/migration use, call createAssignment() directly (the internal primitive).
+ */
+export async function confirmResponsibilityAssignment(
+  prisma: PrismaClient,
+  petitionId: string,
+): Promise<void> {
+  // Fix 2: verify petition is approved and of the correct family
+  const petition = await requireApprovedPetition(prisma, petitionId, "responsibility_proposal");
+  const snapshot = petition.governanceSnapshot as { reconfirmationPeriod: number };
+
+  // subjectId is encoded as "{membershipId}:{type}"
+  const colonIdx = petition.subjectId.indexOf(":");
+  const membershipId = petition.subjectId.slice(0, colonIdx);
+  const type = petition.subjectId.slice(colonIdx + 1);
+
+  const membership = await prisma.groupMembership.findUniqueOrThrow({
+    where: { id: membershipId },
+    select: { groupId: true },
+  });
+
+  const responsibility = await prisma.responsibility.upsert({
+    where: { groupId_type: { groupId: membership.groupId, type } },
+    update: {},
+    create: { groupId: membership.groupId, type },
+  });
+
+  // Skip if an active assignment already exists (idempotent)
+  const existing = await prisma.responsibilityAssignment.findFirst({
+    where: { responsibilityId: responsibility.id, membershipId, endedAt: null, expiresAt: { gt: new Date() } },
+  });
+  if (existing) return;
+
+  // expiresAt derived from governance snapshot — not from Responsibility.termDays
+  const expiresAt = new Date(Date.now() + snapshot.reconfirmationPeriod * 24 * 60 * 60 * 1000);
 
   await prisma.responsibilityAssignment.create({
     data: { responsibilityId: responsibility.id, membershipId, expiresAt },
