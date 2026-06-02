@@ -1,8 +1,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
+  BookOpen,
   Check,
   Clock,
+  FileText,
   FolderOpen,
   HandHeart,
   HeartHandshake,
@@ -11,6 +13,7 @@ import {
   Languages,
   LogOut,
   MapPin,
+  Megaphone,
   Shield,
   X,
 } from "lucide-react";
@@ -30,6 +33,9 @@ import { logAction } from "../../lib/action-log";
 import { applyParticipationTransitions, recordGroupPresence } from "../../lib/participation";
 import { getCoverageStatus } from "../../lib/concerns";
 import { expireStaleAssignments, hasActiveEligibleAssignment } from "../../lib/responsibilities";
+import { createBulletin } from "../../lib/bulletins";
+import { createPublication } from "../../lib/publications";
+import { createLivingDocument, reviseLivingDocument } from "../../lib/living-documents";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +126,21 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             <JumpLink href="#routes" icon={<Inbox className="h-4 w-4" />}>
               Notifications
             </JumpLink>
+            {data.group ? (
+              <JumpLink href="#bulletins" icon={<Megaphone className="h-4 w-4" />}>
+                Bulletins
+              </JumpLink>
+            ) : null}
+            {data.group ? (
+              <JumpLink href="#publications" icon={<BookOpen className="h-4 w-4" />}>
+                Publications
+              </JumpLink>
+            ) : null}
+            {data.group ? (
+              <JumpLink href="#documents" icon={<FileText className="h-4 w-4" />}>
+                Documents
+              </JumpLink>
+            ) : null}
           </nav>
         </header>
 
@@ -581,6 +602,95 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 <SubmitButton variant="secondary">Submit concern</SubmitButton>
               </form>
             </Section>
+
+            <Section id="bulletins" title="Bulletins" eyebrow="Group updates">
+              {data.groupBulletins.length > 0 ? (
+                <div className="mb-4 space-y-3">
+                  {data.groupBulletins.map((b) => (
+                    <div key={b.id} className="rounded border border-[var(--border)] p-3">
+                      <p className="text-sm font-medium text-[var(--text)]">{b.title}</p>
+                      <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-3">{b.body}</p>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        {b.author.displayName} &middot; {formatRelativeDate(b.publishedAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No bulletins yet." />
+              )}
+              <form action={createBulletinAction} className="space-y-3">
+                <label className="block">
+                  <span className="field-label">Title</span>
+                  <input name="title" type="text" required className="field-input" placeholder="A short title" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Body</span>
+                  <textarea name="body" required rows={3} className="field-input resize-none" placeholder="What does the group need to know?" />
+                </label>
+                <SubmitButton variant="secondary">Post bulletin</SubmitButton>
+              </form>
+            </Section>
+
+            <Section id="publications" title="Publications" eyebrow="Knowledge collections">
+              {data.groupPublications.length > 0 ? (
+                <div className="mb-4 space-y-2">
+                  {data.groupPublications.map((p) => (
+                    <div key={p.id} className="rounded border border-[var(--border)] p-3">
+                      <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        {p.creator.displayName} &middot; {p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No publications yet." />
+              )}
+              <form action={createPublicationAction} className="space-y-3">
+                <label className="block">
+                  <span className="field-label">Title</span>
+                  <input name="title" type="text" required className="field-input" placeholder="e.g. Meeting Notes" />
+                </label>
+                <SubmitButton variant="secondary">Create publication</SubmitButton>
+              </form>
+            </Section>
+
+            <Section id="documents" title="Living Documents" eyebrow="Current reference texts">
+              {data.groupLivingDocuments.length > 0 ? (
+                <div className="mb-4 space-y-4">
+                  {data.groupLivingDocuments.map((doc) => (
+                    <div key={doc.id} className="rounded border border-[var(--border)] p-3 space-y-2">
+                      <p className="text-sm font-semibold text-[var(--text)]">{doc.title}</p>
+                      <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
+                      <p className="text-xs text-[var(--muted)]">Last revised {formatRelativeDate(doc.lastRevisedAt)}</p>
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Revise this document</summary>
+                        <form action={reviseLivingDocumentAction} className="mt-2 space-y-2">
+                          <input type="hidden" name="livingDocumentId" value={doc.id} />
+                          <textarea name="body" required rows={4} defaultValue={doc.currentBody} className="field-input resize-none text-sm" />
+                          <SubmitButton variant="secondary">Save revision</SubmitButton>
+                        </form>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No living documents yet." />
+              )}
+              <form action={createLivingDocumentAction} className="space-y-3">
+                <label className="block">
+                  <span className="field-label">Title</span>
+                  <input name="title" type="text" required className="field-input" placeholder="e.g. Mission, Charter, Code of Conduct" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Body</span>
+                  <textarea name="body" required rows={4} className="field-input resize-none" placeholder="The current text of this document." />
+                </label>
+                <SubmitButton variant="secondary">Create document</SubmitButton>
+              </form>
+            </Section>
+
             </>) : null}
           </aside>
         </div>
@@ -989,6 +1099,75 @@ async function submitConcernAction(formData: FormData) {
   redirect("/dashboard#concerns");
 }
 
+async function createBulletinAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const title = requiredString(formData, "title");
+  const body = requiredString(formData, "body");
+  const prisma = createPrismaClient();
+  try {
+    await createBulletin(prisma, { spaceType: "group", spaceId: groupId, authorId: session.accountId, title, body });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#bulletins");
+}
+
+async function createPublicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const title = requiredString(formData, "title");
+  const prisma = createPrismaClient();
+  try {
+    await createPublication(prisma, { spaceType: "group", spaceId: groupId, createdByAccountId: session.accountId, title });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#publications");
+}
+
+async function createLivingDocumentAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const title = requiredString(formData, "title");
+  const body = requiredString(formData, "body");
+  const prisma = createPrismaClient();
+  try {
+    await createLivingDocument(prisma, { spaceType: "group", spaceId: groupId, authorId: session.accountId, title, body });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#documents");
+}
+
+async function reviseLivingDocumentAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const livingDocumentId = requiredString(formData, "livingDocumentId");
+  const body = requiredString(formData, "body");
+  const prisma = createPrismaClient();
+  try {
+    await reviseLivingDocument(prisma, { livingDocumentId, authorId: session.accountId, body });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#documents");
+}
+
 async function getDashboardData(accountId: string, groupId: string | null) {
   const prisma = createPrismaClient();
 
@@ -1014,7 +1193,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
 
-    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount, myRequests] = await Promise.all([
+    const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount, myRequests, groupBulletins, groupPublications, groupLivingDocuments] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active", archivedAt: null }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: {
@@ -1087,6 +1266,30 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             take: 10,
           })
         : Promise.resolve([]),
+      // Communication content for the active group
+      group
+        ? prisma.bulletin.findMany({
+            where: { spaceType: "group", spaceId: group.id, archivedAt: null },
+            include: { author: { select: { displayName: true } } },
+            orderBy: { publishedAt: "desc" },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.publication.findMany({
+            where: { spaceType: "group", spaceId: group.id, archivedAt: null },
+            include: {
+              creator: { select: { displayName: true } },
+              _count: { select: { entries: { where: { archivedAt: null } } } },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : Promise.resolve([]),
+      group
+        ? prisma.livingDocument.findMany({
+            where: { spaceType: "group", spaceId: group.id, archivedAt: null },
+            orderBy: { lastRevisedAt: "desc" },
+          })
+        : Promise.resolve([]),
     ]);
 
     return {
@@ -1131,6 +1334,9 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             return m ? await hasActiveEligibleAssignment(prisma, m.id, "reviewer") : false;
           })()
         : false,
+      groupBulletins,
+      groupPublications,
+      groupLivingDocuments,
       reviewerQueue: group
         ? await prisma.report.findMany({
             where: {
