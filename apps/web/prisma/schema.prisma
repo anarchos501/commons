@@ -136,6 +136,12 @@ enum AbilityAvailability {
   available_during_emergency // activation mechanics deferred to Governance RFC
 }
 
+enum CoordinationSpaceType {
+  group
+  project
+  responsibility
+}
+
 enum GovernanceScope {
   node
   group
@@ -327,10 +333,14 @@ model Account {
   availability        ContributorAvailability[]
   groupMemberships    GroupMembership[]
   projectMemberships  ProjectMembership[]
-  reportsSubmitted    Report[]
-  concernReviews      ConcernReview[]
-  concernFindings     ConcernFinding[]
-  concernProposals    ConcernActionProposal[]
+  reportsSubmitted        Report[]
+  concernReviews          ConcernReview[]
+  concernFindings         ConcernFinding[]
+  concernProposals        ConcernActionProposal[]
+  bulletins               Bulletin[]
+  publicationsCreated     Publication[]
+  publicationEntries      PublicationEntry[]
+  livingDocumentRevisions LivingDocumentRevision[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -965,4 +975,99 @@ model DataReplicationPolicy {
   @@index([scope, scopeId])
   @@index([federationAllowed])
   @@index([p2pAllowed])
+}
+
+// --- D3: Communication Schema ---
+// All communication models use { spaceType, spaceId } to target any Coordination Space
+// (Group, Project, or Responsibility) without table-per-type duplication.
+
+model Bulletin {
+  id          String                @id @default(cuid())
+  spaceType   CoordinationSpaceType
+  spaceId     String
+  authorId    String
+  title       String
+  body        String
+  publishedAt DateTime              @default(now())
+  archivedAt  DateTime?
+  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
+  createdAt   DateTime              @default(now())
+
+  author Account @relation(fields: [authorId], references: [id])
+
+  @@index([spaceType, spaceId])
+  @@index([authorId])
+  @@index([archivedAt])
+}
+
+model Publication {
+  id                 String                @id @default(cuid())
+  spaceType          CoordinationSpaceType
+  spaceId            String
+  title              String
+  createdByAccountId String
+  archivedAt         DateTime?
+  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
+  createdAt          DateTime              @default(now())
+
+  creator Account          @relation(fields: [createdByAccountId], references: [id])
+  entries PublicationEntry[]
+
+  @@index([spaceType, spaceId])
+  @@index([createdByAccountId])
+  @@index([archivedAt])
+}
+
+model PublicationEntry {
+  id            String    @id @default(cuid())
+  publicationId String
+  authorId      String
+  title         String?
+  body          String
+  publishedAt   DateTime  @default(now())
+  archivedAt    DateTime?
+  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
+
+  publication Publication @relation(fields: [publicationId], references: [id])
+  author      Account     @relation(fields: [authorId], references: [id])
+
+  @@index([publicationId])
+  @@index([authorId])
+  @@index([archivedAt])
+}
+
+model LivingDocument {
+  id            String                @id @default(cuid())
+  spaceType     CoordinationSpaceType
+  spaceId       String
+  title         String
+  currentBody   String
+  // currentBody is always the current accepted version.
+  // LivingDocument identity persists across revisions: revisions create
+  // LivingDocumentRevision records, never a new LivingDocument.
+  lastRevisedAt DateTime              @default(now())
+  archivedAt    DateTime?
+  // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
+  createdAt     DateTime              @default(now())
+
+  revisions LivingDocumentRevision[]
+
+  @@unique([spaceType, spaceId, title])
+  @@index([spaceType, spaceId])
+  @@index([archivedAt])
+}
+
+model LivingDocumentRevision {
+  id               String   @id @default(cuid())
+  livingDocumentId String
+  authorId         String
+  body             String
+  // Future: proposalId, approvedAt, approvedByAccountId (Governance RFC)
+  createdAt        DateTime @default(now())
+
+  livingDocument LivingDocument @relation(fields: [livingDocumentId], references: [id])
+  author         Account        @relation(fields: [authorId], references: [id])
+
+  @@index([livingDocumentId])
+  @@index([authorId])
 }
