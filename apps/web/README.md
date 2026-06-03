@@ -1,36 +1,142 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Commons — apps/web
 
-## Getting Started
+Mutual aid coordination without unnecessary surveillance or hidden authority.
 
-First, run the development server:
+This is the Next.js web application for Commons. It implements the coordination model defined in the project RFCs: support requests, routing, responsibilities, accountability, communication spaces, and governance.
 
-```bash
+**Open Alpha status.** This software is experimental. See [docs/open-alpha.md](../../docs/open-alpha.md) before using it for anything real.
+
+---
+
+## Local Setup
+
+**Prerequisites**
+
+- Node.js 20+
+- Docker (for PostgreSQL)
+
+**Steps**
+
+```powershell
+# 1. From the repo root, start PostgreSQL
+docker compose up -d
+
+# 2. Move into the web app
+cd apps/web
+
+# 3. Create your environment file (see below)
+# 4. Run migrations
+npm run db:migrate
+
+# 5. Seed demo data
+npm run db:seed
+
+# 6. Start the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment Variables
 
-## Learn More
+Create `apps/web/.env` with:
 
-To learn more about Next.js, take a look at the following resources:
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5433/commons_local_dev"
+SESSION_SECRET="dev-commons-session-secret-change-this-in-production-32chars"
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`DATABASE_URL` must point to the Commons PostgreSQL container on port `5433`. See [docs/local-environment.md](../../docs/local-environment.md) for Docker setup details.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`SESSION_SECRET` must be at least 32 characters. The value above is fine for local development only.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Database Commands
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```powershell
+# Apply pending migrations
+npm run db:migrate
+
+# Seed demo data (Northside Commons group, sample accounts, requests)
+npm run db:seed
+
+# Open Prisma Studio (database browser)
+npm run db:studio
+
+# Regenerate Prisma client after schema changes
+npm run db:generate
+```
+
+---
+
+## Tests
+
+```powershell
+npm test
+```
+
+Tests use the real local database. Run `docker compose up -d` first.
+
+The test runner uses `--test-concurrency=1` because tests share a live PostgreSQL database and use prefix-based fixture cleanup. Parallel file execution causes cleanup interference.
+
+---
+
+## Build
+
+```powershell
+npm run build
+```
+
+Produces a production Next.js build. All environment variables must be set.
+
+---
+
+## Alpha Operating Assumptions
+
+- **No email system.** Account creation does not send a verification email. Password reset does not exist. If you lose your password in Alpha, create a new account.
+- **Seed data.** `npm run db:seed` creates a demo group (Northside Commons) and sample accounts. The seed is idempotent and can be re-run after a data reset.
+- **No production security.** Session secrets and database credentials in the example above are for local development only.
+- **Alpha data may be reset.** The alpha database may be cleared at any time. Do not store anything you need to keep.
+
+---
+
+## Known Limitations
+
+- No password reset or account recovery
+- No email notifications
+- No admin or moderation console
+- Governance UX (petition UI, temperature signals) exists in the backend but is not yet surfaced in the dashboard
+- No end-to-end encryption
+- Federation not implemented
+- No mobile/PWA support yet
+
+See [docs/open-alpha.md](../../docs/open-alpha.md) for the full list of known gaps and what to test.
+
+---
+
+## Project Structure
+
+```
+apps/web/
+  prisma/
+    schema.prisma       — database schema
+    migrations/         — migration history
+    seed.ts             — demo data seed
+  src/
+    app/                — Next.js app router pages and server actions
+    lib/                — service layer (petitions, governance, responsibilities, etc.)
+    generated/          — Prisma client (do not edit)
+```
+
+Key lib files: `petitions.ts`, `governance-categories.ts`, `responsibilities.ts`, `participation.ts`, `concerns.ts`.
+
+---
+
+## Further Reading
+
+- [docs/open-alpha.md](../../docs/open-alpha.md) — alpha scope, known gaps, demo scenarios, feedback guide
+- [docs/local-environment.md](../../docs/local-environment.md) — Docker and database setup
+- [docs/rfcs/](../../docs/rfcs/) — design rationale for core systems

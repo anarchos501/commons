@@ -89,7 +89,7 @@ export async function createEmergencyPeriodDirect(
   { groupId }: { groupId: string },
 ): Promise<void> {
   // Resolve duration once at creation time — matches the snapshot-invariant principle
-  const { duration } = await resolveGovernanceParams(prisma, groupId, "emergency");
+  const { duration = 30 } = await resolveGovernanceParams(prisma, groupId, "emergency");
   const startedAt = new Date();
   const expiresAt = new Date(startedAt.getTime() + duration * 24 * 60 * 60 * 1000);
   await prisma.emergencyPeriod.create({ data: { groupId, startedAt, expiresAt } });

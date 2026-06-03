@@ -30,12 +30,16 @@ import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../lib/gro
 import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../lib/request-lifecycle";
 import { logAction } from "../../lib/action-log";
-import { applyParticipationTransitions, recordGroupPresence } from "../../lib/participation";
+import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../lib/participation";
 import { getCoverageStatus } from "../../lib/concerns";
-import { expireStaleAssignments, hasActiveEligibleAssignment } from "../../lib/responsibilities";
+import { confirmResponsibilityAssignment, expireStaleAssignments, hasActiveEligibleAssignment, volunteerForResponsibility } from "../../lib/responsibilities";
 import { createBulletin } from "../../lib/bulletins";
 import { createPublication } from "../../lib/publications";
-import { createLivingDocument, reviseLivingDocument } from "../../lib/living-documents";
+import { createLivingDocument, draftLivingDocumentRevision, onLivingDocumentArchivalPetitionApproved, onRevisionPetitionApproved, openRevisionPetition } from "../../lib/living-documents";
+import { addPetitionSupport, evaluatePetition, withdrawPetitionSupport } from "../../lib/petitions";
+import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../lib/governance-categories";
+import { resolveGovernanceParams } from "../../lib/governance-resolver";
+import { upsertGovernanceSignal } from "../../lib/governance-temperature";
 
 export const dynamic = "force-dynamic";
 
@@ -143,6 +147,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             ) : null}
           </nav>
         </header>
+
+        <AlphaNotice />
 
         {notice ? <Notice message={notice} /> : null}
 
@@ -665,11 +671,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
                       <p className="text-xs text-[var(--muted)]">Last revised {formatRelativeDate(doc.lastRevisedAt)}</p>
                       <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Revise this document</summary>
-                        <form action={reviseLivingDocumentAction} className="mt-2 space-y-2">
+                        <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a revision</summary>
+                        <form action={proposeLivingDocumentRevisionAction} className="mt-2 space-y-2">
                           <input type="hidden" name="livingDocumentId" value={doc.id} />
                           <textarea name="body" required rows={4} defaultValue={doc.currentBody} className="field-input resize-none text-sm" />
-                          <SubmitButton variant="secondary">Save revision</SubmitButton>
+                          <SubmitButton variant="secondary">Open revision petition</SubmitButton>
                         </form>
                       </details>
                     </div>
@@ -691,6 +697,80 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               </form>
             </Section>
 
+            <CollapsibleSection id="petitions" title="Petitions" eyebrow="Community decisions">
+              <div className="space-y-4">
+                <form action={evaluateClosedPetitionsAction}>
+                  <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
+                </form>
+                {data.groupPetitions.length > 0 ? (
+                  <div className="space-y-3">
+                    {data.groupPetitions.map((petition) => (
+                      <PetitionCard key={petition.id} petition={petition} canSupport={data.currentMembership?.participationStatus === "active"} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState text="No petitions yet. Proposed document revisions and responsibility volunteers will appear here." />
+                )}
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage">
+              <div className="space-y-4">
+                <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text)]">Reviewer coverage</p>
+                      <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                        {data.coverageStatus === "available"
+                          ? "At least one active reviewer can handle concern reviews."
+                          : "No active reviewer is currently available."}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                      {data.coverageStatus === "available" ? "Covered" : "Needed"}
+                    </span>
+                  </div>
+                  {data.coverageStatus === "unavailable" && data.currentMembership?.participationStatus === "active" ? (
+                    <form action={volunteerForReviewerAction} className="mt-3">
+                      <SubmitButton variant="secondary">Volunteer as reviewer</SubmitButton>
+                    </form>
+                  ) : null}
+                </div>
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection id="governance-settings" title="Governance Settings" eyebrow="Decision friction">
+              <div className="space-y-4">
+                {data.governanceSettings.map((setting) => (
+                  <form key={setting.category} action={updateGovernanceSignalAction} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <input type="hidden" name="category" value={setting.category} />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
+                        <p className="text-xs leading-5 text-[var(--muted)]">
+                          Threshold {formatPercent(setting.threshold)} · {Math.round(setting.petitionDuration)} day petition
+                        </p>
+                      </div>
+                      <select name="signal" className="field-input sm:w-44" defaultValue={String(setting.signal)}>
+                        <option value="-1">More Careful</option>
+                        <option value="0">Neutral</option>
+                        <option value="1">Easier To Act</option>
+                      </select>
+                    </div>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">How this works</summary>
+                      <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
+                        Member signals adjust petition thresholds and petition length for this category. They do not approve proposals by themselves.
+                      </p>
+                    </details>
+                    <div className="mt-3">
+                      <SubmitButton variant="secondary">Save setting</SubmitButton>
+                    </div>
+                  </form>
+                ))}
+              </div>
+            </CollapsibleSection>
+
             </>) : null}
           </aside>
         </div>
@@ -706,6 +786,68 @@ function Section({ id, title, eyebrow, children }: { id: string; title: string; 
       <h2 className="mt-1 text-2xl font-semibold tracking-normal">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
+  );
+}
+
+function CollapsibleSection({ id, title, eyebrow, children }: { id: string; title: string; eyebrow: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
+      <details>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span>
+            <span className="block text-sm font-medium text-[var(--muted)]">{eyebrow}</span>
+            <span className="mt-1 block text-2xl font-semibold tracking-normal">{title}</span>
+          </span>
+          <span className="text-sm text-[var(--muted)]">Expand</span>
+        </summary>
+        <div className="mt-5">{children}</div>
+      </details>
+    </section>
+  );
+}
+
+function PetitionCard({ petition, canSupport }: { petition: DashboardPetition; canSupport: boolean }) {
+  const isOpen = petition.status === "open";
+  return (
+    <article className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-[var(--text)]">{proposalFamilyLabel(petition.subjectType)}</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{petition.subjectLabel}</p>
+        </div>
+        <span className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
+          {petition.status}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-[var(--muted)] sm:grid-cols-3">
+        <p>{petition.supportCount} supporting</p>
+        <p>{petition.requiredSupport} needed</p>
+        <p>{isOpen ? `Closes ${formatRelativeDate(petition.closesAt)}` : `Resolved ${petition.resolvedAt ? formatRelativeDate(petition.resolvedAt) : "later"}`}</p>
+      </div>
+      {isOpen ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {canSupport ? (
+            petition.supportedByCurrentMember ? (
+              <form action={withdrawPetitionSupportAction}>
+                <input type="hidden" name="petitionId" value={petition.id} />
+                <SubmitButton variant="secondary">Withdraw support</SubmitButton>
+              </form>
+            ) : (
+              <form action={supportPetitionAction}>
+                <input type="hidden" name="petitionId" value={petition.id} />
+                <SubmitButton variant="secondary">Support</SubmitButton>
+              </form>
+            )
+          ) : (
+            <p className="text-xs text-[var(--muted)]">Only active members may support petitions.</p>
+          )}
+          <form action={evaluatePetitionAction}>
+            <input type="hidden" name="petitionId" value={petition.id} />
+            <SubmitButton variant="secondary">Check outcome</SubmitButton>
+          </form>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -731,6 +873,28 @@ function SubmitButton({ children, variant = "primary", disabled }: { children: R
     <button type="submit" className={className} disabled={disabled}>
       {children}
     </button>
+  );
+}
+
+function AlphaNotice() {
+  return (
+    <div
+      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      role="status"
+    >
+      <p className="font-medium">Commons Open Alpha</p>
+      <div className="mt-0.5">
+        Experimental software — not for sensitive real-world use yet.{" "}
+        <details className="mt-1">
+          <summary className="cursor-pointer underline-offset-2 hover:underline">Alpha limits</summary>
+          <div className="mt-2 space-y-1 text-xs leading-5">
+            <p>Do not use for medical emergencies, legal emergencies, private organizing, or confidential information.</p>
+            <p>Alpha data is plaintext and visible to the server operator. No end-to-end encryption exists yet.</p>
+            <p>This version is intended for hypothetical testing, architecture review, and governance feedback.</p>
+          </div>
+        </details>
+      </div>
+    </div>
   );
 }
 
@@ -1152,20 +1316,140 @@ async function createLivingDocumentAction(formData: FormData) {
   redirect("/dashboard#documents");
 }
 
-async function reviseLivingDocumentAction(formData: FormData) {
+async function proposeLivingDocumentRevisionAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
   const livingDocumentId = requiredString(formData, "livingDocumentId");
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    await reviseLivingDocument(prisma, { livingDocumentId, authorId: session.accountId, body });
+    const membership = await prisma.groupMembership.findUniqueOrThrow({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    const revision = await draftLivingDocumentRevision(prisma, { livingDocumentId, authorId: session.accountId, body });
+    await openRevisionPetition(prisma, { livingDocumentId, revisionId: revision.id, createdByMembershipId: membership.id, groupId });
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath("/dashboard");
   redirect("/dashboard#documents");
+}
+
+async function supportPetitionAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const petitionId = requiredString(formData, "petitionId");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    await addPetitionSupport(prisma, { petitionId, membershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#petitions");
+}
+
+async function withdrawPetitionSupportAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const petitionId = requiredString(formData, "petitionId");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    await withdrawPetitionSupport(prisma, { petitionId, membershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#petitions");
+}
+
+async function evaluatePetitionAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const petitionId = requiredString(formData, "petitionId");
+  const prisma = createPrismaClient();
+  try {
+    await requireDashboardMembership(prisma, session.accountId, groupId);
+    await evaluateAndApplyPetition(prisma, petitionId);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#petitions");
+}
+
+async function evaluateClosedPetitionsAction() {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const prisma = createPrismaClient();
+  try {
+    await requireDashboardMembership(prisma, session.accountId, groupId);
+    const petitions = await prisma.petition.findMany({
+      where: { groupId, status: "open", closesAt: { lte: new Date() } },
+      select: { id: true },
+    });
+    for (const petition of petitions) {
+      await evaluateAndApplyPetition(prisma, petition.id);
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#petitions");
+}
+
+async function volunteerForReviewerAction() {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    await volunteerForResponsibility(prisma, { membershipId: membership.id, type: "reviewer" });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#responsibilities");
+}
+
+async function updateGovernanceSignalAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const category = requiredString(formData, "category");
+  const signal = Number(requiredString(formData, "signal"));
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    await upsertGovernanceSignal(prisma, { membershipId: membership.id, groupId, category, signal });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard#governance-settings");
 }
 
 async function getDashboardData(accountId: string, groupId: string | null) {
@@ -1192,6 +1476,12 @@ async function getDashboardData(accountId: string, groupId: string | null) {
     ]);
 
     const nodeId = group?.nodeId ?? account.homeNodeId;
+    const currentMembership = group
+      ? await prisma.groupMembership.findUnique({
+          where: { accountId_groupId: { accountId, groupId: group.id } },
+          select: { id: true, status: true, participationStatus: true },
+        })
+      : null;
 
     const [projects, routes, serviceOfferings, openGroups, groupContributions, personalContributions, projectServices, projectContributions, myReports, groupOpenConcernCount, myRequests, groupBulletins, groupPublications, groupLivingDocuments] = await Promise.all([
       group ? prisma.project.findMany({ where: { groupId: group.id, status: "active", archivedAt: null }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
@@ -1291,10 +1581,63 @@ async function getDashboardData(accountId: string, groupId: string | null) {
           })
         : Promise.resolve([]),
     ]);
+    const activeParticipantCount = group ? await getActiveParticipantCount(prisma, group.id) : 0;
+    const petitions = group
+      ? await prisma.petition.findMany({
+          where: { groupId: group.id },
+          orderBy: [{ status: "asc" }, { closesAt: "asc" }],
+          include: {
+            _count: { select: { support: true } },
+            support: { where: { membershipId: currentMembership?.id ?? "" }, select: { id: true }, take: 1 },
+          },
+          take: 12,
+        })
+      : [];
+    const groupPetitions = await Promise.all(
+      petitions.map(async (petition): Promise<DashboardPetition> => {
+        const snapshot = petition.governanceSnapshot as { threshold?: number };
+        const threshold = typeof snapshot.threshold === "number" ? snapshot.threshold : 1;
+        return {
+          id: petition.id,
+          subjectType: petition.subjectType,
+          subjectLabel: await describePetitionSubject(prisma, petition.subjectType, petition.subjectId),
+          status: petition.status,
+          closesAt: petition.closesAt,
+          resolvedAt: petition.resolvedAt,
+          supportCount: petition._count.support,
+          requiredSupport: Math.ceil(activeParticipantCount * threshold),
+          supportedByCurrentMember: petition.support.length > 0,
+        };
+      }),
+    );
+    const governanceCategories = GOVERNANCE_CATEGORIES.filter(
+      (category): category is GovernanceCategory => category === "living_document" || category === "responsibility",
+    );
+    const currentSignals = currentMembership
+      ? await prisma.memberGovernanceSignal.findMany({
+          where: { membershipId: currentMembership.id, category: { in: governanceCategories } },
+          select: { category: true, signal: true },
+        })
+      : [];
+    const signalByCategory = new Map(currentSignals.map((signal) => [signal.category, signal.signal]));
+    const governanceSettings = group && currentMembership
+      ? await Promise.all(
+          governanceCategories.map(async (category) => {
+            const params = await resolveGovernanceParams(prisma, group.id, category);
+            return {
+              category,
+              threshold: params.threshold,
+              petitionDuration: params.petitionDuration,
+              signal: signalByCategory.get(category) ?? 0,
+            };
+          }),
+        )
+      : [];
 
     return {
       account,
       group,
+      currentMembership,
       memberships,
       openGroups,
       projects: projects.map((p) => ({
@@ -1337,6 +1680,8 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       groupBulletins,
       groupPublications,
       groupLivingDocuments,
+      groupPetitions,
+      governanceSettings,
       reviewerQueue: group
         ? await prisma.report.findMany({
             where: {
@@ -1361,6 +1706,65 @@ async function getDashboardData(accountId: string, groupId: string | null) {
   }
 }
 
+async function requireDashboardMembership(prisma: ReturnType<typeof createPrismaClient>, accountId: string, groupId: string) {
+  const membership = await prisma.groupMembership.findUnique({
+    where: { accountId_groupId: { accountId, groupId } },
+    select: { id: true, status: true, participationStatus: true },
+  });
+  if (!membership || membership.status !== "active") {
+    throw new Error("Active group membership required.");
+  }
+  return membership;
+}
+
+async function evaluateAndApplyPetition(prisma: ReturnType<typeof createPrismaClient>, petitionId: string) {
+  const result = await evaluatePetition(prisma, petitionId);
+  if (result.outcome !== "approved") return;
+
+  const petition = await prisma.petition.findUnique({
+    where: { id: petitionId },
+    select: { subjectType: true },
+  });
+  if (!petition) return;
+
+  if (petition.subjectType === "living_document_revision") {
+    await onRevisionPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "living_document_archive") {
+    await onLivingDocumentArchivalPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "responsibility_proposal") {
+    await confirmResponsibilityAssignment(prisma, petitionId);
+  }
+}
+
+async function describePetitionSubject(prisma: ReturnType<typeof createPrismaClient>, subjectType: string, subjectId: string) {
+  if (subjectType === "living_document_revision") {
+    const revision = await prisma.livingDocumentRevision.findUnique({
+      where: { id: subjectId },
+      select: { livingDocument: { select: { title: true } }, author: { select: { displayName: true } } },
+    });
+    return revision ? `${revision.livingDocument.title} revision by ${revision.author.displayName}` : subjectId;
+  }
+
+  if (subjectType === "living_document_archive") {
+    const document = await prisma.livingDocument.findUnique({
+      where: { id: subjectId },
+      select: { title: true },
+    });
+    return document ? `Archive ${document.title}` : subjectId;
+  }
+
+  if (subjectType === "responsibility_proposal") {
+    const [membershipId, type] = subjectId.split(":", 2);
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: membershipId },
+      select: { account: { select: { displayName: true } } },
+    });
+    return membership ? `${membership.account.displayName} for ${capitalize(type)}` : subjectId;
+  }
+
+  return subjectId;
+}
+
 
 function urgencyLabel(urgency: string) {
   if (urgency === "urgent") return "Time-sensitive, but not broadcast publicly.";
@@ -1372,6 +1776,34 @@ function formatRelativeDate(date: Date) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function proposalFamilyLabel(subjectType: string) {
+  switch (subjectType) {
+    case "living_document_revision":
+      return "Living document revision";
+    case "living_document_archive":
+      return "Living document archival";
+    case "responsibility_proposal":
+      return "Responsibility volunteer";
+    default:
+      return subjectType.replace(/_/g, " ");
+  }
+}
+
+function governanceCategoryLabel(category: GovernanceCategory) {
+  switch (category) {
+    case "living_document":
+      return "Living Documents";
+    case "responsibility":
+      return "Responsibilities";
+    default:
+      return category.replace(/_/g, " ");
+  }
+}
+
 type ExperienceRoute = {
   id: string;
   contributorAccountId: string;
@@ -1380,4 +1812,16 @@ type ExperienceRoute = {
   status: string;
   urgencyLabel: string;
   createdAtLabel: string;
+};
+
+type DashboardPetition = {
+  id: string;
+  subjectType: string;
+  subjectLabel: string;
+  status: string;
+  closesAt: Date;
+  resolvedAt: Date | null;
+  supportCount: number;
+  requiredSupport: number;
+  supportedByCurrentMember: boolean;
 };

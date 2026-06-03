@@ -250,7 +250,7 @@ export async function declareTempStewardship(
   });
 
   // Resolve duration once at declaration time. Never re-resolves after this point.
-  const { duration } = await resolveGovernanceParams(prisma, membership.groupId, "emergency");
+  const { duration = 30 } = await resolveGovernanceParams(prisma, membership.groupId, "emergency");
   const expiresAt = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
 
   await prisma.responsibilityAssignment.create({
