@@ -29,11 +29,11 @@ function AlphaNotice() {
   );
 }
 import { randomUUID } from "crypto";
-import { createPrismaClient } from "../../../lib/prisma";
-import { resolveCurrentNode } from "../../../lib/node-context";
-import { createSupportRequest, routeSupportRequest } from "../../../lib/capability-routing";
-import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../lib/support-form";
-import { generateGuestAccessToken } from "../../../lib/request-lifecycle";
+import { createPrismaClient } from "../../../../lib/prisma";
+import { resolveCurrentNode } from "../../../../lib/node-context";
+import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
+import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../../lib/support-form";
+import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
 
 export const dynamic = "force-dynamic";
 

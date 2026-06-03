@@ -33,26 +33,24 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #151411;
-    --foreground: #f0ece3;
-    --page: #151411;
-    --surface: #211f1a;
-    --subtle: #2a2721;
-    --hover: #343026;
-    --text: #f0ece3;
-    --soft-text: #c8c0b4;
-    --muted: #aaa092;
-    --border: #403a31;
-    --border-strong: #5b5246;
-    --accent: #86a792;
-    --accent-hover: #9bb9a4;
-    --accent-text: #111713;
-    --notice: #1f3028;
-    --notice-border: #42624f;
-    --notice-text: #c7e7d0;
-  }
+html.dark {
+  --background: #151411;
+  --foreground: #f0ece3;
+  --page: #151411;
+  --surface: #211f1a;
+  --subtle: #2a2721;
+  --hover: #343026;
+  --text: #f0ece3;
+  --soft-text: #c8c0b4;
+  --muted: #aaa092;
+  --border: #403a31;
+  --border-strong: #5b5246;
+  --accent: #86a792;
+  --accent-hover: #9bb9a4;
+  --accent-text: #111713;
+  --notice: #1f3028;
+  --notice-border: #42624f;
+  --notice-text: #c7e7d0;
 }
 
 html {

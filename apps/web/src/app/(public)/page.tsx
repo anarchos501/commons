@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { HandHeart, HelpCircle, LogIn, UserPlus } from "lucide-react";
-import { getSession } from "../lib/session";
+import { getSession } from "../../lib/session";
 import { redirect } from "next/navigation";
 
 function AlphaNotice() {

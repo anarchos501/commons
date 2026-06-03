@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { createPrismaClient } from "../../lib/prisma";
-import { getSession } from "../../lib/session";
-import { registerAccount } from "../../lib/auth";
+import { createPrismaClient } from "../../../lib/prisma";
+import { getSession } from "../../../lib/session";
+import { registerAccount } from "../../../lib/auth";
 
 function AlphaNotice() {
   return (

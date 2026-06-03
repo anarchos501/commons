@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft, HelpCircle, Shield } from "lucide-react";
-import { createPrismaClient } from "../../lib/prisma";
-import { resolveCurrentNode } from "../../lib/node-context";
-import { capitalize } from "../../lib/support-form";
+import { createPrismaClient } from "../../../lib/prisma";
+import { resolveCurrentNode } from "../../../lib/node-context";
+import { capitalize } from "../../../lib/support-form";
 
 function AlphaNotice() {
   return (
