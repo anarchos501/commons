@@ -323,7 +323,6 @@ async function main() {
     },
     update: {
       status: "approved",
-      supportThreshold: 0.7,
       approvedAt: new Date("2026-05-27T12:00:00.000Z"),
       revokedAt: null,
     },
@@ -333,8 +332,6 @@ async function main() {
       groupId: group.id,
       trustContext: "medical accompaniment",
       status: "approved",
-      supportThreshold: 0.7,
-      reviewEndsAt: new Date("2026-06-10T12:00:00.000Z"),
       approvedAt: new Date("2026-05-27T12:00:00.000Z"),
     },
   });

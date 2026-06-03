@@ -515,8 +515,6 @@ model TrustedServiceCapability {
   groupId             String
   trustContext        String
   status              TrustStatus @default(petitioned)
-  supportThreshold    Float?
-  reviewEndsAt        DateTime?
   approvedAt          DateTime?
   revokedAt           DateTime?
   createdAt           DateTime    @default(now())

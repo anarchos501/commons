@@ -50,7 +50,7 @@ export async function isEligibleReviewer(
   // Cross-group guard: group/report mismatch is a caller error, not an eligibility failure
   if (report.groupId !== groupId) throw new Error("Concern does not belong to this group.");
   if (report.reportedByAccountId === accountId) return false;
-  // Note: subject-of-concern check deferred — subject field not yet defined
+  // Note: subject-of-concern check deferred — reviewer conflict with report subject not yet implemented
 
   // Condition 4: No active conflict specific to this concern (not global concern history)
   // Future: check linked request/project participation here

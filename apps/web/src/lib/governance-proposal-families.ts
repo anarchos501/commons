@@ -33,8 +33,6 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   collective_contribution_offer: "contribution_offer",
 };
 
-const ALL_FAMILIES = Object.keys(FAMILY_TO_CATEGORY) as ProposalFamily[];
-
 export function isProposalFamily(value: string): value is ProposalFamily {
   return value in FAMILY_TO_CATEGORY;
 }
@@ -63,4 +61,4 @@ export function deriveCompetitionKey(
   }
 }
 
-export { ALL_FAMILIES };
+

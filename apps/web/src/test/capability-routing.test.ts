@@ -67,7 +67,6 @@ test("elevated rides route only to approved trusted contributors", async () => {
       groupId: fixture.group.id,
       trustContext: "rides",
       status: "approved",
-      supportThreshold: 0.7,
       approvedAt: new Date("2026-05-27T12:00:00.000Z"),
     },
   });
