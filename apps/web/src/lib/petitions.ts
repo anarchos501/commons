@@ -1,9 +1,8 @@
-import type { PrismaClient } from "../generated/prisma/client";
-import { Prisma } from "../generated/prisma/client";
+import { type PrismaClient, Prisma } from "../generated/prisma/client";
 import { isGovernanceCategory } from "./governance-categories";
 import { isProposalFamily, categoryForFamily, deriveCompetitionKey } from "./governance-proposal-families";
 import { snapshotGovernanceParams } from "./governance-resolver";
-import { getActiveParticipantCount } from "./participation";
+import { getActiveParticipantCount, getActiveVoterCount } from "./participation";
 
 export type PetitionStatus = "open" | "approved" | "rejected" | "withdrawn" | "superseded" | "blocked";
 
@@ -65,12 +64,15 @@ export async function openPetition(
     subjectType,
     subjectId,
     createdByMembershipId,
+    voterScope,
   }: {
     groupId: string;
     category: string;
     subjectType: string;
     subjectId: string;
     createdByMembershipId: string;
+    // null = group-wide voting (default). { type: "project", scopeId } = project-member voting.
+    voterScope?: { type: "project"; scopeId: string } | null;
   },
 ): Promise<OpenPetitionResult> {
   if (!isProposalFamily(subjectType)) {
@@ -117,6 +119,7 @@ export async function openPetition(
         competitionKey,
         status: "open",
         governanceSnapshot: snapshot as object,
+        voterScope: voterScope ?? Prisma.JsonNull,
         opensAt,
         closesAt,
         createdByMembershipId,
@@ -133,7 +136,7 @@ export async function openPetition(
 
 export type AddSupportResult =
   | { ok: true }
-  | { ok: false; reason: "petition_not_open" | "not_eligible" };
+  | { ok: false; reason: "petition_not_open" | "not_eligible" | "not_eligible_in_scope" };
 
 // Fix 1: check both status and closesAt on add
 export async function addPetitionSupport(
@@ -142,7 +145,7 @@ export async function addPetitionSupport(
 ): Promise<AddSupportResult> {
   const petition = await prisma.petition.findUnique({
     where: { id: petitionId },
-    select: { groupId: true, status: true, closesAt: true },
+    select: { groupId: true, status: true, closesAt: true, voterScope: true },
   });
 
   if (!petition || petition.status !== "open" || new Date() >= petition.closesAt) {
@@ -151,7 +154,7 @@ export async function addPetitionSupport(
 
   const membership = await prisma.groupMembership.findUnique({
     where: { id: membershipId },
-    select: { groupId: true, status: true, participationStatus: true },
+    select: { groupId: true, status: true, participationStatus: true, accountId: true },
   });
 
   if (
@@ -161,6 +164,22 @@ export async function addPetitionSupport(
     membership.participationStatus !== "active"
   ) {
     return { ok: false, reason: "not_eligible" };
+  }
+
+  // Additional scope check for project-scoped petitions
+  const scope = petition.voterScope as { type: string; scopeId: string } | null;
+  if (scope?.type === "project") {
+    const projectMembership = await prisma.projectMembership.findFirst({
+      where: {
+        projectId: scope.scopeId,
+        accountId: membership.accountId,
+        status: "active",
+        participationStatus: "active",
+      },
+    });
+    if (!projectMembership) {
+      return { ok: false, reason: "not_eligible_in_scope" };
+    }
   }
 
   await prisma.petitionSupport.upsert({
@@ -210,6 +229,7 @@ export async function evaluatePetition(
       closesAt: true,
       competitionKey: true,
       governanceSnapshot: true,
+      voterScope: true,
     },
   });
 
@@ -222,7 +242,7 @@ export async function evaluatePetition(
   }
 
   const snapshot = petition.governanceSnapshot as { threshold: number };
-  const eligible = await getActiveParticipantCount(prisma, petition.groupId);
+  const eligible = await getActiveVoterCount(prisma, petition);
 
   if (eligible === 0) {
     await prisma.petition.update({ where: { id: petitionId }, data: { status: "blocked", resolvedAt: new Date() } });

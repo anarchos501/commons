@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, RequestRoute } from "../generated/prisma/client";
 import type { ServiceCapabilityStatus } from "../generated/prisma/enums";
 import { logAction } from "./action-log";
 import {
@@ -33,6 +33,9 @@ export type DeclareServiceCapabilityInput = {
 
 export type RequestedServiceInput = {
   serviceType: string;
+  // Optional: ID of a community-governed ContributionCategory.
+  // When set, drives category-based routing instead of string-based routing.
+  categoryId?: string;
   trustRequirement?: TrustRequirementValue;
 };
 
@@ -63,7 +66,7 @@ export type RouteDecisionInput = {
   decidedAt?: Date;
 };
 
-export type RouteNotification = Awaited<ReturnType<typeof routeSupportRequest>>[number];
+export type RouteNotification = RequestRoute & { notificationPayload: ReturnType<typeof buildRouteNotificationPayload> };
 
 export type CreateContributionFromRouteInput = {
   routeId: string;
@@ -124,6 +127,7 @@ export async function declareServiceCapability(prisma: PrismaClient, input: Decl
 export async function createSupportRequest(prisma: PrismaClient, input: CreateSupportRequestInput) {
   const requestedServices = input.requestedServices.map((service) => ({
     serviceType: service.serviceType,
+    categoryId: service.categoryId?.trim() || null,
     trustRequirement: service.trustRequirement ?? "lightweight",
   }));
 
@@ -197,6 +201,7 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
         supportRequestId: supportRequest.id,
         serviceType: service.serviceType,
         trustRequirement: service.trustRequirement,
+        categoryId: service.categoryId,
       },
     });
   }
@@ -241,6 +246,19 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
   const routes = [];
 
   for (const requestedService of supportRequest.services) {
+    // Category-based routing path: when a ContributionCategory is linked
+    if (requestedService.categoryId) {
+      const categoryRoutes = await routeByCategory(prisma, {
+        supportRequest,
+        requestedService,
+        routePayloadRequest,
+        privacyResolution,
+      });
+      routes.push(...categoryRoutes);
+      continue;
+    }
+
+    // String-based routing path (legacy / backward-compatible)
     const offering = await prisma.groupServiceOffering.findUnique({
       where: { groupId_serviceType: { groupId: supportRequest.groupId, serviceType: requestedService.serviceType } },
     });
@@ -443,4 +461,155 @@ function resolveTrustThreshold(requesterPreference: string, groupMinimum: string
     return "elevated";
   }
   return "lightweight";
+}
+
+type CategoryRoutingContext = {
+  supportRequest: {
+    id: string;
+    groupId: string;
+    submittedByAccountId: string | null;
+  };
+  requestedService: {
+    serviceType: string;
+    trustRequirement: string;
+    categoryId: string | null;
+  };
+  routePayloadRequest: Parameters<typeof buildRouteNotificationPayload>[0];
+  privacyResolution: Parameters<typeof buildRouteNotificationPayload>[1];
+};
+
+async function routeByCategory(
+  prisma: PrismaClient,
+  ctx: CategoryRoutingContext,
+): Promise<RouteNotification[]> {
+  const { supportRequest, requestedService } = ctx;
+  const categoryId = requestedService.categoryId!;
+  const trustRequirement = requestedService.trustRequirement as TrustRequirementValue;
+  const routes: RouteNotification[] = [];
+
+  if (trustRequirement === "elevated") {
+    // Trusted providers only: query TrustedProviderStatus
+    const trustedStatuses = await prisma.trustedProviderStatus.findMany({
+      where: {
+        categoryId,
+        groupId: supportRequest.groupId,
+        status: "active",
+        membership: {
+          status: "active",
+          participationStatus: "active",
+          accountId: supportRequest.submittedByAccountId
+            ? { not: supportRequest.submittedByAccountId }
+            : undefined,
+        },
+      },
+      include: {
+        membership: { select: { accountId: true } },
+      },
+      orderBy: { grantedAt: "asc" },
+    });
+
+    for (const trusted of trustedStatuses) {
+      const accountId = trusted.membership.accountId;
+      const route = await upsertCategoryRoute(prisma, ctx, accountId, trustRequirement);
+      if (route) routes.push(route);
+    }
+  } else {
+    // Any contributor: query ServiceCapability by categoryId
+    const capabilities = await prisma.serviceCapability.findMany({
+      where: {
+        categoryId,
+        approvalStatus: { in: ["available", "approved"] },
+        account: {
+          groupMemberships: {
+            some: { groupId: supportRequest.groupId, status: "active", participationStatus: "active" },
+          },
+        },
+        accountId: supportRequest.submittedByAccountId
+          ? { not: supportRequest.submittedByAccountId }
+          : undefined,
+      },
+      include: { availabilityRecords: true },
+      orderBy: [{ createdAt: "asc" }, { accountId: "asc" }],
+    });
+
+    for (const capability of capabilities) {
+      if (!isCapabilityAvailable(capability.availability, capability.availabilityRecords)) {
+        continue;
+      }
+      const route = await upsertCategoryRoute(prisma, ctx, capability.accountId, trustRequirement);
+      if (route) routes.push(route);
+    }
+  }
+
+  return routes;
+}
+
+async function upsertCategoryRoute(
+  prisma: PrismaClient,
+  ctx: CategoryRoutingContext,
+  contributorAccountId: string,
+  trustRequirement: TrustRequirementValue,
+): Promise<RouteNotification | null> {
+  const { supportRequest, requestedService, routePayloadRequest, privacyResolution } = ctx;
+
+  // Lightweight category routing still uses declared category capabilities.
+  // Elevated routing is anchored by TrustedProviderStatus, so a service capability
+  // record is optional there.
+  const capability = await prisma.serviceCapability.findFirst({
+    where: {
+      accountId: contributorAccountId,
+      categoryId: requestedService.categoryId!,
+    },
+    select: { id: true },
+  });
+
+  const existingRoute = await prisma.requestRoute.findUnique({
+    where: {
+      supportRequestId_contributorAccountId_serviceType_trustRequirement: {
+        supportRequestId: supportRequest.id,
+        contributorAccountId,
+        serviceType: requestedService.serviceType,
+        trustRequirement,
+      },
+    },
+  });
+
+  if (existingRoute?.status === "declined") return null;
+
+  if (!capability && trustRequirement !== "elevated") {
+    // No declared capability for this category; skip route creation
+    return null;
+  }
+
+  const route = await prisma.requestRoute.upsert({
+    where: {
+      supportRequestId_contributorAccountId_serviceType_trustRequirement: {
+        supportRequestId: supportRequest.id,
+        contributorAccountId,
+        serviceType: requestedService.serviceType,
+        trustRequirement,
+      },
+    },
+    update: existingRoute ? {} : { status: "notified" },
+    create: {
+      supportRequestId: supportRequest.id,
+      contributorAccountId,
+      serviceCapabilityId: capability?.id ?? null,
+      serviceType: requestedService.serviceType,
+      trustRequirement,
+      status: "notified",
+    },
+  });
+
+  if (!existingRoute) {
+    await logAction(prisma, {
+      groupId: supportRequest.groupId,
+      action: "request.routed",
+      targetType: "request_route",
+      targetId: route.id,
+      metadata: { supportRequestId: supportRequest.id, serviceType: requestedService.serviceType, categoryId: requestedService.categoryId },
+    });
+  }
+
+  return { ...route, notificationPayload: buildRouteNotificationPayload(routePayloadRequest, privacyResolution) };
 }

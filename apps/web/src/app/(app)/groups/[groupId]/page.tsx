@@ -42,6 +42,17 @@ import {
   proposalFamilyLabel,
   governanceCategoryLabel,
 } from "../../../../lib/petition-evaluation";
+import {
+  proposeContributionCategory,
+  proposeContributionCategoryArchival,
+  getAvailableCategoriesForScope,
+} from "../../../../lib/contribution-categories";
+import {
+  proposeTrustedProviderStatus,
+  proposeTrustedProviderRevocation,
+  getTrustedProvidersForCategory,
+  formatTrustedByLabel,
+} from "../../../../lib/trusted-providers";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { Section } from "../../../../components/shared/Section";
@@ -424,6 +435,107 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
+        {/* ── Contribution Categories ───────────────────────────────── */}
+        <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this community offers" storageKey={`group:${groupId}:section:categories`}>
+          <div className="space-y-4">
+            {data.contributionCategories.length > 0 ? (
+              <div className="space-y-3">
+                {data.contributionCategories.map((cat) => (
+                  <div key={cat.id} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--text)]">{cat.name}</p>
+                        <p className="text-xs text-[var(--muted)] mt-0.5">
+                          {cat.offeringEntityType === "group" && cat.offeringEntityName}
+                          {cat.offeringEntityType === "project" && `Project: ${cat.offeringEntityName}`}
+                          {cat.offeringEntityType === "responsibility" && `Responsibility: ${cat.offeringEntityName}`}
+                        </p>
+                        {cat.description && <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{cat.description}</p>}
+                      </div>
+                      {isActive && (
+                        <form action={proposeCategoryArchivalAction} className="shrink-0">
+                          <input type="hidden" name="groupId" value={groupId} />
+                          <input type="hidden" name="categoryId" value={cat.id} />
+                          <SubmitButton variant="secondary">Archive</SubmitButton>
+                        </form>
+                      )}
+                    </div>
+                    {/* Trusted Providers */}
+                    {cat.trustedProviders.length > 0 && (
+                      <div className="mt-3 border-t border-[var(--border)] pt-2">
+                        <p className="text-xs font-medium text-[var(--soft-text)] mb-1">Trusted providers</p>
+                        <div className="space-y-1">
+                          {cat.trustedProviders.map((tp) => (
+                            <div key={tp.id} className="flex items-center justify-between">
+                              <span className="text-xs text-[var(--soft-text)]">
+                                {tp.memberDisplayName} — {cat.offeringEntityName ? formatTrustedByLabel(tp.offeringEntityType, cat.offeringEntityName) : ""}
+                              </span>
+                              {isActive && (
+                                <form action={proposeTrustedProviderRevocationAction}>
+                                  <input type="hidden" name="groupId" value={groupId} />
+                                  <input type="hidden" name="targetMembershipId" value={tp.membershipId} />
+                                  <input type="hidden" name="statusIds" value={tp.id} />
+                                  <SubmitButton variant="secondary">Revoke</SubmitButton>
+                                </form>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Propose trusted provider */}
+                    {isActive && data.groupMembers.length > 0 && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose trusted provider</summary>
+                        <form action={proposeTrustedProviderStatusAction} className="mt-2 space-y-2">
+                          <input type="hidden" name="groupId" value={groupId} />
+                          <input type="hidden" name="categoryId" value={cat.id} />
+                          <select name="targetMembershipId" required className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
+                            <option value="">Select member…</option>
+                            {data.groupMembers.map((m) => (
+                              <option key={m.id} value={m.id}>{m.account.displayName}</option>
+                            ))}
+                          </select>
+                          <SubmitButton variant="secondary">Open petition</SubmitButton>
+                        </form>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState text="No contribution categories defined yet." />
+            )}
+            {/* Propose new category */}
+            {isActive && (
+              <details>
+                <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new category</summary>
+                <form action={proposeCategoryAction} className="mt-3 space-y-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Name</label>
+                    <input name="name" required placeholder="Transportation" className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Description</label>
+                    <textarea name="description" required rows={2} placeholder="What kind of assistance does this cover?" className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Offered by</label>
+                    <select name="offeringEntityType" required className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
+                      <option value="group">This group</option>
+                      {data.allProjects.map((p) => (
+                        <option key={p.id} value={`project:${p.id}`}>Project: {p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <SubmitButton>Open petition</SubmitButton>
+                </form>
+              </details>
+            )}
+          </div>
+        </CollapsibleSection>
+
         {/* ── Responsibilities ──────────────────────────────────────── */}
         <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage" storageKey={`group:${groupId}:section:responsibilities`}>
           <div className="space-y-4">
@@ -629,6 +741,29 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       ? await listDiscussionMessages(prisma, selectedThread.id)
       : [];
 
+    // Contribution categories
+    const contributionCategories = await getAvailableCategoriesForScope(prisma, { groupId });
+    const categoriesWithProviders = await Promise.all(
+      contributionCategories.map(async (cat) => ({
+        ...cat,
+        trustedProviders: await getTrustedProvidersForCategory(prisma, { categoryId: cat.id, groupId }),
+      })),
+    );
+
+    // Projects for entity selector in category proposal form
+    const allProjects = await prisma.project.findMany({
+      where: { groupId, status: "active", archivedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+
+    // Members for trusted provider petition form
+    const groupMembers = await prisma.groupMembership.findMany({
+      where: { groupId, status: "active" },
+      select: { id: true, account: { select: { displayName: true } } },
+      orderBy: { account: { displayName: "asc" } },
+    });
+
     // Reviewer queue
     const hasReviewerRole = await hasActiveEligibleAssignment(prisma, currentMembership.id, "reviewer");
     const reviewerQueue = hasReviewerRole
@@ -668,6 +803,9 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       coverageStatus: await getCoverageStatus(prisma, groupId),
       reviewerQueue,
       activeParticipantCount,
+      contributionCategories: categoriesWithProviders,
+      allProjects,
+      groupMembers,
     };
   } finally {
     await prisma.$disconnect();
@@ -942,6 +1080,108 @@ async function volunteerForReviewerAction(formData: FormData) {
   }
   revalidatePath(`/groups/${groupId}`);
   redirect(`/groups/${groupId}#responsibilities`);
+}
+
+async function proposeCategoryAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const name = requiredString(formData, "name");
+  const description = requiredString(formData, "description");
+  const entityRaw = requiredString(formData, "offeringEntityType");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let notice = "Category proposal opened.";
+  try {
+    // entityRaw is either "group" or "project:<projectId>"
+    const [entityType, entityId] = entityRaw.startsWith("project:")
+      ? ["project" as const, entityRaw.slice("project:".length)]
+      : ["group" as const, groupId];
+    const result = await proposeContributionCategory(prisma, {
+      membershipId: membership.id,
+      groupId,
+      offeringEntityType: entityType,
+      offeringEntityId: entityId,
+      name,
+      description,
+    });
+    if (!result.ok) notice = `Could not open category petition: ${result.reason}.`;
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+}
+
+async function proposeCategoryArchivalAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const categoryId = requiredString(formData, "categoryId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let notice = "Category archival petition opened.";
+  try {
+    const result = await proposeContributionCategoryArchival(prisma, { membershipId: membership.id, groupId, categoryId });
+    if (!result.ok) notice = `Could not open archival petition: ${result.reason}.`;
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+}
+
+async function proposeTrustedProviderStatusAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const categoryId = requiredString(formData, "categoryId");
+  const targetMembershipId = requiredString(formData, "targetMembershipId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let notice = "Trusted provider petition opened.";
+  try {
+    const result = await proposeTrustedProviderStatus(prisma, {
+      requestingMembershipId: membership.id,
+      targetMembershipId,
+      groupId,
+      categoryIds: [categoryId],
+    });
+    if (!result.ok) notice = `Could not open trusted provider petition: ${result.reason}.`;
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+}
+
+async function proposeTrustedProviderRevocationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const targetMembershipId = requiredString(formData, "targetMembershipId");
+  const statusIdsRaw = formData.get("statusIds");
+  const statusIds = typeof statusIdsRaw === "string" ? statusIdsRaw.split(",").filter(Boolean) : [];
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let notice = "Trusted provider revocation petition opened.";
+  try {
+    const result = await proposeTrustedProviderRevocation(prisma, {
+      requestingMembershipId: membership.id,
+      targetMembershipId,
+      groupId,
+      statusIds,
+    });
+    if (!result.ok) notice = `Could not open revocation petition: ${result.reason}.`;
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
 }
 
 async function updateGovernanceSignalAction(formData: FormData) {

@@ -150,6 +150,37 @@ export async function getActiveParticipantCount(prisma: PrismaClient, groupId: s
   });
 }
 
+type VoterScope = { type: "project"; scopeId: string } | null | undefined;
+
+/**
+ * Count of eligible voters for a petition, respecting its voterScope.
+ * - null/undefined scope → group-wide active participants
+ * - { type: "project", scopeId } → active project members (who are also active group members)
+ *
+ * Note: type "responsibility" is reserved for a future RFC and is not handled here.
+ */
+export async function getActiveVoterCount(
+  prisma: PrismaClient,
+  petition: { groupId: string; voterScope: unknown },
+): Promise<number> {
+  const scope = petition.voterScope as VoterScope;
+  if (scope?.type === "project") {
+    return prisma.projectMembership.count({
+      where: {
+        projectId: scope.scopeId,
+        status: "active",
+        participationStatus: "active",
+        account: {
+          groupMemberships: {
+            some: { groupId: petition.groupId, status: "active", participationStatus: "active" },
+          },
+        },
+      },
+    });
+  }
+  return getActiveParticipantCount(prisma, petition.groupId);
+}
+
 /**
  * Count of Active + Quiet members (membershipStatus: active AND participationStatus: active|quiet).
  * Use for governance preference aggregation.

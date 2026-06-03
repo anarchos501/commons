@@ -123,12 +123,30 @@ enum CoordinationAbility {
   issue_support_requests
   issue_contribution_offers
   approve_membership
+  // Contribution Categories — RFC: Contribution Categories & Trusted Provider Status
+  create_contribution_categories
   // Accountability — in enum for completeness; NOT wired into platform behavior in D2.
   // Reviewer checks continue using hasActiveEligibleAssignment (see concerns.ts).
   review_concerns
   issue_findings
   issue_action_proposals
   administrative_closure
+}
+
+enum OfferingEntityType {
+  group
+  project
+  responsibility
+}
+
+enum CategoryStatus {
+  active
+  archived
+}
+
+enum TrustedProviderStatusValue {
+  active
+  revoked
 }
 
 enum AbilityAvailability {
@@ -376,9 +394,14 @@ model Group {
   concernReviews     ConcernReview[]
   concernFindings    ConcernFinding[]
   concernProposals   ConcernActionProposal[]
-  governanceSignals  MemberGovernanceSignal[]
-  petitions          Petition[]
-  emergencyPeriods   EmergencyPeriod[]
+  governanceSignals              MemberGovernanceSignal[]
+  petitions                      Petition[]
+  emergencyPeriods               EmergencyPeriod[]
+  contributionCategories         ContributionCategory[]
+  contributionCategoryDrafts     ContributionCategoryDraft[]
+  trustedProviderApplications    TrustedProviderApplication[]
+  trustedProviderRevocations     TrustedProviderRevocationRequest[]
+  trustedProviderStatuses        TrustedProviderStatus[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -393,12 +416,16 @@ model GroupMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
 
-  account                  Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  group                    Group                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  responsibilityAssignments ResponsibilityAssignment[]
-  governanceSignals        MemberGovernanceSignal[]
-  createdPetitions         Petition[]                 @relation("PetitionCreator")
-  petitionSupport          PetitionSupport[]
+  account                       Account                            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group                         Group                              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  responsibilityAssignments     ResponsibilityAssignment[]
+  governanceSignals             MemberGovernanceSignal[]
+  createdPetitions              Petition[]                         @relation("PetitionCreator")
+  petitionSupport               PetitionSupport[]
+  proposedCategoryDrafts        ContributionCategoryDraft[]
+  trustedProviderApplications   TrustedProviderApplication[]
+  trustedProviderRevocations    TrustedProviderRevocationRequest[]
+  trustedProviderStatuses       TrustedProviderStatus[]
 
   @@unique([accountId, groupId])
   @@index([accountId])
@@ -495,18 +522,22 @@ model ServiceCapability {
   visibility       VisibilityLevel         @default(group)
   trustRequirement TrustRequirement        @default(lightweight)
   approvalStatus   ServiceCapabilityStatus @default(available)
+  // Optional link to a community-governed ContributionCategory (RFC: Contribution Categories)
+  categoryId       String?
   createdAt        DateTime                @default(now())
 
   account             Account                    @relation(fields: [accountId], references: [id])
   trustedRecords      TrustedServiceCapability[]
   requestRoutes       RequestRoute[]
   availabilityRecords ContributorAvailability[]
+  category            ContributionCategory?      @relation(fields: [categoryId], references: [id])
 
   @@unique([accountId, serviceType, trustRequirement])
   @@index([accountId])
   @@index([serviceType])
   @@index([approvalStatus])
   @@index([trustRequirement])
+  @@index([categoryId])
 }
 
 model TrustedServiceCapability {
@@ -578,20 +609,24 @@ model SupportRequestService {
   supportRequestId String
   serviceType      String
   trustRequirement TrustRequirement @default(lightweight)
+  // Optional link to a community-governed ContributionCategory (RFC: Contribution Categories)
+  categoryId       String?
   createdAt        DateTime         @default(now())
 
-  supportRequest SupportRequest @relation(fields: [supportRequestId], references: [id])
+  supportRequest SupportRequest        @relation(fields: [supportRequestId], references: [id])
+  category       ContributionCategory? @relation(fields: [categoryId], references: [id])
 
   @@unique([supportRequestId, serviceType, trustRequirement])
   @@index([serviceType])
   @@index([trustRequirement])
+  @@index([categoryId])
 }
 
 model RequestRoute {
   id                   String             @id @default(cuid())
   supportRequestId     String
   contributorAccountId String
-  serviceCapabilityId  String
+  serviceCapabilityId  String?
   serviceType          String
   trustRequirement     TrustRequirement   @default(lightweight)
   status               RequestRouteStatus @default(notified)
@@ -602,7 +637,7 @@ model RequestRoute {
 
   supportRequest    SupportRequest    @relation(fields: [supportRequestId], references: [id], onDelete: Cascade)
   contributor       Account           @relation(fields: [contributorAccountId], references: [id], onDelete: Cascade)
-  serviceCapability ServiceCapability @relation(fields: [serviceCapabilityId], references: [id], onDelete: Cascade)
+  serviceCapability ServiceCapability? @relation(fields: [serviceCapabilityId], references: [id], onDelete: Cascade)
 
   @@unique([supportRequestId, contributorAccountId, serviceType, trustRequirement])
   @@index([supportRequestId])
@@ -920,6 +955,9 @@ model Petition {
   competitionKey        String?   // derived from subjectType+subjectId; null = non-competing
   status                String    @default("open") // open | approved | rejected | withdrawn | superseded | blocked
   governanceSnapshot    Json      // resolved parameters frozen at petition open time
+  // null = group-wide voting; { type: "project", scopeId } = project-member voting
+  // type: "responsibility" is reserved for a future RFC
+  voterScope            Json?
   opensAt               DateTime  @default(now())
   closesAt              DateTime
   resolvedAt            DateTime?
@@ -1201,4 +1239,93 @@ model DiscussionMessage {
   @@index([authorId])
   @@index([expiresAt])
   @@index([createdAt])
+}
+
+// --- RFC: Contribution Categories & Trusted Provider Status ---
+
+model ContributionCategoryDraft {
+  id                     String             @id @default(cuid())
+  groupId                String
+  offeringEntityType     OfferingEntityType
+  offeringEntityId       String
+  name                   String
+  description            String
+  proposedByMembershipId String
+  createdAt              DateTime           @default(now())
+
+  group      Group           @relation(fields: [groupId], references: [id])
+  membership GroupMembership @relation(fields: [proposedByMembershipId], references: [id])
+
+  @@index([groupId])
+  @@index([proposedByMembershipId])
+}
+
+model ContributionCategory {
+  id                 String             @id @default(cuid())
+  groupId            String             // governance anchor — always a Group ID
+  offeringEntityType OfferingEntityType
+  offeringEntityId   String             // ID of the offering group/project/responsibility
+  name               String
+  description        String
+  status             CategoryStatus     @default(active)
+  createdAt          DateTime           @default(now())
+  archivedAt         DateTime?
+
+  group               Group                  @relation(fields: [groupId], references: [id])
+  trustedProviders    TrustedProviderStatus[]
+  serviceCapabilities ServiceCapability[]
+  requestServices     SupportRequestService[]
+
+  @@unique([offeringEntityType, offeringEntityId, name])
+  @@index([groupId])
+  @@index([offeringEntityType, offeringEntityId])
+  @@index([status])
+}
+
+model TrustedProviderApplication {
+  id           String   @id @default(cuid())
+  membershipId String   // the member being trusted
+  groupId      String
+  categoryIds  Json     // String[] — IDs of ContributionCategory records
+  requestedAt  DateTime @default(now())
+
+  membership GroupMembership @relation(fields: [membershipId], references: [id])
+  group      Group           @relation(fields: [groupId], references: [id])
+
+  @@index([membershipId])
+  @@index([groupId])
+}
+
+model TrustedProviderRevocationRequest {
+  id                 String   @id @default(cuid())
+  targetMembershipId String
+  groupId            String
+  statusIds          Json     // String[] — IDs of TrustedProviderStatus records to revoke
+  requestedAt        DateTime @default(now())
+
+  membership GroupMembership @relation(fields: [targetMembershipId], references: [id])
+  group      Group           @relation(fields: [groupId], references: [id])
+
+  @@index([targetMembershipId])
+  @@index([groupId])
+}
+
+model TrustedProviderStatus {
+  id           String                     @id @default(cuid())
+  membershipId String
+  categoryId   String
+  groupId      String
+  status       TrustedProviderStatusValue @default(active)
+  grantedAt    DateTime                   @default(now())
+  revokedAt    DateTime?
+
+  membership GroupMembership      @relation(fields: [membershipId], references: [id])
+  category   ContributionCategory @relation(fields: [categoryId], references: [id])
+  group      Group                @relation(fields: [groupId], references: [id])
+
+  @@unique([membershipId, categoryId])
+  @@index([membershipId])
+  @@index([categoryId])
+  @@index([groupId])
+  @@index([status])
 }

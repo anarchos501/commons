@@ -117,6 +117,49 @@ test("unapproved elevated contributors are excluded from sensitive routing", asy
   assert.equal(routes.length, 0);
 });
 
+test("elevated category request routes to active trusted provider without declared capability", async () => {
+  const fixture = await createFixture("category_trusted");
+  const aliceMembership = await prisma.groupMembership.findFirstOrThrow({
+    where: { groupId: fixture.group.id, accountId: fixture.alice.id },
+  });
+  const category = await prisma.contributionCategory.create({
+    data: {
+      id: "caproute_category_trusted_category",
+      groupId: fixture.group.id,
+      offeringEntityType: "group",
+      offeringEntityId: fixture.group.id,
+      name: "Transportation",
+      description: "Rides and transit support.",
+      status: "active",
+    },
+  });
+  await prisma.trustedProviderStatus.create({
+    data: {
+      id: "caproute_category_trusted_status",
+      membershipId: aliceMembership.id,
+      categoryId: category.id,
+      groupId: fixture.group.id,
+      status: "active",
+    },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_category_trusted_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    requestType: "category",
+    requestedServices: [{ serviceType: "category", categoryId: category.id, trustRequirement: "elevated" }],
+    description: "Needs a trusted ride.",
+    expiresAt: futureDate(),
+  });
+
+  const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].contributorAccountId, fixture.alice.id);
+  assert.equal(routes[0].serviceCapabilityId, null);
+});
+
 test("contributors outside availability are excluded", async () => {
   const fixture = await createFixture("unavailable");
   await declareServiceCapability(prisma, {
@@ -563,6 +606,8 @@ async function cleanupFixture(prefix: string) {
   await prisma.requestRoute.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.supportRequestService.deleteMany({ where: { supportRequestId: { startsWith: prefix } } });
   await prisma.supportRequest.deleteMany({ where: { id: { startsWith: prefix } } });
+  await prisma.trustedProviderStatus.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.contributionCategory.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.trustedServiceCapability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.contributorAvailability.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.serviceCapability.deleteMany({ where: { accountId: { startsWith: prefix } } });

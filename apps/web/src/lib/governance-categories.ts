@@ -8,7 +8,9 @@ export type GovernanceCategory =
   | "support_request"
   | "contribution_offer"
   | "emergency"
-  | "discussion";
+  | "discussion"
+  | "contribution_category"
+  | "trusted_provider";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -21,6 +23,8 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "contribution_offer",
   "emergency",
   "discussion",
+  "contribution_category",
+  "trusted_provider",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -89,6 +93,15 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     // Discussion retention is bounded: governance can shorten/lengthen, never disable expiration.
     messageRetentionDays: { anchors: [7, 30, 90], min: 1, max: 90 },
     threadInactivityDays: { anchors: [14, 60, 180], min: 1, max: 180 },
+  },
+  // RFC: Contribution Categories & Trusted Provider Status
+  contribution_category: {
+    threshold: { anchors: [0.70, 0.50, 0.30] },
+    petitionDuration: { anchors: [14, 7, 3] },
+  },
+  trusted_provider: {
+    threshold: { anchors: [0.70, 0.50, 0.30] },
+    petitionDuration: { anchors: [14, 7, 3] },
   },
 };
 

@@ -34,6 +34,7 @@ import { resolveCurrentNode } from "../../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
 import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
+import { getAvailableCategoriesForScope, trustedProviderExistsForCategory } from "../../../../lib/contribution-categories";
 
 export const dynamic = "force-dynamic";
 
@@ -138,16 +139,29 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       );
     }
 
-    const serviceOfferings = await prisma.groupServiceOffering.findMany({
-      where: { groupId: group.id, status: "active" },
-      select: { serviceType: true },
-      orderBy: { serviceType: "asc" },
-    });
+    const [serviceOfferings, rawCategories] = await Promise.all([
+      prisma.groupServiceOffering.findMany({
+        where: { groupId: group.id, status: "active" },
+        select: { serviceType: true },
+        orderBy: { serviceType: "asc" },
+      }),
+      getAvailableCategoriesForScope(prisma, { groupId: group.id }),
+    ]);
+
+    // Pre-compute trusted provider existence per category for the trust preference picker
+    const categories = await Promise.all(
+      rawCategories.map(async (cat) => ({
+        ...cat,
+        hasTrustedProviders: await trustedProviderExistsForCategory(prisma, { categoryId: cat.id, groupId: group.id }),
+      })),
+    );
+    const anyTrustedProviders = categories.some((c) => c.hasTrustedProviders);
 
     async function submitGroupScopedRequest(formData: FormData) {
       "use server";
 
-      const serviceType = formData.get("serviceType");
+      const serviceType = formData.get("serviceType") as string | null;
+      const categoryId = formData.get("categoryId") as string | null;
       const contact = formData.get("contact");
       const urgency = formData.get("urgency") as "low" | "normal" | "high" | "urgent" | null;
       const location = formData.get("location");
@@ -155,7 +169,14 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       const trustPreference = (formData.get("trustPreference") ?? "lightweight") as "lightweight" | "elevated";
       const activeDays = Math.min(90, Math.max(3, parseInt((formData.get("activeDays") as string) ?? "30", 10) || 30));
 
-      if (typeof serviceType !== "string" || typeof contact !== "string" || !contact.trim()) {
+      // Either a category or a legacy service type must be provided
+      const selectedCategoryId = categoryId?.trim() || null;
+      const selectedServiceType = serviceType?.trim() || "";
+      const resolvedServiceType = selectedCategoryId ? "category" : selectedServiceType;
+      if (!resolvedServiceType) {
+        redirect(`/request/${groupId}?error=1`);
+      }
+      if (typeof contact !== "string" || !contact.trim()) {
         redirect(`/request/${groupId}?error=1`);
       }
 
@@ -185,8 +206,12 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           guestRequestId: randomUUID(),
           submittedByAccountId: null,
           groupId: actionGroup.id,
-          requestType: serviceType,
-          requestedServices: [{ serviceType, trustRequirement: trustPreference }],
+          requestType: resolvedServiceType,
+          requestedServices: [{
+            serviceType: resolvedServiceType,
+            categoryId: selectedCategoryId ?? undefined,
+            trustRequirement: trustPreference,
+          }],
           description,
           urgency: urgency ?? "normal",
           privacyLevel: "private",
@@ -229,26 +254,51 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           <AlphaNotice />
 
           <form action={submitGroupScopedRequest} className="flex flex-col gap-5 rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-            <label className="block">
+            <div className="block">
               <span className="field-label">What do you need help with?</span>
-              <select name="serviceType" className="field-input" defaultValue={serviceOfferings[0]?.serviceType ?? ""}>
-                {serviceOfferings.map((offering) => (
-                  <option key={offering.serviceType} value={offering.serviceType}>
-                    {capitalize(offering.serviceType)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              {categories.length > 0 ? (
+                <>
+                  <select name="categoryId" className="field-input">
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id} data-has-trusted={cat.hasTrustedProviders ? "1" : "0"}>
+                        {cat.name}
+                        {cat.offeringEntityName ? ` — ${
+                          cat.offeringEntityType === "group" ? cat.offeringEntityName
+                          : cat.offeringEntityType === "project" ? `Project: ${cat.offeringEntityName}`
+                          : `Responsibility: ${cat.offeringEntityName}`
+                        }` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="hidden" name="serviceType" value="" />
+                </>
+              ) : (
+                <>
+                  <select name="serviceType" className="field-input" defaultValue={serviceOfferings[0]?.serviceType ?? ""}>
+                    {serviceOfferings.map((offering) => (
+                      <option key={offering.serviceType} value={offering.serviceType}>
+                        {capitalize(offering.serviceType)}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="hidden" name="categoryId" value="" />
+                </>
+              )}
+            </div>
 
-            <label className="block">
-              <span className="field-label">Who should help?</span>
-              <select name="trustPreference" className="field-input" defaultValue="lightweight">
-                {trustPreferenceOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-[var(--muted)]">You know best what level of trust you need.</p>
-            </label>
+            {anyTrustedProviders && (
+              <label className="block">
+                <span className="field-label">Who should help?</span>
+                <select name="trustPreference" className="field-input" defaultValue="lightweight">
+                  {trustPreferenceOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Trusted providers have been recognized by {group.name}. You decide whether that matters.
+                </p>
+              </label>
+            )}
 
             <label className="block">
               <span className="field-label">Safe contact note</span>

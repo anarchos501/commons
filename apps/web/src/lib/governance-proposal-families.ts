@@ -15,7 +15,12 @@ export type ProposalFamily =
   | "emergency_declaration"
   | "discussion_thread_close"
   | "collective_support_request"
-  | "collective_contribution_offer";
+  | "collective_contribution_offer"
+  // RFC: Contribution Categories & Trusted Provider Status
+  | "contribution_category_proposal"
+  | "contribution_category_archive"
+  | "trusted_provider_proposal"
+  | "trusted_provider_revocation";
 
 const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
@@ -31,6 +36,10 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   discussion_thread_close: "discussion",
   collective_support_request: "support_request",
   collective_contribution_offer: "contribution_offer",
+  contribution_category_proposal: "contribution_category",
+  contribution_category_archive: "contribution_category",
+  trusted_provider_proposal: "trusted_provider",
+  trusted_provider_revocation: "trusted_provider",
 };
 
 export function isProposalFamily(value: string): value is ProposalFamily {
@@ -54,6 +63,11 @@ export function deriveCompetitionKey(
     case "responsibility_proposal":
     // Non-competing: emergency periods are managed by EmergencyPeriod model, not competition
     case "emergency_declaration":
+    // Non-competing: idempotent handlers prevent duplicates for categories and trusted provider status
+    case "contribution_category_proposal":
+    case "contribution_category_archive":
+    case "trusted_provider_proposal":
+    case "trusted_provider_revocation":
       return null;
     // All others: groupId:family:subjectId is unique per decision within a group
     default:
