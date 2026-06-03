@@ -1,5 +1,5 @@
 // D4: LivingDocument lib -- create, revise, archive, list.
-// Discussion is a separate, deferred communication type. It must remain
+// Discussion is a separate, temporary communication type. It must remain
 // distinct from Bulletins, Publications, and LivingDocuments.
 import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";

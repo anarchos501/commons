@@ -2,27 +2,6 @@
 
 Commons is a simple, secure mutual aid coordination app for real-world groups.
 
-## Project Boundary
-
-This repository is independent.
-
-Commons is its own project. It is not part of Tribal Commons, and Tribal Commons is not part of Commons.
-
-Do not import code, schemas, migrations, databases, or configuration from Tribal Commons.
-
-Any shared functionality must be explicitly copied or packaged.
-
-Before making schema, governance, roadmap, or implementation recommendations, verify this repository is Commons. Commons and Tribal Commons are independent projects. Similar concepts do not imply shared implementation.
-
-If this project identity conflicts with surrounding folder names, package names, database names, or prior context, stop and ask before proceeding.
-
-Open Codex from `C:\Users\Nico\commons` when working on Commons.
-
-Local database: `commons_local_dev`
-
-Docker container name: `commons-postgres`
-
-Docker host port: `5433`
 
 It is not a social network, charity management platform, surveillance system, automated governance engine, or generalized distributed governance framework. Commons is coordination infrastructure for communities that need to organize care, labor, resources, trust, projects, and decisions without surrendering autonomy to centralized authority.
 

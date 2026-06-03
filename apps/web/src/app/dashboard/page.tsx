@@ -14,6 +14,7 @@ import {
   LogOut,
   MapPin,
   Megaphone,
+  MessageCircle,
   Shield,
   X,
 } from "lucide-react";
@@ -36,6 +37,7 @@ import { confirmResponsibilityAssignment, expireStaleAssignments, hasActiveEligi
 import { createBulletin } from "../../lib/bulletins";
 import { createPublication } from "../../lib/publications";
 import { createLivingDocument, draftLivingDocumentRevision, onLivingDocumentArchivalPetitionApproved, onRevisionPetitionApproved, openRevisionPetition } from "../../lib/living-documents";
+import { createDiscussionThread, ensureGeneralDiscussion, listDiscussionMessages, listDiscussionThreads, onThreadClosurePetitionApproved, openThreadClosurePetition, postDiscussionMessage } from "../../lib/discussions";
 import { addPetitionSupport, evaluatePetition, withdrawPetitionSupport } from "../../lib/petitions";
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../lib/governance-resolver";
@@ -77,7 +79,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
 
   const params = await searchParams;
   const notice = typeof params.notice === "string" ? params.notice : null;
-  const data = await getDashboardData(session.accountId, session.activeGroupId ?? null);
+  const discussionThreadId = typeof params.discussionThread === "string" ? params.discussionThread : null;
+  const data = await getDashboardData(session.accountId, session.activeGroupId ?? null, discussionThreadId);
 
   return (
     <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
@@ -130,6 +133,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             <JumpLink href="#routes" icon={<Inbox className="h-4 w-4" />}>
               Notifications
             </JumpLink>
+            {data.group ? (
+              <JumpLink href="#discussion" icon={<MessageCircle className="h-4 w-4" />}>
+                Discussion
+              </JumpLink>
+            ) : null}
             {data.group ? (
               <JumpLink href="#bulletins" icon={<Megaphone className="h-4 w-4" />}>
                 Bulletins
@@ -607,6 +615,85 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </label>
                 <SubmitButton variant="secondary">Submit concern</SubmitButton>
               </form>
+            </Section>
+
+            <Section id="discussion" title="Discussion" eyebrow="Temporary coordination">
+              {data.groupDiscussionThreads.length > 0 ? (
+                <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    {data.groupDiscussionThreads.map((thread) => (
+                      <a
+                        key={thread.id}
+                        href={`/dashboard?discussionThread=${thread.id}#discussion`}
+                        className={`block rounded border p-3 text-sm transition hover:bg-[var(--hover)] ${
+                          data.selectedDiscussionThread?.id === thread.id
+                            ? "border-[var(--accent)] bg-[var(--subtle)]"
+                            : "border-[var(--border)]"
+                        }`}
+                      >
+                        <span className="font-medium text-[var(--text)]">{thread.title}</span>
+                        <span className="mt-1 block text-xs text-[var(--muted)]">
+                          {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"} &middot; {formatRelativeDate(thread.lastActivityAt)}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                  <div className="rounded border border-[var(--border)] p-3">
+                    {data.selectedDiscussionThread ? (
+                      <>
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-[var(--text)]">{data.selectedDiscussionThread.title}</p>
+                            <p className="text-xs text-[var(--muted)]">Messages expire automatically.</p>
+                          </div>
+                          {data.currentMembership?.participationStatus === "active" ? (
+                            <form action={openThreadClosurePetitionAction}>
+                              <input type="hidden" name="threadId" value={data.selectedDiscussionThread.id} />
+                              <SubmitButton variant="secondary">Propose closure</SubmitButton>
+                            </form>
+                          ) : null}
+                        </div>
+                        {data.groupDiscussionMessages.length > 0 ? (
+                          <div className="mb-3 max-h-72 space-y-3 overflow-y-auto pr-1">
+                            {data.groupDiscussionMessages.map((message) => (
+                              <div key={message.id} className="rounded bg-[var(--subtle)] px-3 py-2">
+                                <p className="text-sm leading-6 text-[var(--soft-text)]">{message.body}</p>
+                                <p className="mt-1 text-xs text-[var(--muted)]">
+                                  {message.author.displayName} &middot; {formatRelativeDate(message.createdAt)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <EmptyState text="No active messages in this thread." />
+                        )}
+                        {data.currentMembership?.participationStatus === "active" ? (
+                          <form action={postDiscussionMessageAction} className="space-y-2">
+                            <input type="hidden" name="threadId" value={data.selectedDiscussionThread.id} />
+                            <textarea name="body" required rows={3} className="field-input resize-none" placeholder="Add a temporary coordination note." />
+                            <SubmitButton variant="secondary">Post message</SubmitButton>
+                          </form>
+                        ) : (
+                          <p className="text-xs text-[var(--muted)]">Quiet members can read discussion but cannot post.</p>
+                        )}
+                      </>
+                    ) : (
+                      <EmptyState text="No active discussion thread selected." />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <EmptyState text="No active discussion threads yet." />
+              )}
+              {data.currentMembership?.participationStatus === "active" ? (
+                <form action={createDiscussionThreadAction} className="space-y-3">
+                  <label className="block">
+                    <span className="field-label">New thread</span>
+                    <input name="title" type="text" required className="field-input" placeholder="A focused coordination topic" />
+                  </label>
+                  <SubmitButton variant="secondary">Create thread</SubmitButton>
+                </form>
+              ) : null}
             </Section>
 
             <Section id="bulletins" title="Bulletins" eyebrow="Group updates">
@@ -1263,6 +1350,71 @@ async function submitConcernAction(formData: FormData) {
   redirect("/dashboard#concerns");
 }
 
+async function createDiscussionThreadAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const title = requiredString(formData, "title");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    const thread = await createDiscussionThread(prisma, {
+      spaceType: "group",
+      spaceId: groupId,
+      groupId,
+      createdByMembershipId: membership.id,
+      title,
+    });
+    revalidatePath("/dashboard");
+    redirect(`/dashboard?discussionThread=${thread.id}#discussion`);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function postDiscussionMessageAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const threadId = requiredString(formData, "threadId");
+  const body = requiredString(formData, "body");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    await postDiscussionMessage(prisma, { threadId, groupId, authorMembershipId: membership.id, body });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect(`/dashboard?discussionThread=${threadId}#discussion`);
+}
+
+async function openThreadClosurePetitionAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = session.activeGroupId;
+  if (!groupId) redirect("/dashboard");
+  const threadId = requiredString(formData, "threadId");
+  const prisma = createPrismaClient();
+  let notice = "Thread closure petition opened.";
+  try {
+    const membership = await requireDashboardMembership(prisma, session.accountId, groupId);
+    const result = await openThreadClosurePetition(prisma, { threadId, groupId, createdByMembershipId: membership.id });
+    if (!result.ok) {
+      notice = discussionPetitionFailureNotice(result.reason);
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+  redirect(`/dashboard?discussionThread=${threadId}&notice=${encodeURIComponent(notice)}#discussion`);
+}
+
 async function createBulletinAction(formData: FormData) {
   "use server";
   const session = await getSession();
@@ -1452,7 +1604,7 @@ async function updateGovernanceSignalAction(formData: FormData) {
   redirect("/dashboard#governance-settings");
 }
 
-async function getDashboardData(accountId: string, groupId: string | null) {
+async function getDashboardData(accountId: string, groupId: string | null, selectedDiscussionThreadId: string | null) {
   const prisma = createPrismaClient();
 
   try {
@@ -1611,7 +1763,7 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       }),
     );
     const governanceCategories = GOVERNANCE_CATEGORIES.filter(
-      (category): category is GovernanceCategory => category === "living_document" || category === "responsibility",
+      (category): category is GovernanceCategory => category === "living_document" || category === "responsibility" || category === "discussion",
     );
     const currentSignals = currentMembership
       ? await prisma.memberGovernanceSignal.findMany({
@@ -1632,6 +1784,23 @@ async function getDashboardData(accountId: string, groupId: string | null) {
             };
           }),
         )
+      : [];
+    let groupDiscussionThreads = group
+      ? await listDiscussionThreads(prisma, { spaceType: "group", spaceId: group.id, groupId: group.id })
+      : [];
+    if (group && currentMembership?.participationStatus === "active" && groupDiscussionThreads.length === 0) {
+      await ensureGeneralDiscussion(prisma, {
+        spaceType: "group",
+        spaceId: group.id,
+        groupId: group.id,
+        createdByMembershipId: currentMembership.id,
+      });
+      groupDiscussionThreads = await listDiscussionThreads(prisma, { spaceType: "group", spaceId: group.id, groupId: group.id });
+    }
+    const selectedDiscussionThread =
+      groupDiscussionThreads.find((thread) => thread.id === selectedDiscussionThreadId) ?? groupDiscussionThreads[0] ?? null;
+    const groupDiscussionMessages = selectedDiscussionThread
+      ? await listDiscussionMessages(prisma, selectedDiscussionThread.id)
       : [];
 
     return {
@@ -1680,6 +1849,9 @@ async function getDashboardData(accountId: string, groupId: string | null) {
       groupBulletins,
       groupPublications,
       groupLivingDocuments,
+      groupDiscussionThreads,
+      selectedDiscussionThread,
+      groupDiscussionMessages,
       groupPetitions,
       governanceSettings,
       reviewerQueue: group
@@ -1731,6 +1903,8 @@ async function evaluateAndApplyPetition(prisma: ReturnType<typeof createPrismaCl
     await onRevisionPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "living_document_archive") {
     await onLivingDocumentArchivalPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "discussion_thread_close") {
+    await onThreadClosurePetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "responsibility_proposal") {
     await confirmResponsibilityAssignment(prisma, petitionId);
   }
@@ -1762,6 +1936,14 @@ async function describePetitionSubject(prisma: ReturnType<typeof createPrismaCli
     return membership ? `${membership.account.displayName} for ${capitalize(type)}` : subjectId;
   }
 
+  if (subjectType === "discussion_thread_close") {
+    const thread = await prisma.discussionThread.findUnique({
+      where: { id: subjectId },
+      select: { title: true },
+    });
+    return thread ? `Close ${thread.title}` : subjectId;
+  }
+
   return subjectId;
 }
 
@@ -1786,10 +1968,26 @@ function proposalFamilyLabel(subjectType: string) {
       return "Living document revision";
     case "living_document_archive":
       return "Living document archival";
+    case "discussion_thread_close":
+      return "Discussion thread closure";
     case "responsibility_proposal":
       return "Responsibility volunteer";
     default:
       return subjectType.replace(/_/g, " ");
+  }
+}
+
+function discussionPetitionFailureNotice(reason: string) {
+  switch (reason) {
+    case "creator_not_eligible":
+      return "Only active members can propose closing a discussion thread.";
+    case "petition_already_open":
+      return "A closure petition is already open for this discussion thread.";
+    case "category_mismatch":
+    case "invalid_family":
+      return "This discussion closure petition could not be opened.";
+    default:
+      return "This discussion closure petition could not be opened.";
   }
 }
 
@@ -1799,6 +1997,8 @@ function governanceCategoryLabel(category: GovernanceCategory) {
       return "Living Documents";
     case "responsibility":
       return "Responsibilities";
+    case "discussion":
+      return "Discussion";
     default:
       return category.replace(/_/g, " ");
   }

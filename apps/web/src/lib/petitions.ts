@@ -1,4 +1,5 @@
 import type { PrismaClient } from "../generated/prisma/client";
+import { Prisma } from "../generated/prisma/client";
 import { isGovernanceCategory } from "./governance-categories";
 import { isProposalFamily, categoryForFamily, deriveCompetitionKey } from "./governance-proposal-families";
 import { snapshotGovernanceParams } from "./governance-resolver";
@@ -8,7 +9,7 @@ export type PetitionStatus = "open" | "approved" | "rejected" | "withdrawn" | "s
 
 export type OpenPetitionResult =
   | { ok: true; petitionId: string }
-  | { ok: false; reason: "invalid_family" | "category_mismatch" | "creator_not_eligible" };
+  | { ok: false; reason: "invalid_family" | "category_mismatch" | "creator_not_eligible" | "petition_already_open" };
 
 export type EvaluateResult =
   | { outcome: "approved" | "rejected" | "blocked" }
@@ -106,22 +107,28 @@ export async function openPetition(
   const opensAt = new Date();
   const closesAt = new Date(opensAt.getTime() + snapshot.petitionDuration * 24 * 60 * 60 * 1000);
 
-  const petition = await prisma.petition.create({
-    data: {
-      groupId,
-      category,
-      subjectType,
-      subjectId,
-      competitionKey,
-      status: "open",
-      governanceSnapshot: snapshot as object,
-      opensAt,
-      closesAt,
-      createdByMembershipId,
-    },
-  });
-
-  return { ok: true, petitionId: petition.id };
+  try {
+    const petition = await prisma.petition.create({
+      data: {
+        groupId,
+        category,
+        subjectType,
+        subjectId,
+        competitionKey,
+        status: "open",
+        governanceSnapshot: snapshot as object,
+        opensAt,
+        closesAt,
+        createdByMembershipId,
+      },
+    });
+    return { ok: true, petitionId: petition.id };
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return { ok: false, reason: "petition_already_open" };
+    }
+    throw err;
+  }
 }
 
 export type AddSupportResult =

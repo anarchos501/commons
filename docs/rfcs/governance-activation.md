@@ -544,4 +544,4 @@ RFC-004's `declareTempStewardship()` creates a 30-day emergency assignment durin
 - Recall petitions (infrastructure ready; deferred in RFC-004)
 - Cross-group governance coordination
 - Federation governance
-- Discussion threading (deferred from RFC-005)
+- Concern-remedy integration for discussion thread closure

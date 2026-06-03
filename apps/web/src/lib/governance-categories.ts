@@ -7,7 +7,8 @@ export type GovernanceCategory =
   | "archival"
   | "support_request"
   | "contribution_offer"
-  | "emergency";
+  | "emergency"
+  | "discussion";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -19,6 +20,7 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "support_request",
   "contribution_offer",
   "emergency",
+  "discussion",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -81,6 +83,13 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     // Permissive = longer emergencies (sustained activation tolerated)
     duration: { anchors: [14, 30, 60] },
   },
+  discussion: {
+    threshold: { anchors: [0.75, 0.55, 0.35] },
+    petitionDuration: { anchors: [14, 7, 3] },
+    // Discussion retention is bounded: governance can shorten/lengthen, never disable expiration.
+    messageRetentionDays: { anchors: [7, 30, 90], min: 1, max: 90 },
+    threadInactivityDays: { anchors: [14, 60, 180], min: 1, max: 180 },
+  },
 };
 
 export type ResolvedCategoryParams = {
@@ -88,6 +97,8 @@ export type ResolvedCategoryParams = {
   petitionDuration: number;
   reconfirmationPeriod?: number;
   duration?: number;
+  messageRetentionDays?: number;
+  threadInactivityDays?: number;
 };
 
 // Piecewise linear interpolation between three anchor points.
@@ -141,5 +152,9 @@ export function validateGovernanceSnapshot(
   if (typeof s.threshold !== "number" || typeof s.petitionDuration !== "number") return false;
   if (category === "responsibility" && typeof s.reconfirmationPeriod !== "number") return false;
   if (category === "emergency" && typeof s.duration !== "number") return false;
+  if (
+    category === "discussion" &&
+    (typeof s.messageRetentionDays !== "number" || typeof s.threadInactivityDays !== "number")
+  ) return false;
   return true;
 }

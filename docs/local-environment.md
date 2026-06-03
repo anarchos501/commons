@@ -6,8 +6,6 @@ Do not share Docker containers, databases, migrations, environment files, or sta
 
 ## Identity
 
-- Project folder: `C:\Users\Nico\commons`
-- Docker Compose file: `C:\Users\Nico\commons\docker-compose.yml`
 - PostgreSQL container: `commons-postgres`
 - PostgreSQL database: `commons_local_dev`
 - PostgreSQL host port: `5433`

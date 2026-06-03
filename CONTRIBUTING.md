@@ -16,12 +16,6 @@ Before making schema, governance, roadmap, or implementation recommendations, ve
 
 If this project identity conflicts with surrounding folder names, package names, database names, or prior context, stop and ask before proceeding.
 
-## Local Identity
-
-- Project folder: `C:\Users\Nico\commons`
-- Local database: `commons_local_dev`
-- Docker container name: `commons-postgres`
-
 ## Code Standards
 
 - Keep core behavior understandable before making it clever.

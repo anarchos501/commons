@@ -9,8 +9,8 @@ import {
   validateGovernanceSnapshot,
 } from "../lib/governance-categories";
 
-test("all 9 categories are registered", () => {
-  assert.equal(GOVERNANCE_CATEGORIES.length, 9);
+test("all 10 categories are registered", () => {
+  assert.equal(GOVERNANCE_CATEGORIES.length, 10);
   for (const category of GOVERNANCE_CATEGORIES) {
     assert.ok(CATEGORY_REGISTRY[category], `${category} missing from registry`);
   }
@@ -35,6 +35,8 @@ test("resolveParameter at temperature=0 returns default anchor", () => {
   assert.equal(resolveParameter("membership", "petitionDuration", 0), 7);
   assert.equal(resolveParameter("responsibility", "reconfirmationPeriod", 0), 365);
   assert.equal(resolveParameter("emergency", "duration", 0), 30);
+  assert.equal(resolveParameter("discussion", "messageRetentionDays", 0), 30);
+  assert.equal(resolveParameter("discussion", "threadInactivityDays", 0), 60);
 });
 
 test("resolveParameter at temperature=-1 returns restrictive anchor", () => {
@@ -42,6 +44,8 @@ test("resolveParameter at temperature=-1 returns restrictive anchor", () => {
   assert.equal(resolveParameter("membership", "petitionDuration", -1), 14);
   assert.equal(resolveParameter("emergency", "threshold", -1), 0.90);
   assert.equal(resolveParameter("responsibility", "reconfirmationPeriod", -1), 90);
+  assert.equal(resolveParameter("discussion", "messageRetentionDays", -1), 7);
+  assert.equal(resolveParameter("discussion", "threadInactivityDays", -1), 14);
 });
 
 test("resolveParameter at temperature=+1 returns permissive anchor", () => {
@@ -49,6 +53,8 @@ test("resolveParameter at temperature=+1 returns permissive anchor", () => {
   assert.equal(resolveParameter("membership", "petitionDuration", 1), 3);
   assert.equal(resolveParameter("emergency", "duration", 1), 60);
   assert.equal(resolveParameter("responsibility", "reconfirmationPeriod", 1), 730);
+  assert.equal(resolveParameter("discussion", "messageRetentionDays", 1), 90);
+  assert.equal(resolveParameter("discussion", "threadInactivityDays", 1), 180);
 });
 
 test("resolveParameter interpolates linearly between anchors", () => {
@@ -84,18 +90,24 @@ test("resolveAllParameters returns all keys for each category", () => {
 
   const emergency = resolveAllParameters("emergency", 0);
   assert.ok("duration" in emergency);
+
+  const discussion = resolveAllParameters("discussion", 0);
+  assert.ok("messageRetentionDays" in discussion);
+  assert.ok("threadInactivityDays" in discussion);
 });
 
 test("validateGovernanceSnapshot accepts valid snapshots", () => {
   assert.equal(validateGovernanceSnapshot("membership", { threshold: 0.6, petitionDuration: 7 }), true);
   assert.equal(validateGovernanceSnapshot("responsibility", { threshold: 0.5, petitionDuration: 7, reconfirmationPeriod: 365 }), true);
   assert.equal(validateGovernanceSnapshot("emergency", { threshold: 0.8, petitionDuration: 3, duration: 30 }), true);
+  assert.equal(validateGovernanceSnapshot("discussion", { threshold: 0.55, petitionDuration: 7, messageRetentionDays: 30, threadInactivityDays: 60 }), true);
 });
 
 test("validateGovernanceSnapshot rejects missing fields", () => {
   assert.equal(validateGovernanceSnapshot("membership", { threshold: 0.6 }), false);
   assert.equal(validateGovernanceSnapshot("responsibility", { threshold: 0.5, petitionDuration: 7 }), false);
   assert.equal(validateGovernanceSnapshot("emergency", { threshold: 0.8, petitionDuration: 3 }), false);
+  assert.equal(validateGovernanceSnapshot("discussion", { threshold: 0.55, petitionDuration: 7 }), false);
   assert.equal(validateGovernanceSnapshot("membership", null), false);
   assert.equal(validateGovernanceSnapshot("membership", "not an object"), false);
 });

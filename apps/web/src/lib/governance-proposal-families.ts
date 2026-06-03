@@ -13,6 +13,7 @@ export type ProposalFamily =
   | "publication_entry_archive"
   | "living_document_archive"
   | "emergency_declaration"
+  | "discussion_thread_close"
   | "collective_support_request"
   | "collective_contribution_offer";
 
@@ -27,6 +28,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   publication_entry_archive: "archival",
   living_document_archive: "archival",
   emergency_declaration: "emergency",
+  discussion_thread_close: "discussion",
   collective_support_request: "support_request",
   collective_contribution_offer: "contribution_offer",
 };

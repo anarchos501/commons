@@ -238,7 +238,9 @@ Examples:
 
 ### Discussion
 
-Deferred. Threading and moderation design not yet settled.
+Temporary thread-based conversation for coordination. Discussion messages and inactive threads expire and are hard-deleted; information that should be preserved must be intentionally moved into Bulletins, Publications, or Living Documents.
+
+See `docs/rfcs/discussion.md`.
 
 ---
 
