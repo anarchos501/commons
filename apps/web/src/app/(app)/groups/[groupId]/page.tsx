@@ -48,6 +48,7 @@ import { Section } from "../../../../components/shared/Section";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
+import { GroupContextSync } from "../../../../components/shared/GroupContextSync";
 
 export const dynamic = "force-dynamic";
 
@@ -64,11 +65,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId);
 
-  // Update active group only after getGroupSpaceData confirms membership — it redirects on failure,
-  // so if we reach this line the user is a valid member of this group.
-  if (session.activeGroupId !== groupId) {
-    session.activeGroupId = groupId;
-    await session.save();
+  // Server action: update session.activeGroupId after confirmed membership.
+  // Must be a server action (not inline code) because cookies can only be written
+  // in Server Actions or Route Handlers, not in Server Component render functions.
+  async function syncGroupContext() {
+    "use server";
+    const s = await getSession();
+    if (s.accountId && s.activeGroupId !== groupId) {
+      s.activeGroupId = groupId;
+      await s.save();
+    }
   }
 
   const { group, currentMembership } = data;
@@ -77,6 +83,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+      <GroupContextSync syncAction={syncGroupContext} />
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
