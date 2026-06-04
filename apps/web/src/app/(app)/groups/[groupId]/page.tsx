@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
-import { expireStaleAssignments, hasActiveEligibleAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
+import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { getCoverageStatus } from "../../../../lib/concerns";
 import { createBulletin, openBulletinArchivalPetition } from "../../../../lib/bulletins";
 import { createPublication, openPublicationArchivalPetition } from "../../../../lib/publications";
@@ -400,28 +400,47 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
         {/* ── Responsibilities ──────────────────────────────────────── */}
         <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage" storageKey={`group:${groupId}:section:responsibilities`} className="bg-[var(--surface)] p-5 sm:p-6">
-          <div className="space-y-4">
-            <div className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-[var(--text)]">Reviewer coverage</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                    {data.coverageStatus === "available"
-                      ? "At least one active reviewer can handle concern reviews."
-                      : "No active reviewer is currently available."}
-                  </p>
+          <div className="space-y-3">
+            {data.responsibilityTypes.length === 0 && (
+              <EmptyState text="No responsibility types defined yet." />
+            )}
+            {data.responsibilityTypes.map((r) => {
+              const isHolder = data.myResponsibilityTypes.has(r.type);
+              const hasHolders = r.assignments.length > 0;
+              return (
+                <div key={r.id} className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <a href={`/responsibilities/${r.id}`} className="text-sm font-medium text-[var(--text)] hover:text-[var(--accent)] capitalize">
+                        {r.type}
+                      </a>
+                      {r.assignments.length > 0 && (
+                        <p className="mt-0.5 text-xs text-[var(--muted)]">
+                          {r.assignments.map((a) => a.membership.account.displayName).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 text-xs font-medium ${hasHolders ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                      {hasHolders ? "Covered" : "Needed"}
+                    </span>
+                  </div>
+                  {isActive && !isHolder && (
+                    <form action={volunteerForResponsibilityAction} className="mt-2">
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="type" value={r.type} />
+                      <SubmitButton variant="secondary">Volunteer</SubmitButton>
+                    </form>
+                  )}
+                  {isHolder && (
+                    <form action={resignResponsibilityAction} className="mt-2">
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="type" value={r.type} />
+                      <button type="submit" className="text-xs text-amber-700 hover:text-amber-600 transition">Resign</button>
+                    </form>
+                  )}
                 </div>
-                <span className={`shrink-0 px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
-                  {data.coverageStatus === "available" ? "Covered" : "Needed"}
-                </span>
-              </div>
-              {data.coverageStatus === "unavailable" && isActive && (
-                <form action={volunteerForReviewerAction} className="mt-3">
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <SubmitButton variant="secondary">Volunteer as reviewer</SubmitButton>
-                </form>
-              )}
-            </div>
+              );
+            })}
           </div>
         </CollapsibleSection>
 
@@ -991,6 +1010,26 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       orderBy: { account: { displayName: "asc" } },
     });
 
+    // All responsibility types for the group
+    const responsibilityTypes = await prisma.responsibility.findMany({
+      where: { groupId },
+      orderBy: { type: "asc" },
+      select: {
+        id: true,
+        type: true,
+        termDays: true,
+        assignments: {
+          where: { endedAt: null, expiresAt: { gt: new Date() } },
+          select: { id: true, membershipId: true, expiresAt: true, membership: { select: { account: { select: { displayName: true } } } } },
+        },
+      },
+    });
+    const myResponsibilityTypes = new Set(
+      responsibilityTypes
+        .filter((r) => r.assignments.some((a) => a.membershipId === currentMembership.id))
+        .map((r) => r.type),
+    );
+
     // Reviewer queue
     const hasReviewerRole = await hasActiveEligibleAssignment(prisma, currentMembership.id, "reviewer");
     const reviewerQueue = hasReviewerRole
@@ -1035,6 +1074,8 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       groupMembers,
       pendingApplications,
       activeEmergency,
+      responsibilityTypes,
+      myResponsibilityTypes,
     };
   } finally {
     await prisma.$disconnect();
@@ -1424,20 +1465,36 @@ async function evaluateClosedPetitionsAction(formData: FormData) {
   redirect(`/groups/${groupId}#petitions`);
 }
 
-async function volunteerForReviewerAction(formData: FormData) {
+async function volunteerForResponsibilityAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
+  const type = requiredString(formData, "type");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await volunteerForResponsibility(prisma, { membershipId: membership.id, type: "reviewer" });
+    await volunteerForResponsibility(prisma, { membershipId: membership.id, type });
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#responsibilities`);
+}
+
+async function resignResponsibilityAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const type = requiredString(formData, "type");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await resignAssignment(prisma, membership.id, type);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
 }
 
 async function proposeCategoryAction(formData: FormData) {
