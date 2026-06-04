@@ -5,8 +5,8 @@ import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { getCoverageStatus } from "../../../../lib/concerns";
-import { createBulletin } from "../../../../lib/bulletins";
-import { createPublication } from "../../../../lib/publications";
+import { createBulletin, openBulletinArchivalPetition } from "../../../../lib/bulletins";
+import { createPublication, openPublicationArchivalPetition } from "../../../../lib/publications";
 import {
   createLivingDocument,
   draftLivingDocumentRevision,
@@ -21,6 +21,8 @@ import {
   postDiscussionMessage,
 } from "../../../../lib/discussions";
 import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
+import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
+import { proposeProject } from "../../../../lib/projects";
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
 import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
@@ -246,9 +248,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <div key={b.id} className="border border-[var(--border)] p-3">
                   <p className="text-sm font-medium text-[var(--text)]">{b.title}</p>
                   <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-3">{b.body}</p>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    {b.author.displayName} &middot; {formatRelativeDate(b.publishedAt)}
-                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-xs text-[var(--muted)]">
+                      {b.author.displayName} &middot; {formatRelativeDate(b.publishedAt)}
+                    </p>
+                    {isActive && (
+                      <form action={archiveBulletinAction}>
+                        <input type="hidden" name="groupId" value={groupId} />
+                        <input type="hidden" name="bulletinId" value={b.id} />
+                        <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">
+                          Archive
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -291,7 +304,18 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
                     <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
                   </div>
-                  <p className="mt-1 text-xs text-[var(--muted)]">{p.creator.displayName}</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
+                    {isActive && (
+                      <form action={archivePublicationAction}>
+                        <input type="hidden" name="groupId" value={groupId} />
+                        <input type="hidden" name="publicationId" value={p.id} />
+                        <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">
+                          Archive
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -414,6 +438,23 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           ) : (
             <EmptyState text="No active projects." />
           )}
+          {isActive && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new project</summary>
+              <form action={proposeProjectAction} className="mt-3 space-y-3">
+                <input type="hidden" name="groupId" value={groupId} />
+                <label className="block">
+                  <span className="field-label">Project name</span>
+                  <input name="name" type="text" required className="field-input" placeholder="e.g. Community Garden" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Description</span>
+                  <textarea name="description" rows={2} className="field-input resize-none" placeholder="What will this project do?" />
+                </label>
+                <SubmitButton variant="secondary">Open proposal petition</SubmitButton>
+              </form>
+            </details>
+          )}
         </CollapsibleSection>
 
         {/* ── Members ───────────────────────────────────────────────── */}
@@ -424,6 +465,36 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
             )}
           </div>
+
+          {/* Pending membership applications — visible to active members */}
+          {isActive && data.pendingApplications.length > 0 && (
+            <div className="mt-4 border-t border-[var(--border)] pt-4 space-y-3">
+              <p className="text-xs font-medium text-[var(--muted)]">Pending applications ({data.pendingApplications.length})</p>
+              {data.pendingApplications.map((app) => (
+                <div key={app.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                  <p className="text-sm font-medium text-[var(--text)]">{app.account.displayName}</p>
+                  {app.applicationNote && (
+                    <p className="mt-1 text-xs text-[var(--soft-text)]">{app.applicationNote}</p>
+                  )}
+                  <p className="mt-1 text-xs text-[var(--muted)]">Applied {formatRelativeDate(app.joinedAt)}</p>
+                  <div className="mt-3 flex gap-2">
+                    <form action={sponsorApplicationAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="pendingMembershipId" value={app.id} />
+                      <SubmitButton variant="secondary">Sponsor</SubmitButton>
+                    </form>
+                    <form action={dismissApplicationAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="pendingMembershipId" value={app.id} />
+                      <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">
+                        Dismiss
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CollapsibleSection>
 
         </div>{/* end Participation */}
@@ -741,6 +812,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       openConcernCount,
       groupContributions,
       activeParticipantCount,
+      pendingApplications,
     ] = await Promise.all([
       prisma.project.findMany({
         where: { groupId, status: "active", archivedAt: null },
@@ -783,6 +855,16 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
         orderBy: { _count: { contributionType: "desc" } },
       }),
       getActiveParticipantCount(prisma, groupId),
+      prisma.groupMembership.findMany({
+        where: { groupId, status: "pending" },
+        orderBy: { joinedAt: "asc" },
+        select: {
+          id: true,
+          joinedAt: true,
+          applicationNote: true,
+          account: { select: { displayName: true } },
+        },
+      }),
     ]);
 
     // Petitions
@@ -916,6 +998,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       contributionCategories: categoriesWithProviders,
       allProjects,
       groupMembers,
+      pendingApplications,
     };
   } finally {
     await prisma.$disconnect();
@@ -923,6 +1006,114 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
 }
 
 // ── Server Actions ────────────────────────────────────────────────────────────
+
+async function archiveBulletinAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const bulletinId = formData.get("bulletinId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    if (!membership) redirect("/dashboard");
+    await openBulletinArchivalPetition(prisma, { bulletinId, createdByMembershipId: membership.id, groupId });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function archivePublicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const publicationId = formData.get("publicationId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    if (!membership) redirect("/dashboard");
+    await openPublicationArchivalPetition(prisma, { publicationId, createdByMembershipId: membership.id, groupId });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function proposeProjectAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const name = (formData.get("name") as string)?.trim();
+  const description = (formData.get("description") as string)?.trim() || "";
+  if (!name) return;
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    if (!membership) redirect("/dashboard");
+    await proposeProject(prisma, {
+      groupId,
+      createdByMembershipId: membership.id,
+      accountId: session.accountId,
+      name,
+      description,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function sponsorApplicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const pendingMembershipId = formData.get("pendingMembershipId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const sponsor = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    if (!sponsor) redirect("/dashboard");
+    await sponsorMembershipApplication(prisma, sponsor.id, pendingMembershipId);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function dismissApplicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const pendingMembershipId = formData.get("pendingMembershipId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const dismisser = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true },
+    });
+    if (!dismisser) redirect("/dashboard");
+    await dismissMembershipApplication(prisma, pendingMembershipId, dismisser.id);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
 
 // Full active participation required — for content creation, petitions, governance signals.
 async function requireMembership(accountId: string, groupId: string) {

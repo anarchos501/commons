@@ -375,17 +375,20 @@ async function getDashboardData(
       createdAt: r.createdAt,
     }));
 
-    const petitionNotifs: PetitionNotif[] = petitions.map((p) => ({
-      kind: "petition",
-      id: p.id,
-      groupId: p.groupId,
-      groupName: p.group.name,
-      membershipId: membershipIdByGroup[p.groupId] ?? "",
-      supportCount: p._count.support,
-      closesAt: p.closesAt,
-      isUnread: p.support.length === 0,
-      createdAt: p.opensAt,
-    }));
+    const petitionNotifs: PetitionNotif[] = petitions.map((p) => {
+      const effectiveGroupId = p.groupId ?? p.scopeId;
+      return {
+        kind: "petition",
+        id: p.id,
+        groupId: effectiveGroupId,
+        groupName: p.group?.name ?? effectiveGroupId,
+        membershipId: membershipIdByGroup[effectiveGroupId] ?? "",
+        supportCount: p._count.support,
+        closesAt: p.closesAt,
+        isUnread: p.support.length === 0,
+        createdAt: p.opensAt,
+      };
+    });
 
     const combined: NotifItem[] = [
       ...(notifFilters.type === "all" || notifFilters.type === "route" ? routeNotifs : []),

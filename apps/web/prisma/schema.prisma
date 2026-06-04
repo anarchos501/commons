@@ -415,6 +415,7 @@ model GroupMembership {
   status              MembershipStatus    @default(active)
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
+  applicationNote     String?             // optional note submitted with a pending membership application
 
   account                       Account                            @relation(fields: [accountId], references: [id], onDelete: Cascade)
   group                         Group                              @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -504,8 +505,10 @@ model ProjectMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  account          Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdPetitions Petition[]       @relation("PetitionProjectCreator")
+  petitionSupport  PetitionSupport[] @relation("PetitionSupportProject")
 
   @@unique([accountId, projectId])
   @@index([accountId])
@@ -947,26 +950,32 @@ model EmergencyPeriod {
 // --- RFC-006: Petition Infrastructure ---
 
 model Petition {
-  id                    String    @id @default(cuid())
-  groupId               String
-  category              String    // GovernanceCategory, validated at service layer
-  subjectType           String    // ProposalFamily, validated at service layer
-  subjectId             String
-  competitionKey        String?   // derived from subjectType+subjectId; null = non-competing
-  status                String    @default("open") // open | approved | rejected | withdrawn | superseded | blocked
-  governanceSnapshot    Json      // resolved parameters frozen at petition open time
+  id                           String    @id @default(cuid())
+  // Scope fields (P1 migration): scopeType/scopeId replace groupId as the governing-entity reference.
+  // groupId kept as nullable for backward compat during transition — prefer scopeId.
+  groupId                      String?
+  scopeType                    String    @default("group") // "group" | "project" | "responsibility"
+  scopeId                      String    // governing entity id; backfilled from groupId for existing records
+  category                     String    // GovernanceCategory, validated at service layer
+  subjectType                  String    // ProposalFamily, validated at service layer
+  subjectId                    String
+  competitionKey               String?   // derived from subjectType+subjectId; null = non-competing
+  status                       String    @default("open") // open | approved | rejected | withdrawn | superseded | blocked
+  governanceSnapshot           Json      // resolved parameters frozen at petition open time
   // null = group-wide voting; { type: "project", scopeId } = project-member voting
-  // type: "responsibility" is reserved for a future RFC
-  voterScope            Json?
-  opensAt               DateTime  @default(now())
-  closesAt              DateTime
-  resolvedAt            DateTime?
-  createdByMembershipId String?
+  voterScope                   Json?
+  opensAt                      DateTime  @default(now())
+  closesAt                     DateTime
+  resolvedAt                   DateTime?
+  createdByMembershipId        String?   // legacy: GroupMembership FK — kept for compat
+  createdByProjectMembershipId String?   // new: ProjectMembership FK for project-scoped petitions
 
-  group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  createdBy         GroupMembership? @relation("PetitionCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  group             Group?             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy         GroupMembership?   @relation("PetitionCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  createdByProject  ProjectMembership? @relation("PetitionProjectCreator", fields: [createdByProjectMembershipId], references: [id], onDelete: SetNull)
   support           PetitionSupport[]
 
+  @@index([scopeType, scopeId, status])
   @@index([groupId, status])
   @@index([category])
   @@index([competitionKey])
@@ -974,16 +983,22 @@ model Petition {
 }
 
 model PetitionSupport {
-  id           String   @id @default(cuid())
-  petitionId   String
-  membershipId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  petitionId          String
+  // P1 migration: membershipId made nullable; projectMembershipId added.
+  // Exactly one of membershipId/projectMembershipId must be non-null (service-layer enforced).
+  // Partial unique indexes (in migration SQL, not Prisma-managed):
+  //   UNIQUE (petitionId, membershipId) WHERE membershipId IS NOT NULL
+  //   UNIQUE (petitionId, projectMembershipId) WHERE projectMembershipId IS NOT NULL
+  membershipId        String?  // GroupMembership; nullable (was required)
+  projectMembershipId String?  // ProjectMembership; null for group-scoped petitions
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  petition   Petition        @relation(fields: [petitionId], references: [id], onDelete: Cascade)
-  membership GroupMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  petition          Petition           @relation(fields: [petitionId], references: [id], onDelete: Cascade)
+  membership        GroupMembership?   @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  projectMembership ProjectMembership? @relation("PetitionSupportProject", fields: [projectMembershipId], references: [id], onDelete: Cascade)
 
-  @@unique([petitionId, membershipId])
   @@index([petitionId])
 }
 

@@ -150,27 +150,16 @@ export default async function FindGroupsPage() {
                             </div>
                           )}
 
-                          {/* Request to Join */}
-                          {!isMember && (canJoinDirectly ? (
+                          {/* Request to Join / Apply to Join */}
+                          {!isMember && (
                             <Link
                               href={`/groups/${group.id}/join`}
                               className="inline-flex items-center gap-2 border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium leading-none text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
                             >
                               <UserPlus className="h-4 w-4" aria-hidden="true" />
-                              Request to Join
+                              {canJoinDirectly ? "Request to Join" : "Apply to Join"}
                             </Link>
-                          ) : (
-                            <div className="flex items-start justify-between gap-3 px-1 py-2">
-                              <div className="flex items-start gap-2 min-w-0">
-                                <UserPlus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" aria-hidden="true" />
-                                <div className="min-w-0">
-                                  <p className="text-sm text-[var(--soft-text)]">Request to Join</p>
-                                  <p className="mt-0.5 text-xs leading-4 text-[var(--muted)]">Ask to become a member of this group.</p>
-                                </div>
-                              </div>
-                              <span className="shrink-0 border border-[var(--border)] px-1.5 py-0.5 text-xs text-[var(--muted)]">α</span>
-                            </div>
-                          ))}
+                          )}
 
                           {/* Planned interactions */}
                           {PLANNED_INTERACTIONS.map(({ label, description, icon: Icon }) => (

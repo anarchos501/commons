@@ -14,6 +14,11 @@ import {
   grantTrustedProviderStatusFromPetition,
   revokeTrustedProviderStatusFromPetition,
 } from "./trusted-providers";
+import { approveMembershipRequest } from "./group-membership";
+import { onEmergencyPetitionApproved } from "./emergency";
+import { createProjectFromPetition } from "./projects";
+import { onBulletinArchivalPetitionApproved } from "./bulletins";
+import { onPublicationArchivalPetitionApproved, onPublicationEntryArchivalPetitionApproved } from "./publications";
 
 export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string) {
   const result = await evaluatePetition(prisma, petitionId);
@@ -21,11 +26,13 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
 
   const petition = await prisma.petition.findUnique({
     where: { id: petitionId },
-    select: { subjectType: true },
+    select: { subjectType: true, subjectId: true },
   });
   if (!petition) return;
 
-  if (petition.subjectType === "living_document_revision") {
+  if (petition.subjectType === "membership_request") {
+    await approveMembershipRequest(prisma, petition.subjectId);
+  } else if (petition.subjectType === "living_document_revision") {
     await onRevisionPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "living_document_archive") {
     await onLivingDocumentArchivalPetitionApproved(prisma, petitionId);
@@ -41,6 +48,16 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
     await grantTrustedProviderStatusFromPetition(prisma, petitionId);
   } else if (petition.subjectType === "trusted_provider_revocation") {
     await revokeTrustedProviderStatusFromPetition(prisma, petitionId);
+  } else if (petition.subjectType === "emergency_declaration") {
+    await onEmergencyPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "project_proposal") {
+    await createProjectFromPetition(prisma, petitionId);
+  } else if (petition.subjectType === "bulletin_archive") {
+    await onBulletinArchivalPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "publication_archive") {
+    await onPublicationArchivalPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "publication_entry_archive") {
+    await onPublicationEntryArchivalPetitionApproved(prisma, petitionId);
   }
 }
 
