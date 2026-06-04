@@ -25,6 +25,8 @@ import { sponsorMembershipApplication, dismissMembershipApplication } from "../.
 import { proposeProject } from "../../../../lib/projects";
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
+import { computeGroupTemperature } from "../../../../lib/governance-temperature";
+import { openEmergencyPetition, isEmergencyActive } from "../../../../lib/emergency";
 import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
@@ -732,11 +734,37 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Governance Settings ───────────────────────────────────── */}
         <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
+
+            {/* Emergency period status + declaration */}
+            {data.activeEmergency ? (
+              <div className="border border-amber-400 bg-amber-50 p-3">
+                <p className="text-sm font-medium text-amber-900">Emergency period active</p>
+                <p className="mt-0.5 text-xs text-amber-700">
+                  Expires {formatRelativeDate(data.activeEmergency.expiresAt)}
+                </p>
+              </div>
+            ) : isActive && (
+              <form action={declareEmergencyAction}>
+                <input type="hidden" name="groupId" value={groupId} />
+                <SubmitButton variant="secondary">Declare Emergency Period</SubmitButton>
+              </form>
+            )}
+
             {data.governanceSettings.map((setting) => (
               <div key={setting.category} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
-                <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
+                  {/* Temperature indicator: -1 (blue/careful) → 0 (neutral) → +1 (green/permissive) */}
+                  <span className={`shrink-0 text-xs font-medium px-1.5 py-0.5 ${
+                    setting.temperature > 0.2 ? "bg-green-100 text-green-800" :
+                    setting.temperature < -0.2 ? "bg-blue-100 text-blue-800" :
+                    "bg-[var(--subtle)] text-[var(--muted)]"
+                  }`}>
+                    {setting.temperature > 0.2 ? "Permissive" : setting.temperature < -0.2 ? "Careful" : "Neutral"}
+                  </span>
+                </div>
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Temperature: {formatPercent(setting.threshold)} threshold &middot; {Math.round(setting.petitionDuration)}d window
+                  {formatPercent(setting.threshold)} threshold &middot; {Math.round(setting.petitionDuration)}d window
                 </p>
                 <form action={updateGovernanceSignalAction} className="mt-3">
                   <input type="hidden" name="groupId" value={groupId} />
@@ -895,26 +923,33 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     );
 
-    // Governance
-    const governanceCategories = GOVERNANCE_CATEGORIES.filter(
-      (c): c is GovernanceCategory => ["living_document", "responsibility", "discussion"].includes(c),
-    );
+    // Governance — all 12 categories
     const currentSignals = await prisma.memberGovernanceSignal.findMany({
-      where: { membershipId: currentMembership.id, category: { in: governanceCategories } },
+      where: { membershipId: currentMembership.id },
       select: { category: true, signal: true },
     });
     const signalByCategory = new Map(currentSignals.map((s) => [s.category, s.signal]));
     const governanceSettings = await Promise.all(
-      governanceCategories.map(async (category) => {
-        const params = await resolveGovernanceParams(prisma, groupId, category);
+      GOVERNANCE_CATEGORIES.map(async (category) => {
+        const [params, temperature] = await Promise.all([
+          resolveGovernanceParams(prisma, groupId, category),
+          computeGroupTemperature(prisma, groupId, category),
+        ]);
         return {
           category,
           threshold: params.threshold,
           petitionDuration: params.petitionDuration,
           signal: signalByCategory.get(category) ?? 0,
+          temperature,
         };
       }),
     );
+
+    // Emergency period
+    const activeEmergency = await prisma.emergencyPeriod.findFirst({
+      where: { groupId, endedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true, startedAt: true, expiresAt: true },
+    });
 
     // Discussion
     let discussionThreads = await listDiscussionThreads(prisma, { spaceType: "group", spaceId: groupId, groupId });
@@ -999,6 +1034,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       allProjects,
       groupMembers,
       pendingApplications,
+      activeEmergency,
     };
   } finally {
     await prisma.$disconnect();
@@ -1006,6 +1042,27 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
 }
 
 // ── Server Actions ────────────────────────────────────────────────────────────
+
+async function declareEmergencyAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true, status: true, participationStatus: true },
+    });
+    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
+      redirect(`/groups/${groupId}`);
+    }
+    await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
 
 async function archiveBulletinAction(formData: FormData) {
   "use server";
