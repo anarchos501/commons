@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 function AlphaNotice() {
   return (
     <div
-      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
       role="status"
     >
       <p className="font-medium">Commons Open Alpha</p>
@@ -38,11 +38,11 @@ export default async function LandingPage() {
     <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
       <section className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 py-16 sm:px-6">
         <header className="flex flex-col gap-4">
-          <p className="text-sm font-medium text-[var(--muted)]">Northside Commons</p>
-          <h1 className="text-4xl font-semibold tracking-normal text-[var(--text)] sm:text-5xl">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--accent)]">Northside Commons</p>
+          <h1 className="text-5xl font-bold tracking-tight text-[var(--text)] sm:text-6xl leading-[1.05]">
             Ask for help.<br />Offer help.<br />Keep it human.
           </h1>
-          <p className="mt-2 max-w-lg text-base leading-7 text-[var(--soft-text)]">
+          <p className="mt-3 max-w-lg text-base leading-7 text-[var(--soft-text)]">
             Commons helps a group connect needs with people who can help — without turning private hardship into public history.
           </p>
         </header>
@@ -50,21 +50,21 @@ export default async function LandingPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
           <Link
             href="/request"
-            className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-5 py-3 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
+            className="btn-primary flex min-h-14 flex-1 items-center justify-center gap-2 bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
           >
             <HelpCircle className="h-4 w-4" aria-hidden="true" />
             Request Support
           </Link>
           <Link
             href="/login"
-            className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
+            className="btn-secondary flex min-h-14 flex-1 items-center justify-center gap-2 border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
           >
             <LogIn className="h-4 w-4" aria-hidden="true" />
             Login
           </Link>
           <Link
             href="/register"
-            className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
+            className="btn-secondary flex min-h-14 flex-1 items-center justify-center gap-2 border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
           >
             <UserPlus className="h-4 w-4" aria-hidden="true" />
             Create Account
@@ -73,7 +73,7 @@ export default async function LandingPage() {
 
         <AlphaNotice />
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-5 text-sm leading-7 text-[var(--soft-text)]">
+        <div className="border border-[var(--border)] bg-[var(--subtle)] p-5 text-sm leading-7 text-[var(--soft-text)]">
           <div className="flex items-center gap-2 font-medium text-[var(--text)]">
             <HandHeart className="h-4 w-4" aria-hidden="true" />
             No account needed to ask for help

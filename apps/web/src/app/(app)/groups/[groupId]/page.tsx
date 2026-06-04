@@ -116,7 +116,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.groupContributions.length > 0 ? (
             <div className="space-y-2">
               {data.groupContributions.map((c) => (
-                <div key={c.type} className="flex items-center justify-between rounded bg-[var(--subtle)] px-3 py-2 text-sm">
+                <div key={c.type} className="flex items-center justify-between bg-[var(--subtle)] px-3 py-2 text-sm">
                   <span className="capitalize text-[var(--soft-text)]">{c.type}</span>
                   <span className="text-[var(--muted)]">{c.count} {c.count === 1 ? "time" : "times"}</span>
                 </div>
@@ -136,7 +136,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <a
                     key={thread.id}
                     href={`/groups/${groupId}?discussionThread=${thread.id}#discussion`}
-                    className={`block rounded border p-3 text-sm transition hover:bg-[var(--hover)] ${
+                    className={`block border p-3 text-sm transition hover:bg-[var(--hover)] ${
                       data.selectedThread?.id === thread.id
                         ? "border-[var(--accent)] bg-[var(--subtle)]"
                         : "border-[var(--border)]"
@@ -149,7 +149,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   </a>
                 ))}
               </div>
-              <div className="rounded border border-[var(--border)] p-3">
+              <div className="border border-[var(--border)] p-3">
                 {data.selectedThread ? (
                   <>
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -168,7 +168,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     {data.discussionMessages.length > 0 ? (
                       <div className="mb-3 max-h-72 space-y-3 overflow-y-auto pr-1">
                         {data.discussionMessages.map((msg) => (
-                          <div key={msg.id} className="rounded bg-[var(--subtle)] px-3 py-2">
+                          <div key={msg.id} className="bg-[var(--subtle)] px-3 py-2">
                             <p className="text-sm leading-6 text-[var(--soft-text)]">{msg.body}</p>
                             <p className="mt-1 text-xs text-[var(--muted)]">
                               {msg.author.displayName} &middot; {formatRelativeDate(msg.createdAt)}
@@ -215,7 +215,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.bulletins.length > 0 ? (
             <div className="mb-4 space-y-3">
               {data.bulletins.map((b) => (
-                <div key={b.id} className="rounded border border-[var(--border)] p-3">
+                <div key={b.id} className="border border-[var(--border)] p-3">
                   <p className="text-sm font-medium text-[var(--text)]">{b.title}</p>
                   <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-3">{b.body}</p>
                   <p className="mt-1 text-xs text-[var(--muted)]">
@@ -248,7 +248,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.publications.length > 0 ? (
             <div className="mb-4 space-y-3">
               {data.publications.map((p) => (
-                <div key={p.id} className="rounded border border-[var(--border)] p-3">
+                <div key={p.id} className="border border-[var(--border)] p-3">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
                     <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
@@ -277,7 +277,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.livingDocuments.length > 0 ? (
             <div className="mb-4 space-y-4">
               {data.livingDocuments.map((doc) => (
-                <div key={doc.id} className="rounded border border-[var(--border)] p-3 space-y-2">
+                <div key={doc.id} className="border border-[var(--border)] p-3 space-y-2">
                   <p className="text-sm font-semibold text-[var(--text)]">{doc.title}</p>
                   <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
                   <p className="text-xs text-[var(--muted)]">Last revised {formatRelativeDate(doc.lastRevisedAt)}</p>
@@ -317,7 +317,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Concerns ──────────────────────────────────────────────── */}
         <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`group:${groupId}:section:concerns`}>
           <div className="mb-4 flex items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
               Review Coverage: {data.coverageStatus === "available" ? "Available" : "Unavailable"}
             </span>
             {data.openConcernCount > 0 && (
@@ -327,7 +327,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             )}
           </div>
           {data.coverageStatus === "unavailable" && (
-            <p className="mb-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-xs text-[var(--muted)]">
+            <p className="mb-4 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-xs text-[var(--muted)]">
               No active concern reviewers are currently available.
             </p>
           )}
@@ -335,7 +335,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <div className="mb-5 space-y-3">
               <p className="text-xs font-medium text-[var(--muted)]">Reviewer queue</p>
               {data.reviewerQueue.map((concern) => (
-                <div key={concern.id} className="space-y-1 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium">{concern.subject}</p>
                     <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
@@ -353,7 +353,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <div className="mb-5 space-y-3">
               <p className="text-xs font-medium text-[var(--muted)]">Your concerns</p>
               {data.myReports.map((report) => (
-                <div key={report.id} className="space-y-1 rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                <div key={report.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium">{report.subject}</p>
                     <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{report.status.replace(/_/g, " ")}</span>
@@ -423,7 +423,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.projects.length > 0 ? (
             <div className="space-y-3">
               {data.projects.map((project) => (
-                <a key={project.id} href={`/projects/${project.id}`} className="block rounded border border-[var(--border)] bg-[var(--subtle)] p-3 hover:bg-[var(--hover)] transition">
+                <a key={project.id} href={`/projects/${project.id}`} className="block border border-[var(--border)] bg-[var(--subtle)] p-3 hover:bg-[var(--hover)] transition">
                   <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
                   {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
                   <p className="mt-1 text-xs text-[var(--muted)] capitalize">{project.status}</p>
@@ -441,7 +441,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             {data.contributionCategories.length > 0 ? (
               <div className="space-y-3">
                 {data.contributionCategories.map((cat) => (
-                  <div key={cat.id} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                  <div key={cat.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-[var(--text)]">{cat.name}</p>
@@ -490,7 +490,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         <form action={proposeTrustedProviderStatusAction} className="mt-2 space-y-2">
                           <input type="hidden" name="groupId" value={groupId} />
                           <input type="hidden" name="categoryId" value={cat.id} />
-                          <select name="targetMembershipId" required className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
+                          <select name="targetMembershipId" required className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
                             <option value="">Select member…</option>
                             {data.groupMembers.map((m) => (
                               <option key={m.id} value={m.id}>{m.account.displayName}</option>
@@ -514,15 +514,15 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <input type="hidden" name="groupId" value={groupId} />
                   <div>
                     <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Name</label>
-                    <input name="name" required placeholder="Transportation" className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
+                    <input name="name" required placeholder="Transportation" className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Description</label>
-                    <textarea name="description" required rows={2} placeholder="What kind of assistance does this cover?" className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
+                    <textarea name="description" required rows={2} placeholder="What kind of assistance does this cover?" className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Offered by</label>
-                    <select name="offeringEntityType" required className="w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
+                    <select name="offeringEntityType" required className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
                       <option value="group">This group</option>
                       {data.allProjects.map((p) => (
                         <option key={p.id} value={`project:${p.id}`}>Project: {p.name}</option>
@@ -536,10 +536,45 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           </div>
         </CollapsibleSection>
 
+        {/* ── Trusted Providers ─────────────────────────────────────── */}
+        <CollapsibleSection id="trusted-providers" title="Trusted Providers" eyebrow="Recognized contributors" storageKey={`group:${groupId}:section:trusted-providers`}>
+          {data.contributionCategories.some((cat) => cat.trustedProviders.length > 0) ? (
+            <div className="space-y-2">
+              {data.contributionCategories.flatMap((cat) =>
+                cat.trustedProviders.map((tp) => ({
+                  ...tp,
+                  categoryName: cat.name,
+                  offeringEntityName: cat.offeringEntityName,
+                }))
+              ).map((tp) => (
+                <div key={tp.id} className="flex items-center justify-between border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">{tp.memberDisplayName}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {tp.categoryName}
+                      {tp.offeringEntityName ? ` — ${formatTrustedByLabel(tp.offeringEntityType, tp.offeringEntityName)}` : ""}
+                    </p>
+                  </div>
+                  {isActive && (
+                    <form action={proposeTrustedProviderRevocationAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="targetMembershipId" value={tp.membershipId} />
+                      <input type="hidden" name="statusIds" value={tp.id} />
+                      <SubmitButton variant="secondary">Revoke</SubmitButton>
+                    </form>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="No trusted providers recognized yet. Propose one from the Contribution Categories section." />
+          )}
+        </CollapsibleSection>
+
         {/* ── Responsibilities ──────────────────────────────────────── */}
         <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage" storageKey={`group:${groupId}:section:responsibilities`}>
           <div className="space-y-4">
-            <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+            <div className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-[var(--text)]">Reviewer coverage</p>
@@ -549,7 +584,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                       : "No active reviewer is currently available."}
                   </p>
                 </div>
-                <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                <span className={`shrink-0 px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
                   {data.coverageStatus === "available" ? "Covered" : "Needed"}
                 </span>
               </div>
@@ -567,7 +602,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`}>
           <div className="space-y-4">
             {data.governanceSettings.map((setting) => (
-              <div key={setting.category} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+              <div key={setting.category} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
                 <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Temperature: {formatPercent(setting.threshold)} threshold &middot; {Math.round(setting.petitionDuration)}d window
@@ -586,7 +621,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         type="submit"
                         name="signal"
                         value={opt.value}
-                        className={`rounded-md border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
+                        className={`border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
                           setting.signal === Number(opt.value)
                             ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
                             : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
@@ -1220,13 +1255,13 @@ type SpacePetition = {
 function PetitionCard({ petition, canSupport, groupId }: { petition: SpacePetition; canSupport: boolean; groupId: string }) {
   const isOpen = petition.status === "open";
   return (
-    <article className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+    <article className="border border-[var(--border)] bg-[var(--subtle)] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-[var(--text)]">{proposalFamilyLabel(petition.subjectType)}</p>
           <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{petition.subjectLabel}</p>
         </div>
-        <span className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
+        <span className="shrink-0 border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
           {petition.status}
         </span>
       </div>

@@ -39,7 +39,7 @@ export function SidebarShell({ trigger, children }: Props) {
       >
         <div className="flex items-center justify-between px-4 py-3 lg:hidden">
           <span className="text-sm font-semibold text-[var(--text)]">Commons</span>
-          <button onClick={() => setOpen(false)} aria-label="Close navigation" className="p-1 rounded hover:bg-[var(--hover)]">
+          <button onClick={() => setOpen(false)} aria-label="Close navigation" className="btn-icon p-1 hover:bg-[var(--hover)]">
             <X className="h-4 w-4 text-[var(--muted)]" />
           </button>
         </div>

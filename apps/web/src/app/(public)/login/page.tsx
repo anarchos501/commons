@@ -8,7 +8,7 @@ import { loginAccount } from "../../../lib/auth";
 function AlphaNotice() {
   return (
     <div
-      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
       role="status"
     >
       <p className="font-medium">Commons Open Alpha</p>
@@ -49,7 +49,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
             <ArrowLeft className="h-3 w-3" aria-hidden="true" />
             Northside Commons
           </Link>
-          <h1 className="mt-4 text-3xl font-semibold tracking-normal">Sign in</h1>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight">Sign in</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">
             No account yet?{" "}
             <Link href="/register" className="font-medium text-[var(--accent)] hover:underline">
@@ -66,12 +66,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
         <AlphaNotice />
 
         {error ? (
-          <div className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]" role="alert">
+          <div className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]" role="alert">
             {error}
           </div>
         ) : null}
 
-        <form action={loginAction} className="flex flex-col gap-5 rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+        <form action={loginAction} className="flex flex-col gap-5 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
           <label className="block">
             <span className="field-label">Email</span>
             <input name="email" type="email" className="field-input" autoComplete="email" required />
@@ -82,7 +82,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
           </label>
           <button
             type="submit"
-            className="min-h-11 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
+            className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
           >
             Sign in
           </button>

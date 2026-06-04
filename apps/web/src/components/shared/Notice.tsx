@@ -1,7 +1,7 @@
 export function Notice({ message }: { message: string }) {
   return (
     <div
-      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
       role="status"
     >
       {message}
@@ -12,7 +12,7 @@ export function Notice({ message }: { message: string }) {
 export function AlphaNotice() {
   return (
     <div
-      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
       role="status"
     >
       <p className="font-medium">Commons Open Alpha</p>

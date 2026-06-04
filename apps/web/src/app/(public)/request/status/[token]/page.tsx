@@ -68,10 +68,10 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               <p className="mt-2 text-sm text-[var(--soft-text)]">This will mark your request as fulfilled and open a 30-day window to report concerns if needed.</p>
             </header>
             <form action={fulfillAction} className="flex flex-col gap-3">
-              <button type="submit" className="min-h-11 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]">
+              <button type="submit" className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
                 Yes, help was received
               </button>
-              <Link href={`/request/status/${rawToken}`} className="flex min-h-11 items-center justify-center rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]">
+              <Link href={`/request/status/${rawToken}`} className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
                 Cancel
               </Link>
             </form>
@@ -106,10 +106,10 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               </p>
             </header>
             <form action={deleteAction} className="flex flex-col gap-3">
-              <button type="submit" className="min-h-11 rounded-md border border-[var(--border-strong)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]">
+              <button type="submit" className="btn-secondary min-h-11 border border-[var(--border-strong)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
                 Delete request
               </button>
-              <Link href={`/request/status/${rawToken}`} className="flex min-h-11 items-center justify-center rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]">
+              <Link href={`/request/status/${rawToken}`} className="btn-primary flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
                 Keep request
               </Link>
             </form>
@@ -167,7 +167,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               <h1 className="mt-4 text-2xl font-semibold">Report a concern</h1>
               <p className="mt-2 text-sm text-[var(--soft-text)]">Describe what happened. This will be reviewed by the group's members. No account is required.</p>
             </header>
-            <form action={submitConcernAction} className="flex flex-col gap-4 rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+            <form action={submitConcernAction} className="flex flex-col gap-4 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
               <label className="block">
                 <span className="field-label">Subject</span>
                 <input name="subject" className="field-input" placeholder="Brief description of the issue" required />
@@ -176,7 +176,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
                 <span className="field-label">What happened?</span>
                 <textarea name="description" className="field-input min-h-28 resize-y" placeholder="Describe the concern in as much or as little detail as you are comfortable sharing." required />
               </label>
-              <button type="submit" className="min-h-11 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]">
+              <button type="submit" className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
                 Submit concern
               </button>
             </form>
@@ -203,25 +203,25 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
           </header>
 
           {notice === "fulfilled" && (
-            <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
+            <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
               <CheckCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden="true" />
               Help marked as received. A concern reporting window is now open for 30 days.
             </div>
           )}
           {notice === "deleted" && (
-            <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
+            <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
               <CheckCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden="true" />
               Request removed from active views.
             </div>
           )}
           {notice === "concern_submitted" && (
-            <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
+            <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
               <CheckCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden="true" />
               Concern submitted. Group members will review it.
             </div>
           )}
 
-          <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <dl className="flex flex-col gap-4 text-sm">
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Status</dt>
@@ -251,7 +251,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               {supportRequest.status === "matched" && (
                 <Link
                   href={`/request/status/${rawToken}?action=fulfill`}
-                  className="flex min-h-11 items-center justify-center rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]"
+                  className="btn-primary flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
                 >
                   <CheckCircle className="mr-2 h-4 w-4" aria-hidden="true" />
                   Mark help received
@@ -260,7 +260,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               {supportRequest.status !== "deleted" && (
                 <Link
                   href={`/request/status/${rawToken}?action=delete`}
-                  className="flex min-h-11 items-center justify-center rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]"
+                  className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
                 >
                   <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
                   Delete this request
@@ -269,7 +269,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               {canReportConcern && (
                 <Link
                   href={`/request/status/${rawToken}?action=concern`}
-                  className="flex min-h-11 items-center justify-center rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]"
+                  className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
                 >
                   <TriangleAlert className="mr-2 h-4 w-4" aria-hidden="true" />
                   Report a concern
@@ -278,7 +278,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
+          <div className="border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
             <div className="flex items-center gap-2 font-medium text-[var(--text)]">
               <Shield className="h-4 w-4" aria-hidden="true" />
               About this link

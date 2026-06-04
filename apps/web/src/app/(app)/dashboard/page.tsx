@@ -25,7 +25,7 @@ import {
 import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../../../lib/group-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString, trustPreferenceOptions } from "../../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
-import { Section } from "../../../components/shared/Section";
+import { CollapsibleSection } from "../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../components/shared/Notice";
@@ -57,8 +57,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
         {notice && <Notice message={notice} />}
 
         {/* Hero / intro */}
-        <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
-          <h1 className="text-2xl font-semibold text-[var(--text)]">Commons</h1>
+        <div className="border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">Commons</h1>
           <p className="mt-1 text-sm leading-6 text-[var(--soft-text)]">
             Ask for help. Offer help. Keep it human.
           </p>
@@ -73,7 +73,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           {/* Left: request + offer */}
           <div className="flex flex-col gap-6">
 
-            <Section id="request" title="Request Help" eyebrow="Ask only what is needed">
+            <CollapsibleSection id="request" title="Request Help" eyebrow="Ask only what is needed" storageKey="dashboard:request">
               <form action={requestHelpAction} className="space-y-5">
                 {data.serviceOfferings.length === 0 ? (
                   <EmptyState text="No services are currently available on this node. Check back later." />
@@ -136,9 +136,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </label>
                 <SubmitButton disabled={data.serviceOfferings.length === 0}>Ask for help</SubmitButton>
               </form>
-            </Section>
+            </CollapsibleSection>
 
-            <Section id="offer" title="Offer Help" eyebrow="Set your own boundaries">
+            <CollapsibleSection id="offer" title="Offer Help" eyebrow="Set your own boundaries" storageKey="dashboard:offer">
               <form action={offerHelpAction} className="space-y-5">
                 <p className="text-sm leading-6 text-[var(--soft-text)]">
                   Offering as <strong className="font-medium text-[var(--text)]">{data.account.displayName}</strong>. Choose only what feels realistic right now.
@@ -147,8 +147,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   <legend className="field-label">What can you help with?</legend>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {data.serviceOfferings.map((offering) => (
-                      <label key={offering.serviceType} className="flex min-h-11 items-center gap-3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
-                        <input name="services" type="checkbox" value={offering.serviceType} className="h-4 w-4 accent-[#496b5d]" />
+                      <label key={offering.serviceType} className="flex min-h-11 items-center gap-3 border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
+                        <input name="services" type="checkbox" value={offering.serviceType} className="h-4 w-4 accent-[#0d9488]" />
                         <span>{capitalize(offering.serviceType)}</span>
                       </label>
                     ))}
@@ -164,7 +164,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </label>
                 <SubmitButton variant="secondary">Save what I can offer</SubmitButton>
               </form>
-            </Section>
+            </CollapsibleSection>
 
           </div>
 
@@ -172,11 +172,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           <aside className="flex flex-col gap-6">
 
             {/* My Groups */}
-            <Section id="groups" title="My Groups" eyebrow="Your coordination spaces">
+            <CollapsibleSection id="groups" title="My Groups" eyebrow="Your coordination spaces" storageKey="dashboard:groups">
               {data.myGroups.length > 0 ? (
                 <div className="space-y-3">
                   {data.myGroups.map((g) => (
-                    <div key={g.groupId} className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <div key={g.groupId} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-sm font-medium text-[var(--text)]">{g.groupName}</p>
@@ -184,7 +184,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                         </div>
                         <a
                           href={`/groups/${g.groupId}`}
-                          className="shrink-0 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] transition"
+                          className="btn-secondary shrink-0 border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)]"
                         >
                           Open
                         </a>
@@ -207,7 +207,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   {data.openGroups.map((g) => (
                     <form key={g.id} action={joinGroupAction}>
                       <input type="hidden" name="groupId" value={g.id} />
-                      <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-3">
+                      <div className="border border-[var(--border)] bg-[var(--surface)] p-3">
                         <p className="text-sm font-medium">{g.name}</p>
                         {g.description && <p className="mt-1 text-xs text-[var(--muted)]">{g.description}</p>}
                         <div className="mt-3 flex gap-2">
@@ -220,10 +220,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   ))}
                 </div>
               )}
-            </Section>
+            </CollapsibleSection>
 
             {/* Notifications / routes */}
-            <Section id="routes" title="Notifications" eyebrow="Requests you can help with">
+            <CollapsibleSection id="routes" title="Notifications" eyebrow="Requests you can help with" storageKey="dashboard:routes">
               <form action={routeOpenRequestsAction} className="mb-4">
                 <SubmitButton variant="secondary">Check for matching requests</SubmitButton>
               </form>
@@ -236,11 +236,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               ) : (
                 <EmptyState text="No pending requests have been routed to you." />
               )}
-            </Section>
+            </CollapsibleSection>
 
             {/* My Requests */}
             {data.myGroups.length > 0 && (
-              <Section id="my-requests" title="My Requests" eyebrow="Requests you submitted">
+              <CollapsibleSection id="my-requests" title="My Requests" eyebrow="Requests you submitted" storageKey="dashboard:my-requests">
                 {data.myRequests.length === 0 ? (
                   <p className="text-sm text-[var(--muted)]">No active requests.</p>
                 ) : (
@@ -270,7 +270,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       }
 
                       return (
-                        <li key={request.id} className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                        <li key={request.id} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                           <div className="flex items-start justify-between gap-2">
                             <p className="text-sm font-medium capitalize">{request.requestType}</p>
                             <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
@@ -300,7 +300,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 <p className="mt-3 text-xs text-[var(--muted)]">
                   Deleting a request removes it from active views. Contact details are removed after any accountability period.
                 </p>
-              </Section>
+              </CollapsibleSection>
             )}
 
           </aside>
@@ -544,13 +544,13 @@ function RouteCard({ route }: { route: ExperienceRoute }) {
   const accepted = route.status === "accepted";
   const declined = route.status === "declined";
   return (
-    <article className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-4">
+    <article className="border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold capitalize">{route.serviceType} requested</h3>
           <p className="mt-1 text-sm text-[var(--soft-text)]">Routed to you. {route.urgencyLabel}</p>
         </div>
-        <span className="rounded-md border border-[var(--border)] bg-[var(--subtle)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
+        <span className="border border-[var(--border)] bg-[var(--subtle)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
           {route.status.replace("_", " ")}
         </span>
       </div>

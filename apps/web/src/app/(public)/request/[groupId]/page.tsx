@@ -10,7 +10,7 @@ import { ArrowLeft, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-re
 function AlphaNotice() {
   return (
     <div
-      className="rounded-md border border-[var(--notice-border)] bg-[var(--notice)] px-4 py-3 text-sm text-[var(--notice-text)]"
+      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
       role="status"
     >
       <p className="font-medium">Commons Open Alpha</p>
@@ -88,7 +88,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                 All groups
               </Link>
             </header>
-            <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+            <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <HelpCircle className="h-6 w-6 text-[var(--accent)]" aria-hidden="true" />
                 <h1 className="text-xl font-semibold">Request received</h1>
@@ -98,7 +98,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               </p>
 
               {privateLink && (
-                <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm">
+                <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm">
                   <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                     <Key className="h-4 w-4" aria-hidden="true" />
                     Your private request link
@@ -108,7 +108,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                 </div>
               )}
 
-              <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
+              <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
                 <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                   <Shield className="h-4 w-4" aria-hidden="true" />
                   Privacy reminder
@@ -122,13 +122,13 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 <Link
                   href={`/request/${groupId}`}
-                  className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]"
+                  className="btn-secondary flex min-h-11 flex-1 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
                 >
                   Submit another request
                 </Link>
                 <Link
                   href="/"
-                  className="flex min-h-11 flex-1 items-center justify-center rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)]"
+                  className="btn-primary flex min-h-11 flex-1 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
                 >
                   Back to home
                 </Link>
@@ -244,7 +244,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               <ArrowLeft className="h-3 w-3" aria-hidden="true" />
               All groups
             </Link>
-            <h1 className="mt-4 text-3xl font-semibold tracking-normal">Request support</h1>
+            <h1 className="mt-4 text-3xl font-bold tracking-tight">Request support</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">{group.name}</p>
             <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">
               No account needed. Provide only what is necessary to coordinate help.
@@ -253,7 +253,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
 
           <AlphaNotice />
 
-          <form action={submitGroupScopedRequest} className="flex flex-col gap-5 rounded-md border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          <form action={submitGroupScopedRequest} className="flex flex-col gap-5 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <div className="block">
               <span className="field-label">What do you need help with?</span>
               {categories.length > 0 ? (
@@ -351,7 +351,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               <p className="mt-1 text-xs text-[var(--muted)]">Requests expire automatically. You can also delete yours at any time using your private link.</p>
             </label>
 
-            <div className="rounded-md border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
+            <div className="border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
               <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                 <Shield className="h-4 w-4" aria-hidden="true" />
                 Privacy
@@ -366,7 +366,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
 
             <button
               type="submit"
-              className="min-h-11 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
+              className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--page)]"
             >
               Send request
             </button>

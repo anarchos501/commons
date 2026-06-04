@@ -12,12 +12,12 @@
   --muted: #6f6558;
   --border: #d8d0c3;
   --border-strong: #c9c0b2;
-  --accent: #496b5d;
-  --accent-hover: #385549;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
   --accent-text: #ffffff;
-  --notice: #edf5ef;
-  --notice-border: #b8c7bd;
-  --notice-text: #294236;
+  --notice: #f0fdfa;
+  --notice-border: #99f6e4;
+  --notice-text: #134e4a;
 }
 
 @theme inline {
@@ -30,7 +30,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
 html.dark {
@@ -45,12 +45,12 @@ html.dark {
   --muted: #aaa092;
   --border: #403a31;
   --border-strong: #5b5246;
-  --accent: #86a792;
-  --accent-hover: #9bb9a4;
-  --accent-text: #111713;
-  --notice: #1f3028;
-  --notice-border: #42624f;
-  --notice-text: #c7e7d0;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-text: #042f2e;
+  --notice: #042f2e;
+  --notice-border: #115e59;
+  --notice-text: #99f6e4;
 }
 
 html {
@@ -75,7 +75,6 @@ textarea {
 .field-input {
   min-height: 2.75rem;
   width: 100%;
-  border-radius: 0.375rem;
   border: 1px solid var(--border-strong);
   background: var(--surface);
   padding: 0.55rem 0.75rem;
@@ -85,5 +84,63 @@ textarea {
 
 .field-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(73, 107, 93, 0.22);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* ── Button animations ──────────────────────────────────── */
+
+.btn-primary {
+  transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.btn-secondary {
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+.btn-secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.btn-icon {
+  transition: background-color 100ms ease, transform 100ms ease;
+}
+.btn-icon:hover {
+  transform: scale(1.08);
+}
+.btn-icon:active {
+  transform: scale(0.95);
+}
+
+/* ── Sidebar nav links — left-border accent on hover ────── */
+
+.nav-link {
+  position: relative;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.nav-link:hover::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+/* ── Notice/alert with left accent stripe ───────────────── */
+
+.notice-bar {
+  border: 1px solid var(--notice-border);
+  border-left: 3px solid var(--accent);
+  background: var(--notice);
 }
