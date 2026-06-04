@@ -4,7 +4,7 @@ export type SidebarData = {
   displayName: string;
   groupMemberships: Array<{ groupId: string; groupName: string }>;
   projectMemberships: Array<{ projectId: string; projectName: string; groupId: string }>;
-  responsibilityAssignments: Array<{ type: string; groupId: string }>;
+  responsibilityAssignments: Array<{ responsibilityId: string; type: string; groupId: string }>;
   unreadRouteCount: number;
 };
 
@@ -36,7 +36,7 @@ export async function getSidebarData(prisma: PrismaClient, accountId: string): P
         expiresAt: { gt: now },
       },
       select: {
-        responsibility: { select: { type: true, groupId: true } },
+        responsibility: { select: { id: true, type: true, groupId: true } },
       },
     }),
     prisma.requestRoute.count({
@@ -53,6 +53,7 @@ export async function getSidebarData(prisma: PrismaClient, accountId: string): P
       groupId: m.project.groupId,
     })),
     responsibilityAssignments: activeAssignments.map((a) => ({
+      responsibilityId: a.responsibility.id,
       type: a.responsibility.type,
       groupId: a.responsibility.groupId,
     })),

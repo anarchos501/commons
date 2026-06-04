@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, HelpCircle, LayoutDashboard, UserRound, Users } from "lucide-react";
+import { Bell, Briefcase, HelpCircle, LayoutDashboard, Shield, UserRound, Users } from "lucide-react";
 import type { SidebarData } from "../../lib/sidebar-data";
 
 interface Props {
@@ -13,7 +13,7 @@ export function SidebarNavClient({ data }: Props) {
 }
 
 function GlobalSidebarNav({ data }: { data: SidebarData }) {
-  const { groupMemberships, unreadRouteCount } = data;
+  const { groupMemberships, projectMemberships, responsibilityAssignments, unreadRouteCount } = data;
 
   return (
     <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4 gap-1">
@@ -40,6 +40,34 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
           {groupMemberships.map((m) => (
             <NavLink key={m.groupId} href={`/groups/${m.groupId}`} icon={null} indent>
               {m.groupName}
+            </NavLink>
+          ))}
+        </>
+      )}
+
+      {projectMemberships.length > 0 && (
+        <>
+          <p className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-[var(--soft-text)]">
+            <Briefcase className="h-3.5 w-3.5" />
+            My Projects
+          </p>
+          {projectMemberships.map((m) => (
+            <NavLink key={m.projectId} href={`/projects/${m.projectId}`} icon={null} indent>
+              {m.projectName}
+            </NavLink>
+          ))}
+        </>
+      )}
+
+      {responsibilityAssignments.length > 0 && (
+        <>
+          <p className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-[var(--soft-text)]">
+            <Shield className="h-3.5 w-3.5" />
+            My Responsibilities
+          </p>
+          {responsibilityAssignments.map((r) => (
+            <NavLink key={r.responsibilityId} href={`/responsibilities/${r.responsibilityId}`} icon={null} indent>
+              {r.type.charAt(0).toUpperCase() + r.type.slice(1)}
             </NavLink>
           ))}
         </>
