@@ -59,6 +59,34 @@ export async function openBulletinArchivalPetition(
   });
 }
 
+export async function openProjectBulletinArchivalPetition(
+  prisma: PrismaClient,
+  opts: { bulletinId: string; createdByProjectMembershipId: string; projectId: string },
+) {
+  const bulletin = await prisma.bulletin.findUniqueOrThrow({
+    where: { id: opts.bulletinId },
+    select: { spaceType: true, spaceId: true },
+  });
+  if (bulletin.spaceType !== "project" || bulletin.spaceId !== opts.projectId) {
+    throw new Error(`Bulletin "${opts.bulletinId}" does not belong to project "${opts.projectId}".`);
+  }
+
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: opts.projectId },
+    select: { groupId: true },
+  });
+
+  return openPetition(prisma, {
+    groupId: project.groupId,
+    scopeType: "project",
+    scopeId: opts.projectId,
+    category: "archival",
+    subjectType: "bulletin_archive",
+    subjectId: opts.bulletinId,
+    createdByProjectMembershipId: opts.createdByProjectMembershipId,
+  });
+}
+
 /**
  * Called after a Bulletin archival petition is approved.
  * Sets archivedAt and provenance fields. The petition subjectId is the bulletinId.
@@ -69,13 +97,21 @@ export async function onBulletinArchivalPetitionApproved(prisma: PrismaClient, p
 
   const accountId = petition.createdByMembershipId
     ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
-    : null;
+    : petition.createdByProjectMembershipId
+      ? (await prisma.projectMembership.findUnique({ where: { id: petition.createdByProjectMembershipId }, select: { accountId: true } }))?.accountId ?? null
+      : null;
 
   const bulletin = await prisma.bulletin.findUniqueOrThrow({
     where: { id: petition.subjectId },
     select: { spaceType: true, spaceId: true },
   });
-  await assertSpaceBelongsToGroup(prisma, bulletin.spaceType, bulletin.spaceId, petition.groupId);
+  if (petition.scopeType === "project") {
+    if (bulletin.spaceType !== "project" || bulletin.spaceId !== petition.scopeId) {
+      throw new Error(`Bulletin target does not belong to project petition scope "${petition.scopeId}".`);
+    }
+  } else {
+    await assertSpaceBelongsToGroup(prisma, bulletin.spaceType, bulletin.spaceId, petition.groupId);
+  }
 
   await prisma.bulletin.updateMany({
     where: { id: petition.subjectId, archivedAt: null },

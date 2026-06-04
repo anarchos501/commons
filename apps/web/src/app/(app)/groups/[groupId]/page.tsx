@@ -26,7 +26,7 @@ import { proposeProject } from "../../../../lib/projects";
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
 import { computeGroupTemperature } from "../../../../lib/governance-temperature";
-import { openEmergencyPetition, isEmergencyActive } from "../../../../lib/emergency";
+import { openEmergencyPetition } from "../../../../lib/emergency";
 import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,

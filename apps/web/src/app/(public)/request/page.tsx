@@ -87,35 +87,39 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
     if (node) {
       const groups = await prisma.group.findMany({
         where: { nodeId: node.id },
-        include: {
-          serviceOfferings: {
-            where: { status: "active" },
-            select: { serviceType: true },
-            orderBy: { serviceType: "asc" },
-          },
-        },
+        select: { id: true, name: true },
         orderBy: { createdAt: "asc" },
       });
 
-      const trustedGroups = groups.length > 0
-        ? await prisma.trustedProviderStatus.findMany({
-            where: { groupId: { in: groups.map((g) => g.id) }, status: "active" },
-            select: { groupId: true },
-            distinct: ["groupId"],
-          })
-        : [];
+      const groupIds = groups.map((g) => g.id);
+
+      const [categories, trustedGroups] = await Promise.all([
+        groupIds.length > 0
+          ? prisma.contributionCategory.findMany({
+              where: { status: "active", groupId: { in: groupIds } },
+              select: { groupId: true, name: true },
+              orderBy: { name: "asc" },
+            })
+          : Promise.resolve([]),
+        groupIds.length > 0
+          ? prisma.trustedProviderStatus.findMany({
+              where: { groupId: { in: groupIds }, status: "active" },
+              select: { groupId: true },
+              distinct: ["groupId"],
+            })
+          : Promise.resolve([]),
+      ]);
+
       const trustedGroupIds = new Set(trustedGroups.map((t) => t.groupId));
 
       groupOptions = groups.map((g) => ({
         groupId: g.id,
         groupName: g.name,
-        services: g.serviceOfferings.map((o) => o.serviceType),
+        services: categories.filter((c) => c.groupId === g.id).map((c) => c.name),
         hasTrustedProviders: trustedGroupIds.has(g.id),
       }));
 
-      const serviceSet = new Set<string>();
-      for (const g of groups) for (const o of g.serviceOfferings) serviceSet.add(o.serviceType);
-      allServices = [...serviceSet].sort();
+      allServices = [...new Set(categories.map((c) => c.name))].sort();
     }
   } finally {
     await prisma.$disconnect();

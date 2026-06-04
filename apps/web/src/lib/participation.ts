@@ -161,22 +161,18 @@ type VoterScope = { type: "project"; scopeId: string } | null | undefined;
  */
 export async function getActiveVoterCount(
   prisma: PrismaClient,
-  petition: { groupId: string | null; scopeId?: string; voterScope: unknown },
+  petition: { groupId: string | null; scopeType?: string; scopeId?: string; voterScope: unknown },
 ): Promise<number> {
   // Coalesce groupId → scopeId for nullable groupId (P1 migration)
   const governingGroupId = petition.groupId ?? petition.scopeId ?? "";
   const scope = petition.voterScope as VoterScope;
-  if (scope?.type === "project") {
+  const projectScopeId = petition.scopeType === "project" ? petition.scopeId : scope?.type === "project" ? scope.scopeId : null;
+  if (projectScopeId) {
     return prisma.projectMembership.count({
       where: {
-        projectId: scope.scopeId,
+        projectId: projectScopeId,
         status: "active",
         participationStatus: "active",
-        account: {
-          groupMemberships: {
-            some: { groupId: governingGroupId, status: "active", participationStatus: "active" },
-          },
-        },
       },
     });
   }

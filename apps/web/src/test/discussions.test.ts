@@ -3,6 +3,7 @@ import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import {
   createDiscussionThread,
+  createProjectDiscussionThread,
   deleteExpiredDiscussionContent,
   ensureGeneralDiscussion,
   GENERAL_DISCUSSION_TITLE,
@@ -11,6 +12,7 @@ import {
   onThreadClosurePetitionApproved,
   openThreadClosurePetition,
   postDiscussionMessage,
+  postProjectDiscussionMessage,
 } from "../lib/discussions";
 import { addPetitionSupport, evaluatePetition } from "../lib/petitions";
 
@@ -54,6 +56,43 @@ test("active members create threads and post messages without petition", async (
     assert.equal(messages[0].body, "Bring gloves.");
   } finally {
     await cleanupDiscussionFixture("disc_post");
+  }
+});
+
+test("project member without host-group membership creates project thread and message", async () => {
+  const { group } = await createDiscussionFixture("disc_project_only", 1);
+  const project = await prisma.project.create({ data: { id: "disc_project_only_project", groupId: group.id, name: "Project Only", status: "active" } });
+  try {
+    const account = await prisma.account.create({
+      data: {
+        id: "disc_project_only_project_account",
+        homeNodeId: "disc_project_only_node",
+        displayName: "Project Only",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const projectMembership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    const thread = await createProjectDiscussionThread(prisma, {
+      projectId: project.id,
+      createdByProjectMembershipId: projectMembership.id,
+      title: "Project thread",
+    });
+    const message = await postProjectDiscussionMessage(prisma, {
+      threadId: thread.id,
+      projectId: project.id,
+      authorProjectMembershipId: projectMembership.id,
+      body: "Project-only members can post.",
+    });
+
+    assert.equal(thread.spaceType, "project");
+    assert.equal(thread.spaceId, project.id);
+    assert.equal(message.body, "Project-only members can post.");
+  } finally {
+    await cleanupDiscussionFixture("disc_project_only");
   }
 });
 
@@ -216,6 +255,8 @@ async function cleanupDiscussionFixture(prefix: string) {
   await prisma.discussionMessage.deleteMany({ where: { thread: { spaceId: { startsWith: prefix } } } });
   await prisma.discussionThread.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

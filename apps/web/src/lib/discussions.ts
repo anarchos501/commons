@@ -43,6 +43,28 @@ async function requireActiveMembership(
   return { id: membership.id, accountId: membership.accountId };
 }
 
+async function requireActiveProjectMembership(
+  prisma: PrismaClient,
+  projectMembershipId: string,
+  projectId: string,
+): Promise<ActiveMembership> {
+  const membership = await prisma.projectMembership.findUnique({
+    where: { id: projectMembershipId },
+    select: { id: true, accountId: true, projectId: true, status: true, participationStatus: true },
+  });
+
+  if (
+    !membership ||
+    membership.projectId !== projectId ||
+    membership.status !== "active" ||
+    membership.participationStatus !== "active"
+  ) {
+    throw new Error("Active project membership required for project discussion participation.");
+  }
+
+  return { id: membership.id, accountId: membership.accountId };
+}
+
 async function assertDiscussionSpace(
   prisma: PrismaClient,
   { spaceType, spaceId, groupId }: DiscussionSpace,
@@ -116,6 +138,24 @@ export async function createDiscussionThread(
   });
 }
 
+export async function createProjectDiscussionThread(
+  prisma: PrismaClient,
+  opts: { projectId: string; createdByProjectMembershipId: string; title: string },
+) {
+  const membership = await requireActiveProjectMembership(prisma, opts.createdByProjectMembershipId, opts.projectId);
+  const title = opts.title.trim();
+  if (!title) throw new Error("Discussion thread title is required.");
+
+  return prisma.discussionThread.create({
+    data: {
+      spaceType: "project",
+      spaceId: opts.projectId,
+      title,
+      createdByAccountId: membership.accountId,
+    },
+  });
+}
+
 export async function postDiscussionMessage(
   prisma: PrismaClient,
   opts: { threadId: string; groupId: string; authorMembershipId: string; body: string },
@@ -158,6 +198,47 @@ export async function postDiscussionMessage(
       },
     });
 
+    return message;
+  });
+}
+
+export async function postProjectDiscussionMessage(
+  prisma: PrismaClient,
+  opts: { threadId: string; projectId: string; authorProjectMembershipId: string; body: string },
+) {
+  const membership = await requireActiveProjectMembership(prisma, opts.authorProjectMembershipId, opts.projectId);
+  const body = opts.body.trim();
+  if (!body) throw new Error("Discussion message body is required.");
+
+  const thread = await prisma.discussionThread.findUnique({
+    where: { id: opts.threadId },
+    select: { id: true, spaceType: true, spaceId: true, closedAt: true, lastActivityAt: true },
+  });
+  if (!thread) throw new Error(`Discussion thread ${opts.threadId} not found.`);
+  if (thread.spaceType !== "project" || thread.spaceId !== opts.projectId) {
+    throw new Error(`Discussion thread ${opts.threadId} does not belong to project "${opts.projectId}".`);
+  }
+  if (thread.closedAt) throw new Error("Closed discussion threads do not accept new messages.");
+
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: opts.projectId },
+    select: { groupId: true },
+  });
+  const retention = await getDiscussionRetention(prisma, project.groupId);
+  const inactiveBefore = daysBeforeNow(retention.threadInactivityDays);
+  if (thread.lastActivityAt < inactiveBefore) {
+    throw new Error("Inactive discussion threads do not accept new messages.");
+  }
+
+  const expiresAt = daysFromNow(retention.messageRetentionDays);
+  return prisma.$transaction(async (tx) => {
+    const message = await tx.discussionMessage.create({
+      data: { threadId: opts.threadId, authorId: membership.accountId, body, expiresAt },
+    });
+    await tx.discussionThread.update({
+      where: { id: opts.threadId },
+      data: { messageCount: { increment: 1 }, lastActivityAt: new Date() },
+    });
     return message;
   });
 }

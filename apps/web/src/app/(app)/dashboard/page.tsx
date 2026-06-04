@@ -306,14 +306,15 @@ async function getDashboardData(
     const memberGroupIds = myGroupMemberships.map((m) => m.groupId);
     const membershipIdByGroup = Object.fromEntries(myGroupMemberships.map((m) => [m.groupId, m.id]));
 
-    // Parallel: services, routes, petitions, per-group data, my requests
-    const [allNodeServices, routes, petitions, groupServiceOfferings, trustedProviderGroups, myRequests] = await Promise.all([
-      prisma.groupServiceOffering.findMany({
-        where: { status: "active", group: { nodeId } },
-        distinct: ["serviceType"],
-        orderBy: { serviceType: "asc" },
-        select: { serviceType: true },
-      }),
+    // Parallel: services (from contribution categories), routes, petitions, per-group data, my requests
+    const [groupCategories, routes, petitions, trustedProviderGroups, myRequests] = await Promise.all([
+      memberGroupIds.length > 0
+        ? prisma.contributionCategory.findMany({
+            where: { status: "active", groupId: { in: memberGroupIds } },
+            select: { groupId: true, name: true },
+            orderBy: { name: "asc" },
+          })
+        : Promise.resolve([]),
       prisma.requestRoute.findMany({
         where: { contributorAccountId: accountId },
         include: {
@@ -339,11 +340,6 @@ async function getDashboardData(
             take: 40,
           })
         : Promise.resolve([]),
-      prisma.groupServiceOffering.findMany({
-        where: { groupId: { in: memberGroupIds }, status: "active" },
-        select: { groupId: true, serviceType: true },
-        orderBy: { serviceType: "asc" },
-      }),
       memberGroupIds.length > 0
         ? prisma.trustedProviderStatus.findMany({
             where: { groupId: { in: memberGroupIds }, status: "active" },
@@ -411,9 +407,12 @@ async function getDashboardData(
     const groupOptions: GroupOption[] = myGroupMemberships.map((m) => ({
       groupId: m.groupId,
       groupName: m.group.name,
-      services: groupServiceOfferings.filter((o) => o.groupId === m.groupId).map((o) => o.serviceType),
+      services: groupCategories.filter((c) => c.groupId === m.groupId).map((c) => c.name),
       hasTrustedProviders: trustedGroupIds.has(m.groupId),
     }));
+
+    // Distinct category names across all member groups — for the Offer Support checkboxes
+    const allServices = [...new Set(groupCategories.map((c) => c.name))].sort();
 
     return {
       account,
@@ -422,7 +421,7 @@ async function getDashboardData(
         groupName: m.group.name,
         description: m.group.description,
       })),
-      allServices: allNodeServices.map((o) => o.serviceType),
+      allServices,
       groupOptions,
       notifications,
       myRequests,
@@ -473,11 +472,10 @@ async function requestHelpAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await requireGroupMembership(prisma, session.accountId, groupId);
-    const offering = await prisma.groupServiceOffering.findFirst({ where: { groupId, serviceType, status: "active" }, select: { projectId: true } });
     const request = await createSupportRequest(prisma, {
       submittedByAccountId: session.accountId,
       groupId,
-      projectId: offering?.projectId ?? null,
+      projectId: null,
       requestType: serviceType,
       requestedServices: [{ serviceType, trustRequirement: trustPreference }],
       description: buildRequestDescription({ contact, location, language }),

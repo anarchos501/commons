@@ -6,6 +6,7 @@ import {
   reviseLivingDocument,
   draftLivingDocumentRevision,
   openRevisionPetition,
+  openProjectRevisionPetition,
   onRevisionPetitionApproved,
   openLivingDocumentArchivalPetition,
   onLivingDocumentArchivalPetitionApproved,
@@ -107,6 +108,52 @@ test("revision petition: approval promotes body and sets provenance", async () =
     assert.equal(rev.approvedByAccountId, account.id);
   } finally {
     await cleanupCommsFixture("gc_rev_approve");
+  }
+});
+
+test("project-only member opens and approves project living document revision petition", async () => {
+  const { group } = await createCommsFixture("gc_project_revision", 1);
+  const project = await prisma.project.create({ data: { id: "gc_project_revision_project", groupId: group.id, name: "Project Revision", status: "active" } });
+  try {
+    const account = await prisma.account.create({
+      data: {
+        id: "gc_project_revision_project_account",
+        homeNodeId: "gc_project_revision_node",
+        displayName: "Project Revision Member",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const projectMembership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+    const { document } = await createLivingDocument(prisma, {
+      spaceType: "project",
+      spaceId: project.id,
+      authorId: account.id,
+      title: "Project Guide",
+      body: "v1",
+    });
+    const draft = await draftLivingDocumentRevision(prisma, { livingDocumentId: document.id, authorId: account.id, body: "v2" });
+    const result = await openProjectRevisionPetition(prisma, {
+      livingDocumentId: document.id,
+      revisionId: draft.id,
+      projectId: project.id,
+      createdByProjectMembershipId: projectMembership.id,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
+    await prisma.petitionSupport.create({ data: { petitionId: result.petitionId, projectMembershipId: projectMembership.id } });
+    const evaluated = await evaluatePetition(prisma, result.petitionId);
+    assert.equal(evaluated.outcome, "approved");
+    await onRevisionPetitionApproved(prisma, result.petitionId);
+
+    const updated = await prisma.livingDocument.findUniqueOrThrow({ where: { id: document.id } });
+    assert.equal(updated.currentBody, "v2");
+  } finally {
+    await cleanupCommsFixture("gc_project_revision");
   }
 });
 
@@ -360,6 +407,8 @@ async function cleanupCommsFixture(prefix: string) {
   await prisma.publication.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.bulletin.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

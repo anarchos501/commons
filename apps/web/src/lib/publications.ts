@@ -118,14 +118,52 @@ export async function openPublicationArchivalPetition(
   });
 }
 
+export async function openProjectPublicationArchivalPetition(
+  prisma: PrismaClient,
+  opts: { publicationId: string; createdByProjectMembershipId: string; projectId: string },
+) {
+  const pub = await prisma.publication.findUniqueOrThrow({
+    where: { id: opts.publicationId },
+    select: { spaceType: true, spaceId: true },
+  });
+  if (pub.spaceType !== "project" || pub.spaceId !== opts.projectId) {
+    throw new Error(`Publication "${opts.publicationId}" does not belong to project "${opts.projectId}".`);
+  }
+
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: opts.projectId },
+    select: { groupId: true },
+  });
+
+  return openPetition(prisma, {
+    groupId: project.groupId,
+    scopeType: "project",
+    scopeId: opts.projectId,
+    category: "archival",
+    subjectType: "publication_archive",
+    subjectId: opts.publicationId,
+    createdByProjectMembershipId: opts.createdByProjectMembershipId,
+  });
+}
+
 /** Called after a Publication archival petition is approved. Fix 3: re-verifies ownership. */
 export async function onPublicationArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "publication_archive");
-  const accountId = petition.createdByMembershipId ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null : null;
+  const accountId = petition.createdByMembershipId
+    ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
+    : petition.createdByProjectMembershipId
+      ? (await prisma.projectMembership.findUnique({ where: { id: petition.createdByProjectMembershipId }, select: { accountId: true } }))?.accountId ?? null
+      : null;
 
   // Fix 3: verify the publication still belongs to the petition group
   const pub = await prisma.publication.findUniqueOrThrow({ where: { id: petition.subjectId }, select: { spaceType: true, spaceId: true } });
-  await assertSpaceBelongsToGroup(prisma, pub.spaceType, pub.spaceId, petition.groupId);
+  if (petition.scopeType === "project") {
+    if (pub.spaceType !== "project" || pub.spaceId !== petition.scopeId) {
+      throw new Error(`Publication target does not belong to project petition scope "${petition.scopeId}".`);
+    }
+  } else {
+    await assertSpaceBelongsToGroup(prisma, pub.spaceType, pub.spaceId, petition.groupId);
+  }
 
   await prisma.publication.updateMany({
     where: { id: petition.subjectId, archivedAt: null },

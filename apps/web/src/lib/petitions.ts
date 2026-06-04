@@ -25,6 +25,7 @@ type ApprovedPetitionPayload = {
   subjectType: string;
   category: string;
   createdByMembershipId: string | null;
+  createdByProjectMembershipId: string | null;
   governanceSnapshot: unknown;
 };
 
@@ -49,6 +50,7 @@ export async function requireApprovedPetition(
       category: true,
       status: true,
       createdByMembershipId: true,
+      createdByProjectMembershipId: true,
       governanceSnapshot: true,
     },
   });
@@ -87,6 +89,8 @@ export async function openPetition(
     createdByMembershipId,
     createdByProjectMembershipId,
     voterScope,
+    scopeType: requestedScopeType,
+    scopeId: requestedScopeId,
   }: {
     groupId: string;                       // governing group (sets both groupId and scopeId for group-scoped petitions)
     category: string;
@@ -95,6 +99,8 @@ export async function openPetition(
     createdByMembershipId?: string | null; // group-member creator (most petitions)
     createdByProjectMembershipId?: string | null; // project-member creator (project-internal petitions)
     voterScope?: { type: "project"; scopeId: string } | null;
+    scopeType?: "group" | "project" | "responsibility";
+    scopeId?: string;
   },
 ): Promise<OpenPetitionResult> {
   if (!isProposalFamily(subjectType)) return { ok: false, reason: "invalid_family" };
@@ -120,10 +126,13 @@ export async function openPetition(
   } else if (createdByProjectMembershipId) {
     const creatorMembership = await prisma.projectMembership.findUnique({
       where: { id: createdByProjectMembershipId },
-      select: { status: true, participationStatus: true },
+      select: { projectId: true, status: true, participationStatus: true },
     });
+    const projectScopeId = requestedScopeType === "project" ? requestedScopeId : voterScope?.scopeId;
     if (
       !creatorMembership ||
+      !projectScopeId ||
+      creatorMembership.projectId !== projectScopeId ||
       creatorMembership.status !== "active" ||
       creatorMembership.participationStatus !== "active"
     ) {
@@ -133,13 +142,13 @@ export async function openPetition(
     return { ok: false, reason: "creator_not_eligible" };
   }
 
-  // scopeId/scopeType: for now all petitions created via openPetition() are group-scoped.
-  // Project-internal petitions will use a dedicated openProjectPetition() in Phase 5.
-  const scopeType = "group";
-  const scopeId = groupId;
+  const scopeType = requestedScopeType ?? (voterScope?.type === "project" ? "project" : "group");
+  const scopeId = requestedScopeId ?? (scopeType === "project" ? voterScope?.scopeId : groupId);
+  if (!scopeId) return { ok: false, reason: "creator_not_eligible" };
 
   const snapshot = await snapshotGovernanceParams(prisma, groupId, category);
-  const competitionKey = deriveCompetitionKey(subjectType, subjectId, groupId);
+  const competitionScopeId = scopeType === "project" ? scopeId : groupId;
+  const competitionKey = deriveCompetitionKey(subjectType, subjectId, competitionScopeId);
 
   const opensAt = new Date();
   const closesAt = new Date(opensAt.getTime() + snapshot.petitionDuration * 24 * 60 * 60 * 1000);
@@ -156,7 +165,7 @@ export async function openPetition(
         competitionKey,
         status: "open",
         governanceSnapshot: snapshot as object,
-        voterScope: voterScope ?? Prisma.JsonNull,
+        voterScope: voterScope ?? (scopeType === "project" ? { type: "project", scopeId } : Prisma.JsonNull),
         opensAt,
         closesAt,
         createdByMembershipId: createdByMembershipId ?? null,
@@ -205,6 +214,7 @@ export async function addPetitionSupport(
   }
 
   if (membershipId) {
+    if (petition.scopeType === "project") return { ok: false, reason: "not_eligible" };
     // Group-scoped support: validate GroupMembership
     const membership = await prisma.groupMembership.findUnique({
       where: { id: membershipId },
@@ -247,17 +257,21 @@ export async function addPetitionSupport(
       select: { projectId: true, status: true, participationStatus: true },
     });
 
+    const scope = petition.voterScope as { type: string; scopeId: string } | null;
+    const projectScopeId = petition.scopeType === "project" ? petition.scopeId : scope?.type === "project" ? scope.scopeId : null;
     if (
       !pm ||
-      pm.projectId !== petition.scopeId ||
+      !projectScopeId ||
+      pm.projectId !== projectScopeId ||
       pm.status !== "active" ||
       pm.participationStatus !== "active"
     ) {
       return { ok: false, reason: "not_eligible" };
     }
 
-    await prisma.petitionSupport.create({
-      data: { petitionId, projectMembershipId },
+    await prisma.petitionSupport.createMany({
+      data: [{ petitionId, projectMembershipId }],
+      skipDuplicates: true,
     });
   }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import {
   proposeContributionCategory,
+  proposeProjectContributionCategory,
   proposeContributionCategoryArchival,
   createContributionCategoryFromPetition,
   archiveContributionCategoryFromPetition,
@@ -70,9 +71,47 @@ test("proposeContributionCategory opens project-scoped petition for project-offe
     assert.ok(result.ok);
     if (!result.ok) return;
     const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.scopeType, "project");
+    assert.equal(petition.scopeId, project.id);
     assert.deepEqual(petition.voterScope, { type: "project", scopeId: project.id });
   } finally {
     await cleanupFixture("cc_proj_prop");
+  }
+});
+
+test("project-only member proposes project contribution category", async () => {
+  const { project } = await createFixtureWithProject("cc_proj_only");
+  try {
+    const account = await prisma.account.create({
+      data: {
+        id: "cc_proj_only_account_project",
+        homeNodeId: "cc_proj_only_node",
+        displayName: "Project Category Member",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const projectMembership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    const result = await proposeProjectContributionCategory(prisma, {
+      projectMembershipId: projectMembership.id,
+      projectId: project.id,
+      name: "Project Mutual Aid",
+      description: "Help coordinated by the project.",
+    });
+    assert.ok(result.ok);
+    if (!result.ok) return;
+
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    const draft = await prisma.contributionCategoryDraft.findUniqueOrThrow({ where: { id: petition.subjectId } });
+    assert.equal(petition.scopeType, "project");
+    assert.equal(petition.scopeId, project.id);
+    assert.equal(draft.proposedByMembershipId, null);
+    assert.equal(draft.proposedByProjectMembershipId, projectMembership.id);
+  } finally {
+    await cleanupFixture("cc_proj_only");
   }
 });
 

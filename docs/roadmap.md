@@ -1,6 +1,6 @@
 # Roadmap
 
-Commons development should stay anchored to the minimum social loop:
+Commons development stays anchored to the minimum social loop:
 
 1. A community need appears.
 2. Trusted people coordinate.
@@ -9,48 +9,51 @@ Commons development should stay anchored to the minimum social loop:
 5. Vulnerability is not archived.
 6. Trust in the commons grows.
 
-Near-term work should make that loop usable on one healthy local node before adding heavier infrastructure.
+The current alpha has enough of that loop implemented to test on one local node: support requests, routing, contribution records, group workspaces, project workspaces, responsibility workspaces, petitions, governance temperature signals, and accountability concern flows.
 
-## Phase 1
+## Current Alpha Focus
 
-Core models: Node, Account, PortableIdentity, Group, Project, ServiceCapability, TrustedServiceCapability, Contribution, SupportRequest, Offer, Proposal, Responsibility, ResponsibilityAssignment, GovernancePreference, and PrivacyEnvelope.
+- Make the implemented workflows clearer and less brittle.
+- Keep project-internal governance autonomous from host-group membership.
+- Keep responsibilities accountable to their group.
+- Tighten tests around petition side effects, membership sponsorship, emergency periods, project workspaces, and responsibility coverage.
+- Keep documentation aligned with what testers can actually do in the UI.
 
-## Phase 2
+## Next Product Work
 
-Core web app: request intake, service directory, route review, contributor accept/decline flows, contribution logging, group/project pages, lightweight dashboards, and proposals.
+- Polish onboarding for public requesters, applicants, members, project participants, and responsibility holders.
+- Improve petition visibility, status explanations, and outcome history.
+- Add missing responsibility type governance, likely as a distinct `responsibility_type_proposal`.
+- Add production-grade account recovery, email or anti-abuse controls, and operator tooling.
+- Add user-facing data deletion/export workflows.
+- Continue simplifying the dashboard and sidebar as more workflows become available.
 
-## Phase 3
+## Deferred Infrastructure
 
-Routing and trust: service notifications, contributor availability, trust petitions, trust approvals, and request routing.
-
-Contributor availability should stay private, revocable, and low-pressure. Future controls may support preferences such as unavailable, available, limited, and time-sensitive capable, but must avoid creating an on-call culture, urgency pressure, public reliability signals, or implied obligation.
-
-## Phase 4
-
-Mobile and PWA: installable app, offline drafts, encrypted local storage, sync queue, and cached group/project views.
-
-## Later
-
-Security audits, deletion/export workflows, federation readiness, portable identity migration, offline sync, and plugin foundations.
+- Mobile/PWA install path, offline drafts, encrypted local storage, sync queue, and cached workspace views.
+- Federation between Commons nodes.
+- Plugin runtime and permission enforcement.
+- End-to-end encryption and stronger local-first storage.
+- Full security review, rate limiting, and deployment hardening.
 
 ## Scope Boundary: Resource Coordination
 
-Core Commons should remain focused on human coordination. For resource-related workflows, the platform should stop at:
+Core Commons remains focused on human coordination. For resource-related workflows, the platform should stop at:
 
-- Resource Needed
-- Resource Pledged
-- Resource Fulfilled
+- Resource needed.
+- Resource pledged.
+- Resource fulfilled.
 
 Core Commons should not drift into:
 
-- inventory management
-- warehousing
-- asset management
-- procurement
-- accounting
+- Inventory management.
+- Warehousing.
+- Asset management.
+- Procurement.
+- Accounting.
 
-Communities that need those capabilities may add them through optional plugins. The core platform should remain self-contained for human coordination while avoiding responsibility for document storage, external workflow dependencies, and inventory administration.
+Communities that need those capabilities may add them through optional plugins later. The core platform should remain self-contained for human coordination.
 
 ## Hybrid Architecture Preparation
 
-Prepare a split-by-data-class architecture with lightweight signed events, local sync state, and replication policies before implementing full federation, P2P, CRDTs, or browser encryption. Signed events are accountability and migration preparation, not blockchain architecture, total event sourcing, or immutable surveillance history.
+Signed events, local sync state, replication policies, portable identity, and federation-ready schema foundations are preparation work. They are not blockchain architecture, total event sourcing, or immutable surveillance history.

@@ -14,6 +14,13 @@ export type ProposeContributionCategoryInput = {
   description: string;
 };
 
+export type ProposeProjectContributionCategoryInput = {
+  projectMembershipId: string;
+  projectId: string;
+  name: string;
+  description: string;
+};
+
 export type ProposeContributionCategoryResult =
   | { ok: true; petitionId: string }
   | { ok: false; reason: "not_eligible" | "duplicate_name" | "petition_error" | "ability_required" };
@@ -116,6 +123,64 @@ export async function proposeContributionCategory(
     return { ok: false, reason: "petition_error" };
   }
 
+  return { ok: true, petitionId: result.petitionId };
+}
+
+export async function proposeProjectContributionCategory(
+  prisma: PrismaClient,
+  input: ProposeProjectContributionCategoryInput,
+): Promise<ProposeContributionCategoryResult> {
+  const projectMembership = await prisma.projectMembership.findUnique({
+    where: { id: input.projectMembershipId },
+    select: { projectId: true, status: true, participationStatus: true },
+  });
+  if (
+    !projectMembership ||
+    projectMembership.projectId !== input.projectId ||
+    projectMembership.status !== "active" ||
+    projectMembership.participationStatus !== "active"
+  ) {
+    return { ok: false, reason: "not_eligible" };
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: input.projectId },
+    select: { groupId: true },
+  });
+  if (!project) return { ok: false, reason: "not_eligible" };
+
+  const existing = await prisma.contributionCategory.findFirst({
+    where: {
+      offeringEntityType: "project",
+      offeringEntityId: input.projectId,
+      name: input.name,
+      status: "active",
+    },
+  });
+  if (existing) return { ok: false, reason: "duplicate_name" };
+
+  const draft = await prisma.contributionCategoryDraft.create({
+    data: {
+      groupId: project.groupId,
+      offeringEntityType: "project",
+      offeringEntityId: input.projectId,
+      name: input.name,
+      description: input.description,
+      proposedByProjectMembershipId: input.projectMembershipId,
+    },
+  });
+
+  const result = await openPetition(prisma, {
+    groupId: project.groupId,
+    scopeType: "project",
+    scopeId: input.projectId,
+    category: "contribution_category",
+    subjectType: "contribution_category_proposal",
+    subjectId: draft.id,
+    createdByProjectMembershipId: input.projectMembershipId,
+  });
+
+  if (!result.ok) return { ok: false, reason: "petition_error" };
   return { ok: true, petitionId: result.petitionId };
 }
 

@@ -10,7 +10,7 @@ import { ArrowLeft, Clock, HelpCircle, Key, Languages, MapPin, Shield } from "lu
 import { createPrismaClient } from "../../../../lib/prisma";
 import { resolveCurrentNode } from "../../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
-import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../../lib/support-form";
+import { buildRequestDescription, trustPreferenceOptions } from "../../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
 import { getAvailableCategoriesForScope, trustedProviderExistsForCategory } from "../../../../lib/contribution-categories";
 import { AlphaNotice } from "../../../../components/shared/Notice";
@@ -117,14 +117,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       );
     }
 
-    const [serviceOfferings, rawCategories] = await Promise.all([
-      prisma.groupServiceOffering.findMany({
-        where: { groupId: group.id, status: "active" },
-        select: { serviceType: true },
-        orderBy: { serviceType: "asc" },
-      }),
-      getAvailableCategoriesForScope(prisma, { groupId: group.id }),
-    ]);
+    const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: group.id });
 
     // Pre-compute trusted provider existence per category for the trust preference picker
     const categories = await Promise.all(
@@ -256,16 +249,9 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                   <input type="hidden" name="serviceType" value="" />
                 </>
               ) : (
-                <>
-                  <select name="serviceType" className="field-input" defaultValue={serviceOfferings[0]?.serviceType ?? ""}>
-                    {serviceOfferings.map((offering) => (
-                      <option key={offering.serviceType} value={offering.serviceType}>
-                        {capitalize(offering.serviceType)}
-                      </option>
-                    ))}
-                  </select>
-                  <input type="hidden" name="categoryId" value="" />
-                </>
+                <p className="text-sm text-[var(--muted)]">
+                  This group has not defined any contribution categories yet.
+                </p>
               )}
             </div>
 

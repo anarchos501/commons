@@ -159,6 +159,44 @@ export async function openRevisionPetition(
   });
 }
 
+export async function openProjectRevisionPetition(
+  prisma: PrismaClient,
+  opts: { livingDocumentId: string; revisionId: string; createdByProjectMembershipId: string; projectId: string },
+) {
+  const revision = await prisma.livingDocumentRevision.findUniqueOrThrow({
+    where: { id: opts.revisionId },
+    select: { livingDocumentId: true },
+  });
+  if (revision.livingDocumentId !== opts.livingDocumentId) {
+    throw new Error(
+      `Revision "${opts.revisionId}" belongs to document "${revision.livingDocumentId}", not "${opts.livingDocumentId}".`,
+    );
+  }
+
+  const document = await prisma.livingDocument.findUniqueOrThrow({
+    where: { id: opts.livingDocumentId },
+    select: { spaceType: true, spaceId: true },
+  });
+  if (document.spaceType !== "project" || document.spaceId !== opts.projectId) {
+    throw new Error(`Living document "${opts.livingDocumentId}" does not belong to project "${opts.projectId}".`);
+  }
+
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: opts.projectId },
+    select: { groupId: true },
+  });
+
+  return openPetition(prisma, {
+    groupId: project.groupId,
+    scopeType: "project",
+    scopeId: opts.projectId,
+    category: "living_document",
+    subjectType: "living_document_revision",
+    subjectId: opts.revisionId,
+    createdByProjectMembershipId: opts.createdByProjectMembershipId,
+  });
+}
+
 /**
  * Called after a revision petition is approved.
  * Promotes the revision body to LivingDocument.currentBody and sets provenance fields.
@@ -170,20 +208,27 @@ export async function onRevisionPetitionApproved(prisma: PrismaClient, petitionI
 
   const accountId = petition.createdByMembershipId
     ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
-    : null;
+    : petition.createdByProjectMembershipId
+      ? (await prisma.projectMembership.findUnique({ where: { id: petition.createdByProjectMembershipId }, select: { accountId: true } }))?.accountId ?? null
+      : null;
 
   const revision = await prisma.livingDocumentRevision.findUniqueOrThrow({
     where: { id: petition.subjectId },
     select: { livingDocumentId: true, body: true, livingDocument: { select: { spaceType: true, spaceId: true } } },
   });
 
-  // Fix 3: verify the document's space still belongs to the petition group
-  await assertSpaceBelongsToGroup(
-    prisma,
-    revision.livingDocument.spaceType,
-    revision.livingDocument.spaceId,
-    petition.groupId,
-  );
+  if (petition.scopeType === "project") {
+    if (revision.livingDocument.spaceType !== "project" || revision.livingDocument.spaceId !== petition.scopeId) {
+      throw new Error(`Revision target does not belong to project petition scope "${petition.scopeId}".`);
+    }
+  } else {
+    await assertSpaceBelongsToGroup(
+      prisma,
+      revision.livingDocument.spaceType,
+      revision.livingDocument.spaceId,
+      petition.groupId,
+    );
+  }
 
   await prisma.$transaction([
     prisma.livingDocumentRevision.update({

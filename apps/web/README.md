@@ -1,8 +1,8 @@
-# Commons — apps/web
+# Commons - apps/web
 
 Mutual aid coordination without unnecessary surveillance or hidden authority.
 
-This is the Next.js web application for Commons. It implements the coordination model defined in the project RFCs: support requests, routing, responsibilities, accountability, communication spaces, and governance.
+This is the Next.js web application for Commons. It implements the coordination model defined in the project RFCs: support requests, routing, responsibilities, accountability, communication spaces, project workspaces, and petition-backed governance.
 
 **Open Alpha status.** This software is experimental. See [docs/open-alpha.md](../../docs/open-alpha.md) before using it for anything real.
 
@@ -13,7 +13,8 @@ This is the Next.js web application for Commons. It implements the coordination 
 **Prerequisites**
 
 - Node.js 20+
-- Docker (for PostgreSQL)
+- pnpm 10 via Corepack
+- Docker, for PostgreSQL
 
 **Steps**
 
@@ -21,18 +22,17 @@ This is the Next.js web application for Commons. It implements the coordination 
 # 1. From the repo root, start PostgreSQL
 docker compose up -d
 
-# 2. Move into the web app
-cd apps/web
+# 2. Create your environment file
+Copy-Item apps/web/.env.example apps/web/.env
 
-# 3. Create your environment file (see below)
-# 4. Run migrations
-npm run db:migrate
+# 3. Run migrations
+pnpm --dir apps/web db:migrate
 
-# 5. Seed demo data
-npm run db:seed
+# 4. Seed demo data
+pnpm --dir apps/web db:seed
 
-# 6. Start the dev server
-npm run dev
+# 5. Start the dev server
+pnpm --dir apps/web dev
 ```
 
 Visit [http://localhost:3000](http://localhost:3000).
@@ -57,61 +57,59 @@ SESSION_SECRET="dev-commons-session-secret-change-this-in-production-32chars"
 ## Database Commands
 
 ```powershell
-# Apply pending migrations
-npm run db:migrate
-
-# Seed demo data (Northside Commons group, sample accounts, requests)
-npm run db:seed
-
-# Open Prisma Studio (database browser)
-npm run db:studio
-
-# Regenerate Prisma client after schema changes
-npm run db:generate
+pnpm --dir apps/web db:migrate
+pnpm --dir apps/web db:seed
+pnpm --dir apps/web db:studio
+pnpm --dir apps/web db:generate
 ```
 
 ---
 
-## Tests
+## Tests And Build
 
 ```powershell
-npm test
+pnpm test
+pnpm --dir apps/web lint
+pnpm --dir apps/web build
 ```
 
 Tests use the real local database. Run `docker compose up -d` first.
 
-The test runner uses `--test-concurrency=1` because tests share a live PostgreSQL database and use prefix-based fixture cleanup. Parallel file execution causes cleanup interference.
+The test runner uses `--test-concurrency=1` because tests share a live PostgreSQL database and use prefix-based fixture cleanup.
 
 ---
 
-## Build
+## Current UI Surface
 
-```powershell
-npm run build
-```
-
-Produces a production Next.js build. All environment variables must be set.
+- Public users can browse groups, request support, track request status, register, and apply for membership where sponsorship is required.
+- Authenticated users get a dashboard plus group, project, and responsibility workspaces through the sidebar.
+- Group workspaces expose discussion, library material, members, petitions, contribution categories, trusted providers, responsibilities, governance settings, emergency periods, and accountability concerns.
+- Project workspaces expose their own discussion, library, members, petitions, and contribution categories. Project-internal petitions and participation use project membership.
+- Responsibility workspaces expose role overview, holders, volunteer/resign controls, discussion, and library material.
+- Governance UI is surfaced for all 12 categories with temperature signals, resolved thresholds, petition durations, support/withdraw actions, and explicit petition outcome checks.
 
 ---
 
 ## Alpha Operating Assumptions
 
-- **No email system.** Account creation does not send a verification email. Password reset does not exist. If you lose your password in Alpha, create a new account.
-- **Seed data.** `npm run db:seed` creates a demo group (Northside Commons) and sample accounts. The seed is idempotent and can be re-run after a data reset.
-- **No production security.** Session secrets and database credentials in the example above are for local development only.
-- **Alpha data may be reset.** The alpha database may be cleared at any time. Do not store anything you need to keep.
+- **No email system.** Account creation does not send verification email. Password reset does not exist.
+- **Seed data.** `pnpm --dir apps/web db:seed` creates a demo group and sample accounts. The seed is idempotent.
+- **No production security posture.** Session secrets and database credentials in examples are for local development only.
+- **Alpha data may be reset.** Do not store anything you need to keep.
 
 ---
 
 ## Known Limitations
 
-- No password reset or account recovery
-- No email notifications
-- No admin or moderation console
-- Governance UX (petition UI, temperature signals) exists in the backend but is not yet surfaced in the dashboard
-- No end-to-end encryption
-- Federation not implemented
-- No mobile/PWA support yet
+- No password reset or account recovery.
+- No email notifications.
+- No admin or moderation console.
+- No end-to-end encryption.
+- Federation is not implemented.
+- Plugin runtime is not implemented.
+- No mobile/PWA offline support yet.
+- Responsibility type creation is not yet petition-backed; responsibility volunteering is petition-backed.
+- Some advanced proposal families remain backend primitives without polished public workflows.
 
 See [docs/open-alpha.md](../../docs/open-alpha.md) for the full list of known gaps and what to test.
 
@@ -119,24 +117,24 @@ See [docs/open-alpha.md](../../docs/open-alpha.md) for the full list of known ga
 
 ## Project Structure
 
-```
+```text
 apps/web/
   prisma/
-    schema.prisma       — database schema
-    migrations/         — migration history
-    seed.ts             — demo data seed
+    schema.prisma       - database schema
+    migrations/         - migration history
+    seed.ts             - demo data seed
   src/
-    app/                — Next.js app router pages and server actions
-    lib/                — service layer (petitions, governance, responsibilities, etc.)
-    generated/          — Prisma client (do not edit)
+    app/                - Next.js app router pages and server actions
+    lib/                - service layer
+    generated/          - Prisma client, do not edit manually
 ```
 
-Key lib files: `petitions.ts`, `governance-categories.ts`, `responsibilities.ts`, `participation.ts`, `concerns.ts`.
+Key lib files: `petitions.ts`, `petition-evaluation.ts`, `governance-categories.ts`, `responsibilities.ts`, `project-membership.ts`, `participation.ts`, `concerns.ts`.
 
 ---
 
 ## Further Reading
 
-- [docs/open-alpha.md](../../docs/open-alpha.md) — alpha scope, known gaps, demo scenarios, feedback guide
-- [docs/local-environment.md](../../docs/local-environment.md) — Docker and database setup
-- [docs/rfcs/](../../docs/rfcs/) — design rationale for core systems
+- [docs/open-alpha.md](../../docs/open-alpha.md) - alpha scope, known gaps, demo scenarios, feedback guide
+- [docs/local-environment.md](../../docs/local-environment.md) - Docker and database setup
+- [docs/rfcs/](../../docs/rfcs/) - design rationale for core systems

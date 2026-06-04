@@ -7,34 +7,25 @@ import {
   recordProjectPresence,
   leaveProject,
 } from "../../../../lib/project-membership";
-import { createBulletin, openBulletinArchivalPetition } from "../../../../lib/bulletins";
-import { createPublication, openPublicationArchivalPetition } from "../../../../lib/publications";
+import { createBulletin, openProjectBulletinArchivalPetition } from "../../../../lib/bulletins";
+import { createPublication, openProjectPublicationArchivalPetition } from "../../../../lib/publications";
 import {
   createLivingDocument,
   draftLivingDocumentRevision,
-  openRevisionPetition,
+  openProjectRevisionPetition,
 } from "../../../../lib/living-documents";
 import {
-  createDiscussionThread,
-  ensureGeneralDiscussion,
   listDiscussionMessages,
   listDiscussionThreads,
-  openThreadClosurePetition,
-  postDiscussionMessage,
+  createProjectDiscussionThread,
+  postProjectDiscussionMessage,
 } from "../../../../lib/discussions";
 import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
 import { evaluateAndApplyPetition } from "../../../../lib/petition-evaluation";
 import {
-  proposeContributionCategory,
-  proposeContributionCategoryArchival,
+  proposeProjectContributionCategory,
   getAvailableCategoriesForScope,
 } from "../../../../lib/contribution-categories";
-import {
-  proposeTrustedProviderStatus,
-  proposeTrustedProviderRevocation,
-  getTrustedProvidersForCategory,
-  formatTrustedByLabel,
-} from "../../../../lib/trusted-providers";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
@@ -188,7 +179,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                           {isActive && (
                             <form action={archiveBulletinAction}>
                               <input type="hidden" name="projectId" value={projectId} />
-                              <input type="hidden" name="groupId" value={data.hostGroupId} />
                               <input type="hidden" name="bulletinId" value={b.id} />
                               <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">Archive</button>
                             </form>
@@ -234,7 +224,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                           {isActive && (
                             <form action={archivePublicationAction}>
                               <input type="hidden" name="projectId" value={projectId} />
-                              <input type="hidden" name="groupId" value={data.hostGroupId} />
                               <input type="hidden" name="publicationId" value={p.id} />
                               <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">Archive</button>
                             </form>
@@ -277,7 +266,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a revision</summary>
                             <form action={proposeLivingDocumentRevisionAction} className="mt-2 space-y-2">
                               <input type="hidden" name="projectId" value={projectId} />
-                              <input type="hidden" name="groupId" value={data.hostGroupId} />
                               <input type="hidden" name="livingDocumentId" value={doc.id} />
                               <textarea name="body" required rows={4} defaultValue={doc.currentBody} className="field-input resize-none text-sm" />
                               <SubmitButton variant="secondary">Open revision petition</SubmitButton>
@@ -348,13 +336,13 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                           {!petition.supportedByCurrentMember ? (
                             <form action={supportPetitionAction}>
                               <input type="hidden" name="petitionId" value={petition.id} />
-                              <input type="hidden" name="membershipId" value={membershipId} />
+                              <input type="hidden" name="projectMembershipId" value={membershipId} />
                               <SubmitButton variant="secondary">Support</SubmitButton>
                             </form>
                           ) : (
                             <form action={withdrawPetitionSupportAction}>
                               <input type="hidden" name="petitionId" value={petition.id} />
-                              <input type="hidden" name="membershipId" value={membershipId} />
+                              <input type="hidden" name="projectMembershipId" value={membershipId} />
                               <SubmitButton variant="secondary">Withdraw support</SubmitButton>
                             </form>
                           )}
@@ -388,7 +376,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                   <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new category</summary>
                   <form action={proposeCategoryAction} className="mt-3 space-y-3">
                     <input type="hidden" name="projectId" value={projectId} />
-                    <input type="hidden" name="groupId" value={data.hostGroupId} />
                     <div><label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Name</label><input name="name" required placeholder="e.g. Code Review" className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" /></div>
                     <div><label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Description</label><textarea name="description" required rows={2} placeholder="What kind of contribution does this cover?" className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]" /></div>
                     <SubmitButton>Open petition</SubmitButton>
@@ -473,28 +460,25 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       include: {
         _count: { select: { support: true } },
         support: currentMembership
-          ? { where: { membership: { accountId } }, select: { id: true }, take: 1 }
+          ? { where: { projectMembershipId: currentMembership.id }, select: { id: true }, take: 1 }
           : { where: { id: "never" }, select: { id: true }, take: 0 },
       },
       take: 12,
     });
 
-    // Also include group-scoped petitions about this project (e.g. project_proposal)
-    const groupPetitions = await prisma.petition.findMany({
-      where: { groupId: hostGroupId, subjectType: "project_proposal", subjectId: { in: [] } },
-      select: { id: true },
-      take: 0,
+    const petitions = petitionRows.map((p) => {
+      const snapshot = p.governanceSnapshot as { threshold: number } | null;
+      const threshold = snapshot?.threshold ?? 0.6;
+      return {
+        id: p.id,
+        subjectType: p.subjectType,
+        status: p.status,
+        closesAt: p.closesAt,
+        supportCount: p._count.support,
+        requiredSupport: Math.ceil(activeParticipantCount * threshold),
+        supportedByCurrentMember: p.support.length > 0,
+      };
     });
-
-    const petitions = petitionRows.map((p) => ({
-      id: p.id,
-      subjectType: p.subjectType,
-      status: p.status,
-      closesAt: p.closesAt,
-      supportCount: p._count.support,
-      requiredSupport: 1, // simplified for now
-      supportedByCurrentMember: p.support.length > 0,
-    }));
 
     // Contribution categories for project scope
     const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: hostGroupId, projectId });
@@ -534,15 +518,6 @@ async function requireProjectMembership(accountId: string, projectId: string) {
   return membership;
 }
 
-// Helper: get the primary host group membership for petition creation
-async function getHostGroupMembership(prisma: Awaited<ReturnType<typeof createPrismaClient>>, accountId: string, projectId: string) {
-  const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
-  return prisma.groupMembership.findUnique({
-    where: { accountId_groupId: { accountId, groupId: project.groupId } },
-    select: { id: true, groupId: true },
-  });
-}
-
 async function leaveProjectAction(formData: FormData) {
   "use server";
   const session = await getSession();
@@ -563,12 +538,10 @@ async function createDiscussionThreadAction(formData: FormData) {
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
   const title = requiredString(formData, "title");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const hostMembership = await getHostGroupMembership(prisma, session.accountId, projectId);
-    if (!hostMembership) return;
-    await createDiscussionThread(prisma, { spaceType: "project", spaceId: projectId, groupId: hostMembership.groupId, title, createdByMembershipId: hostMembership.id });
+    await createProjectDiscussionThread(prisma, { projectId, title, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -582,12 +555,10 @@ async function postDiscussionMessageAction(formData: FormData) {
   const projectId = formData.get("projectId") as string;
   const threadId = requiredString(formData, "threadId");
   const body = requiredString(formData, "body");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const hostMembership = await getHostGroupMembership(prisma, session.accountId, projectId);
-    if (!hostMembership) return;
-    await postDiscussionMessage(prisma, { threadId, groupId: hostMembership.groupId, authorMembershipId: hostMembership.id, body });
+    await postProjectDiscussionMessage(prisma, { threadId, projectId, authorProjectMembershipId: projectMembership.id, body });
   } finally {
     await prisma.$disconnect();
   }
@@ -616,18 +587,11 @@ async function archiveBulletinAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
-  const groupId = formData.get("groupId") as string;
   const bulletinId = formData.get("bulletinId") as string;
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true },
-    });
-    if (membership) {
-      await openBulletinArchivalPetition(prisma, { bulletinId, createdByMembershipId: membership.id, groupId });
-    }
+    await openProjectBulletinArchivalPetition(prisma, { bulletinId, projectId, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -655,18 +619,11 @@ async function archivePublicationAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
-  const groupId = formData.get("groupId") as string;
   const publicationId = formData.get("publicationId") as string;
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true },
-    });
-    if (membership) {
-      await openPublicationArchivalPetition(prisma, { publicationId, createdByMembershipId: membership.id, groupId });
-    }
+    await openProjectPublicationArchivalPetition(prisma, { publicationId, projectId, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -695,17 +652,13 @@ async function proposeLivingDocumentRevisionAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
-  const groupId = formData.get("groupId") as string;
   const livingDocumentId = requiredString(formData, "livingDocumentId");
   const body = requiredString(formData, "body");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const membership = await getHostGroupMembership(prisma, session.accountId, projectId);
-    if (membership) {
-      const draft = await draftLivingDocumentRevision(prisma, { livingDocumentId, body, authorId: session.accountId });
-      await openRevisionPetition(prisma, { livingDocumentId, revisionId: draft.id, createdByMembershipId: membership.id, groupId });
-    }
+    const draft = await draftLivingDocumentRevision(prisma, { livingDocumentId, body, authorId: session.accountId });
+    await openProjectRevisionPetition(prisma, { livingDocumentId, revisionId: draft.id, createdByProjectMembershipId: projectMembership.id, projectId });
   } finally {
     await prisma.$disconnect();
   }
@@ -735,10 +688,10 @@ async function supportPetitionAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const petitionId = requiredString(formData, "petitionId");
-  const membershipId = requiredString(formData, "membershipId");
+  const projectMembershipId = requiredString(formData, "projectMembershipId");
   const prisma = createPrismaClient();
   try {
-    await addPetitionSupport(prisma, { petitionId, membershipId });
+    await addPetitionSupport(prisma, { petitionId, projectMembershipId });
   } finally {
     await prisma.$disconnect();
   }
@@ -751,10 +704,10 @@ async function withdrawPetitionSupportAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const petitionId = requiredString(formData, "petitionId");
-  const membershipId = requiredString(formData, "membershipId");
+  const projectMembershipId = requiredString(formData, "projectMembershipId");
   const prisma = createPrismaClient();
   try {
-    await withdrawPetitionSupport(prisma, { petitionId, membershipId });
+    await withdrawPetitionSupport(prisma, { petitionId, projectMembershipId });
   } finally {
     await prisma.$disconnect();
   }
@@ -767,25 +720,17 @@ async function proposeCategoryAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
-  const groupId = formData.get("groupId") as string;
   const name = requiredString(formData, "name");
   const description = requiredString(formData, "description");
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true },
+    await proposeProjectContributionCategory(prisma, {
+      projectMembershipId: projectMembership.id,
+      projectId,
+      name,
+      description,
     });
-    if (membership) {
-      await proposeContributionCategory(prisma, {
-        membershipId: membership.id,
-        groupId,
-        offeringEntityType: "project",
-        offeringEntityId: projectId,
-        name,
-        description,
-      });
-    }
   } finally {
     await prisma.$disconnect();
   }
@@ -793,7 +738,3 @@ async function proposeCategoryAction(formData: FormData) {
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────
-
-function formatRelativeDate(date: Date) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(date);
-}

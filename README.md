@@ -28,16 +28,19 @@ The project charter is the main product compass: [docs/charter.md](docs/charter.
 - Plugin-ready boundaries with declared permissions and constitutional constraints.
 - Human-understandable governance rather than automated rule by algorithm.
 
-## MVP Build Order
+## Current Alpha
 
-1. Accounts, groups, projects, service capabilities, support requests, offers, contributions, proposals, roles, governance preferences, and privacy envelopes.
-2. Core web workflows for dashboards, request intake, service directory, contribution logging, and proposals.
-3. Request routing, contributor availability, trust petitions, and trust approvals.
-4. PWA installation, offline drafts, encrypted local storage, and sync queue.
-5. Governance and privacy resolution.
-6. Security, audit logs, deletion workflows, and exports.
-7. Federation readiness.
-8. Plugin registration and permission enforcement.
+Commons currently includes:
+
+- Account registration, login, groups, public support request intake, and request status links.
+- Group workspaces with discussion, bulletins, publications, living documents, members, petitions, governance settings, contribution categories, trusted providers, responsibilities, and concerns.
+- Project workspaces with their own discussion, library, members, petitions, and contribution categories. Project-internal governance is scoped to active project members rather than host-group membership.
+- Responsibility workspaces for group-accountable roles, including holders, volunteering, resignation, discussion, and library material.
+- Petition-backed governance flows for membership sponsorship, project proposals, responsibility volunteering, living document revisions, archival decisions, emergency declarations, contribution categories, and trusted provider status.
+- Governance temperature signals across the 12 current categories, with resolved thresholds and petition durations visible in the UI.
+- PostgreSQL persistence through Prisma, action logging, privacy envelope primitives, and federation/plugin-ready schema foundations.
+
+Commons is still Open Alpha software. It does not yet provide password reset, email notifications, end-to-end encryption, production moderation/admin tooling, federation, plugins, or mobile/PWA offline support.
 
 ## Local Setup
 

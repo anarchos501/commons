@@ -1,80 +1,93 @@
 # Commons Open Alpha
 
-Commons is experimental software for testing coordination and governance ideas. This document is for testers, developers, and anyone curious about how mutual aid coordination infrastructure might work.
+Commons is experimental software for testing mutual aid coordination and community governance. This document is for testers, developers, and people reviewing whether the model is coherent and usable.
 
-**Open Alpha is for hypothetical testing, architecture review, and governance feedback — not real-world sensitive deployment.**
-
----
-
-## What Is Commons Open Alpha
-
-Commons is a mutual aid coordination platform that lets communities:
-
-- Accept support requests from neighbors (with or without accounts)
-- Route requests to trusted contributors based on service capability and trust
-- Coordinate through shared spaces: bulletins, publications, living documents, and projects
-- Assign and confirm community responsibilities (reviewer, steward, etc.)
-- Govern collectively through temperature-weighted petition and confirmation workflows
-
-The Open Alpha makes this infrastructure publicly available for review and feedback. The goal is not feature completeness — it is to test whether the underlying model is coherent, honest, and usable.
+**Open Alpha is for hypothetical testing, architecture review, and governance feedback. It is not ready for real-world sensitive deployment.**
 
 ---
 
-## What to Test
+## What Commons Can Do Now
 
-These are the areas most valuable to exercise during Open Alpha:
+Commons currently lets communities:
+
+- Accept public support requests from neighbors, with or without accounts.
+- Route requests to contributors based on service capability, availability, contribution categories, and trusted provider status.
+- Coordinate inside group, project, and responsibility workspaces.
+- Use discussions, bulletins, publications, and living documents as shared coordination material.
+- Apply for group membership, sponsor pending applicants, and decide membership requests through petitions.
+- Propose projects through host-group governance, then let active project members govern project-internal decisions.
+- Volunteer for group responsibilities and confirm responsibility assignments through petitions.
+- Use governance temperature signals across 12 categories to affect displayed thresholds and petition durations.
+- Declare emergency periods through petitions and show active emergency periods in the governance surface.
+- File and review accountability concerns where appropriate responsibilities are assigned.
+
+The goal is not production readiness. The goal is to test whether Commons makes cooperation easier without hiding power, permanence, or surveillance behind the interface.
+
+---
+
+## What To Test
 
 **Core coordination**
-- Submit a support request as a guest (no account needed)
-- Create an account and join a group
-- Offer help by declaring a service capability
-- Browse requests you can respond to
 
-**Communication**
-- Post a bulletin in a group or project space
-- Create a publication and add entries
-- Create and revise a living document
-- Create a project and explore its coordination space
+- Submit a support request as a guest.
+- Create an account and join or apply to join a group.
+- Route a request to eligible contributors.
+- Accept or decline routed requests.
+- Complete a request and observe the privacy-safe contribution record.
+
+**Group governance**
+
+- Sponsor a pending membership application.
+- Support, withdraw support from, and explicitly evaluate petitions.
+- Propose a project and approve it through group governance.
+- Adjust governance temperature signals across the 12 categories.
+- Declare an emergency and observe the active emergency period.
+
+**Project spaces**
+
+- Open a project from the sidebar.
+- Use project discussion, bulletins, publications, and living documents.
+- Propose project-scoped library revisions or contribution categories.
+- Confirm that project-internal petitions use project membership, not host-group membership.
 
 **Responsibilities**
-- Volunteer for a responsibility (e.g., Reviewer)
-- Observe responsibility assignment and coverage behavior
-- Observe what happens when a member becomes Quiet or Dormant
+
+- Volunteer for a responsibility.
+- Confirm a responsibility assignment through petition approval.
+- Visit a responsibility workspace.
+- Resign from a responsibility.
+- Observe coverage status in the group responsibility section.
 
 **Accountability**
-- File a concern report
-- Begin a concern review (if you hold the Reviewer responsibility)
-- Issue findings on a concern
 
-**Governance**
-- Express a governance temperature signal (More Restrictive / Neutral / Less Restrictive)
-- Observe how the signal affects displayed governance parameters
-- Open a petition for a community decision
+- File a concern report.
+- Start a review as a member holding the Reviewer responsibility.
+- Issue findings and follow the concern lifecycle.
 
 ---
 
-## What Not to Use Commons for
+## What Not To Use Commons For
 
-**Do not use Commons for:**
+Do not use Commons for:
 
-- Real medical emergencies or safety situations
-- Real legal emergencies or sensitive legal matters
-- Private or confidential organizing that requires data security
-- Sensitive personal information (health, immigration status, financial details)
-- Any situation where data exposure would cause real harm
+- Real medical emergencies or safety situations.
+- Real legal emergencies or sensitive legal matters.
+- Private or confidential organizing that requires data security.
+- Sensitive personal information such as health, immigration, financial, or legal details.
+- Any situation where data exposure would cause real harm.
 
-**Why:** Alpha data is stored in plaintext on the server. No end-to-end encryption exists yet. The server operator can read all stored content. Treat everything entered into Alpha as non-private.
+Alpha data is stored in plaintext on the server. No end-to-end encryption exists yet. The server operator can read stored content.
 
 ---
 
-## Security and Data Caveats
+## Security And Data Caveats
 
-- All data is stored as plaintext on the server. The server operator has full read access.
-- There is no end-to-end encryption in this version.
-- Passwords are hashed. Everything else is unencrypted at rest.
-- Sessions use signed cookies (iron-session). Session tokens are not exposed in the UI.
-- There is no email verification, password reset, or account recovery in Alpha.
-- Alpha data may be reset without notice. Do not rely on data persistence.
+- All non-password data is stored as plaintext on the server.
+- Passwords are hashed.
+- Sessions use signed cookies.
+- There is no email verification, password reset, or account recovery.
+- Alpha data may be reset without notice.
+- There is no production moderation/admin console.
 
 **Alpha is for coordination modeling and governance feedback, not operational security.**
 
@@ -82,72 +95,46 @@ These are the areas most valuable to exercise during Open Alpha:
 
 ## Known Gaps
 
-These features are intentionally absent from Open Alpha:
-
 | Gap | Status |
 |---|---|
 | Password reset / account recovery | Not implemented |
 | Email notifications | Not implemented |
-| Governance UX (petition UI, temperature display) | Backend only; no UI yet |
 | End-to-end encryption | Deferred |
 | Admin / moderation console | Deferred |
 | Federation between nodes | Deferred |
+| Plugin runtime | Deferred |
 | Challenge window mechanics | Deferred |
-| Mobile / PWA | Deferred |
-| Plugin system | Deferred |
+| Mobile/PWA offline support | Deferred |
+| Responsibility type creation by petition | Not implemented |
+| Advanced proposal-family workflows | Partially surfaced |
 
-The governance infrastructure (RFC-006: temperature signals, petitions, responsibility confirmation) exists in the backend and is tested, but is not yet surfaced through the dashboard UI. It can be exercised via the API or seeded test scenarios.
+Governance UX is now surfaced in group, project, and responsibility contexts, but it remains alpha-grade and should be tested for clarity and correctness.
 
 ---
 
 ## Suggested Demo Scenarios
 
-These scenarios use a fictional group — **Northside Commons** — with approximately 20 members. All names and situations are invented.
-
-**Scenario 1 — Guest support request**
-A neighbor named Mateo needs help moving supplies before a storm. He goes to the Commons landing page, selects Northside Commons, picks "moving help" as a service, sets urgency to high, and submits. He receives a private link to track the request.
-
-**Scenario 2 — Member joins and offers help**
-Amara creates an account, joins Northside Commons, and declares that she can offer rides within 5 miles. She does not need to be a member to receive requests — but membership lets her see routed requests she qualifies for.
-
-**Scenario 3 — Reviewer responsibility**
-The group needs someone to handle accountability concerns. Priya volunteers for the Reviewer responsibility. A governance petition opens. Other active members signal support. Once the petition closes with enough support, Priya is confirmed as a Reviewer.
-
-**Scenario 4 — Group bulletin**
-Northside Commons is hosting a tool-sharing event. A member posts a bulletin: "Tool Library pop-up: Saturday 10am–2pm at the community garden." All group members can see it.
-
-**Scenario 5 — Living document revision**
-The group's Code of Conduct needs updating. A member drafts a revision and opens a governance petition. The community reviews it during the petition window and signals support. On approval, the new version becomes the current document.
-
-**Scenario 6 — Emergency Preparedness project**
-A subset of members want to coordinate emergency preparedness specifically. They create a project under Northside Commons. The project has its own bulletins, publications, and living documents. Host group members can be invited to join.
-
-**Scenario 7 — Concern reported and reviewed**
-A member reports a concern about a contributor's behavior. A Reviewer is assigned, starts a review, and eventually issues findings. The group decides on a response through a concern action proposal.
-
-**Scenario 8 — Governance temperature signal**
-A member thinks the group's membership process is too open and should require more support to admit new members. She sets her governance temperature signal to "More Restrictive" for the membership category. The collective temperature shifts slightly. If enough members signal in the same direction over time, the effective membership threshold adjusts.
-
-**Scenario 9 — Collective support request**
-The Emergency Preparedness project needs help from another community network. A project member submits a collective support request on behalf of the project, triggering a governance petition within the project before the request is sent.
+1. **Guest support request:** submit a fictional request, route it, accept it, and complete it.
+2. **Membership sponsorship:** apply to a non-open group, sponsor the pending application, support the petition, and approve membership.
+3. **Project creation:** propose a project, approve it through the host group, then use the resulting project workspace.
+4. **Project-internal governance:** as an active project member, propose a living document revision and approve it through a project-scoped petition.
+5. **Responsibility volunteering:** volunteer for Reviewer, approve the responsibility petition, then visit the responsibility workspace.
+6. **Emergency declaration:** open an emergency petition, approve it, and confirm the emergency period appears in governance settings.
+7. **Governance temperature:** adjust category signals and observe threshold/duration changes.
 
 ---
 
-## What Feedback Is Most Valuable
+## Feedback That Helps Most
 
-The goal of Open Alpha is design improvement, not only bug reports.
+- What was confusing?
+- What felt unnecessarily complicated?
+- What felt missing?
+- Which terms were unclear?
+- Which workflows felt natural?
+- Which workflows felt frustrating?
+- What did you expect to happen that did not?
 
-We are especially interested in:
-
-- **What was confusing?** Which parts of the interface or model were hard to understand on first contact?
-- **What felt unnecessarily complicated?** Where did the system create friction that didn't feel justified?
-- **What felt missing?** What did you expect to be able to do that wasn't there?
-- **Which words or concepts were hard to understand?** "Participation status," "governance temperature," "petition" — did these land, or did they create confusion?
-- **Which workflows felt natural?** What worked without needing explanation?
-- **Which workflows felt frustrating?** Where did the system get in your way?
-- **What did you expect to happen that didn't?** Surprises (good and bad) are valuable data.
-
-Bug reports are welcome. But the more important question is: **does the model make sense to people who aren't already familiar with it?**
+Bug reports are welcome, but the deeper question is whether the model makes sense to people who are not already inside it.
 
 ---
 
@@ -157,37 +144,23 @@ Alpha data may be cleared at any time without notice.
 
 - Do not store anything you need to keep.
 - Do not use Alpha for real coordination that would be harmed by data loss.
-- Seed data may be re-applied after resets, restoring the demo group structure.
+- Seed data may be re-applied after resets.
 
 ---
 
-## Reporting and Feedback
-
-Feedback channels are not yet formalized. In the interim:
+## Reporting And Feedback
 
 - GitHub issues: [github.com/anarchos501/commons/issues](https://github.com/anarchos501/commons/issues)
-- Email or direct contact with the operator
+- Direct contact with the operator
 
 ---
 
 ## Beta-Critical Gaps
 
-The following need to exist before a public beta:
-
-1. **Password reset** — users are otherwise permanently locked out if they lose access
-2. **Email verification** — prevents account enumeration and spam
-3. **Governance UX** — petition creation, temperature signal UI, and status display need to be surfaced in the dashboard
-4. **Basic admin tooling** — at minimum: the ability to reset a group, remove a member, or clear stale data
-5. **Security review** — session handling, rate limiting, and input validation reviewed by someone with a security background
-6. **Data retention and deletion** — users should be able to delete their accounts and associated data
-7. **Clearer onboarding** — new users need orientation; the model is not yet self-explaining in the UI
-
----
-
-## Manual UI Settings Principle
-
-Commons is designed around a principle: **membership unlocks possible actions, not a flood of visible complexity.**
-
-Joining a group should reveal what you can do — not immediately present every system at once. UI visibility and preferences should be manually editable by the user. The interface should not permanently force complexity onto the screen because a user became a member or completed an action.
-
-This principle will guide how governance UX, responsibility interfaces, and advanced features are introduced in later phases.
+1. Password reset and account recovery.
+2. Email verification or another anti-abuse path.
+3. Basic admin tooling for local operators.
+4. Security review of sessions, rate limiting, input validation, and data retention.
+5. User-facing data deletion/export workflows.
+6. Clearer onboarding for membership, petitions, responsibilities, and project autonomy.
+7. Mobile/PWA support if Commons is expected to be used in the field.

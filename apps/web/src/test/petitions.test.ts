@@ -508,7 +508,7 @@ test("Fix 3: openPetition rejects creator who is not active-participation", asyn
 
 // ---- voterScope tests ----
 
-test("addPetitionSupport returns not_eligible_in_scope for non-project member on project-scoped petition", async () => {
+test("addPetitionSupport rejects group-member support on project-scoped petition", async () => {
   const { group, memberships } = await createFixture("pet_vs_rej", 2);
   const project = await prisma.project.create({ data: { id: "pet_vs_rej_proj", groupId: group.id, name: "VS Proj", status: "active" } });
   try {
@@ -525,7 +525,7 @@ test("addPetitionSupport returns not_eligible_in_scope for non-project member on
     if (!result.ok) return;
     const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
     assert.equal(supportResult.ok, false);
-    if (!supportResult.ok) assert.equal(supportResult.reason, "not_eligible_in_scope");
+    if (!supportResult.ok) assert.equal(supportResult.reason, "not_eligible");
   } finally {
     await prisma.petition.deleteMany({ where: { groupId: group.id } });
     await prisma.project.deleteMany({ where: { id: "pet_vs_rej_proj" } });
@@ -538,7 +538,7 @@ test("addPetitionSupport succeeds for project member on project-scoped petition"
   const project = await prisma.project.create({ data: { id: "pet_vs_ok_proj", groupId: group.id, name: "VS Proj OK", status: "active" } });
   try {
     const acct1 = await prisma.groupMembership.findUniqueOrThrow({ where: { id: memberships[0].id }, select: { accountId: true } });
-    await prisma.projectMembership.create({ data: { accountId: acct1.accountId, projectId: project.id, status: "active", participationStatus: "active" } });
+    const projectMembership = await prisma.projectMembership.create({ data: { accountId: acct1.accountId, projectId: project.id, status: "active", participationStatus: "active" } });
     const result = await openPetition(prisma, {
       groupId: group.id,
       category: "contribution_category",
@@ -549,7 +549,7 @@ test("addPetitionSupport succeeds for project member on project-scoped petition"
     });
     assert.ok(result.ok);
     if (!result.ok) return;
-    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
+    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, projectMembershipId: projectMembership.id });
     assert.equal(supportResult.ok, true);
   } finally {
     await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: group.id } } });
@@ -587,6 +587,38 @@ test("getActiveVoterCount returns project member count for project-scoped petiti
     await prisma.projectMembership.deleteMany({ where: { projectId: "pet_vc_proj_p" } });
     await prisma.project.deleteMany({ where: { id: "pet_vc_proj_p" } });
     await cleanupFixture("pet_vc_proj");
+  }
+});
+
+test("getActiveVoterCount includes project members without host-group membership", async () => {
+  const { group } = await createFixture("pet_vc_proj_only", 1);
+  const project = await prisma.project.create({ data: { id: "pet_vc_proj_only_p", groupId: group.id, name: "VC Project Only", status: "active" } });
+  try {
+    const account = await prisma.account.create({
+      data: {
+        id: "pet_vc_proj_only_acct_project",
+        homeNodeId: `${"pet_vc_proj_only"}_node`,
+        displayName: "Project Only Member",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    const { getActiveVoterCount } = await import("../lib/participation");
+    const count = await getActiveVoterCount(prisma, {
+      groupId: group.id,
+      scopeType: "project",
+      scopeId: project.id,
+      voterScope: { type: "project", scopeId: project.id },
+    });
+    assert.equal(count, 1);
+  } finally {
+    await prisma.projectMembership.deleteMany({ where: { projectId: "pet_vc_proj_only_p" } });
+    await prisma.project.deleteMany({ where: { id: "pet_vc_proj_only_p" } });
+    await cleanupFixture("pet_vc_proj_only");
   }
 });
 

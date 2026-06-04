@@ -509,6 +509,7 @@ model ProjectMembership {
   project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdPetitions Petition[]       @relation("PetitionProjectCreator")
   petitionSupport  PetitionSupport[] @relation("PetitionSupportProject")
+  contributionCategoryDrafts ContributionCategoryDraft[] @relation("ContributionCategoryDraftProjectProposer")
 
   @@unique([accountId, projectId])
   @@index([accountId])
@@ -1265,14 +1266,17 @@ model ContributionCategoryDraft {
   offeringEntityId       String
   name                   String
   description            String
-  proposedByMembershipId String
+  proposedByMembershipId String?
+  proposedByProjectMembershipId String?
   createdAt              DateTime           @default(now())
 
-  group      Group           @relation(fields: [groupId], references: [id])
-  membership GroupMembership @relation(fields: [proposedByMembershipId], references: [id])
+  group             Group              @relation(fields: [groupId], references: [id])
+  membership        GroupMembership?   @relation(fields: [proposedByMembershipId], references: [id])
+  projectMembership ProjectMembership? @relation("ContributionCategoryDraftProjectProposer", fields: [proposedByProjectMembershipId], references: [id])
 
   @@index([groupId])
   @@index([proposedByMembershipId])
+  @@index([proposedByProjectMembershipId])
 }
 
 model ContributionCategory {
