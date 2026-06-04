@@ -480,7 +480,7 @@ async function main() {
   }
 
   // Seed ProjectHosting rows (one per project — Gotham Mutual Aid is the founding host).
-  for (const [projectId, projectRef] of [
+  for (const [, projectRef] of [
     ["project_rides", ridesProject.id],
     ["project_food_distribution", foodProject.id],
     ["project_translation_support", translationProject.id],

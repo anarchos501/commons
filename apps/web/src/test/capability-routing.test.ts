@@ -11,8 +11,6 @@ import {
 
 const prisma = createPrismaClient();
 
-type Fixture = Awaited<ReturnType<typeof createFixture>>;
-
 test.after(async () => {
   await prisma.$disconnect();
 });

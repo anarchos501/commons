@@ -126,7 +126,6 @@ test("always_available ability is active regardless of emergency state", async (
   const { group, membership } = await createFixture("ge_always");
   try {
     await createAssignment(prisma, membership.id, "steward");
-    const assignment = await prisma.responsibilityAssignment.findFirst({ where: { membershipId: membership.id } });
     const responsibility = await prisma.responsibility.findFirst({ where: { groupId: group.id } });
     assert.ok(responsibility);
     await grantAbility(prisma, responsibility.id, "create_bulletins", "always_available");

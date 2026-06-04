@@ -20,7 +20,7 @@ test.after(async () => {
 // ---- createAssignment still works as internal primitive ----
 
 test("createAssignment (internal primitive) still creates an assignment", async () => {
-  const { group, membership } = await createFixture("grsp_create");
+  const { membership } = await createFixture("grsp_create");
   try {
     await createAssignment(prisma, membership.id, "steward");
     const assignment = await prisma.responsibilityAssignment.findFirst({ where: { membershipId: membership.id } });
@@ -34,7 +34,7 @@ test("createAssignment (internal primitive) still creates an assignment", async 
 // ---- volunteerForResponsibility → petition → confirmResponsibilityAssignment ----
 
 test("volunteerForResponsibility opens a petition for the responsibility type", async () => {
-  const { group, membership } = await createFixture("grsp_volunteer");
+  const { membership } = await createFixture("grsp_volunteer");
   try {
     const result = await volunteerForResponsibility(prisma, { membershipId: membership.id, type: "reviewer" });
     assert.equal(result.ok, true);
@@ -97,7 +97,7 @@ test("Responsibility.termDays is not modified by governance-path assignment", as
 });
 
 test("multiple volunteers can be confirmed simultaneously (multi-holder)", async () => {
-  const { group, memberships } = await createFixture("grsp_multi", 4);
+  const { memberships } = await createFixture("grsp_multi", 4);
   try {
     const [r1, r2] = await Promise.all([
       volunteerForResponsibility(prisma, { membershipId: memberships[0].id, type: "steward" }),
@@ -117,7 +117,7 @@ test("multiple volunteers can be confirmed simultaneously (multi-holder)", async
 });
 
 test("volunteer withdrawal closes responsibility petition as withdrawn", async () => {
-  const { group, membership } = await createFixture("grsp_withdraw");
+  const { membership } = await createFixture("grsp_withdraw");
   try {
     const result = await volunteerForResponsibility(prisma, { membershipId: membership.id, type: "reviewer" });
     if (!result.ok) return;
@@ -133,7 +133,7 @@ test("volunteer withdrawal closes responsibility petition as withdrawn", async (
 });
 
 test("declareTempStewardship uses resolver duration (default 30 days at neutral temperature)", async () => {
-  const { group, membership } = await createFixture("grsp_steward");
+  const { membership } = await createFixture("grsp_steward");
   try {
     await declareTempStewardship(prisma, membership.id, "reviewer");
     const assignment = await prisma.responsibilityAssignment.findFirst({ where: { membershipId: membership.id } });

@@ -14,7 +14,6 @@ import { createBulletin, archiveBulletin, openBulletinArchivalPetition, onBullet
 import {
   createPublication,
   addPublicationEntry,
-  archivePublication,
   openPublicationArchivalPetition,
   onPublicationArchivalPetitionApproved,
   openPublicationEntryArchivalPetition,
@@ -252,7 +251,7 @@ test("Fix 3: openBulletinArchivalPetition rejects bulletin from wrong group", as
 });
 
 test("Fix 3: openRevisionPetition rejects revision on document from wrong group", async () => {
-  const { group, account, membership } = await createCommsFixture("gc_own_rev_a");
+  const { group, membership } = await createCommsFixture("gc_own_rev_a");
   const { group: groupB, account: accountB } = await createCommsFixture("gc_own_rev_b");
   try {
     // Document is in groupB's space

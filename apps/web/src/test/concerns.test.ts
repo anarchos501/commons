@@ -12,7 +12,7 @@ test.after(async () => {
 // --- isEligibleReviewer ---
 
 test("isEligibleReviewer returns true for active member with reviewer responsibility", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cer_eligible");
+  const { group, reviewerAccount, report } = await createFixture("cer_eligible");
   try {
     const eligible = await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id);
     assert.equal(eligible, true);
@@ -22,7 +22,7 @@ test("isEligibleReviewer returns true for active member with reviewer responsibi
 });
 
 test("isEligibleReviewer returns false when member lacks reviewer responsibility", async () => {
-  const { account, group, report } = await createFixture("cer_norole");
+  const { group, report } = await createFixture("cer_norole");
   try {
     const member = await prisma.account.create({
       data: { id: "cer_norole_member2", homeNodeId: `cer_norole_node`, displayName: "Member 2", accountType: "member", profileVisibility: "private" },
@@ -37,7 +37,7 @@ test("isEligibleReviewer returns false when member lacks reviewer responsibility
 });
 
 test("isEligibleReviewer returns false when reviewer is the reporter", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cer_reporter");
+  const { group, reviewerAccount } = await createFixture("cer_reporter");
   try {
     // Report submitted by reviewerAccount — reviewer is the reporter
     const selfReport = await prisma.report.create({
@@ -52,7 +52,7 @@ test("isEligibleReviewer returns false when reviewer is the reporter", async () 
 });
 
 test("isEligibleReviewer returns false when participation is not active", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cer_quiet");
+  const { group, reviewerAccount, report } = await createFixture("cer_quiet");
   try {
     await prisma.groupMembership.updateMany({
       where: { accountId: reviewerAccount.id, groupId: group.id },
@@ -117,7 +117,7 @@ test("getCoverageStatus returns unavailable when no reviewer assignment exists",
 // --- startReview ---
 
 test("startReview creates ConcernReview and transitions report to under_review", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("csr_start");
+  const { group, reviewerAccount, report } = await createFixture("csr_start");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
 
@@ -149,7 +149,7 @@ test("startReview rejects ineligible reviewer", async () => {
 // --- issueFindings ---
 
 test("issueFindings creates ConcernFinding and transitions to findings_issued", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cif_issue");
+  const { group, reviewerAccount, report } = await createFixture("cif_issue");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "The concern was verified.");
@@ -169,7 +169,7 @@ test("issueFindings creates ConcernFinding and transitions to findings_issued", 
 });
 
 test("issueFindings rejects reviewer who has not started a review", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cif_noreview");
+  const { reviewerAccount, report } = await createFixture("cif_noreview");
   try {
     await assert.rejects(
       () => issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Without starting review first."),
@@ -183,7 +183,7 @@ test("issueFindings rejects reviewer who has not started a review", async () => 
 // --- proposeAction ---
 
 test("proposeAction creates proposal after substantiated finding", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cpa_propose");
+  const { group, reviewerAccount, report } = await createFixture("cpa_propose");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Verified.");
@@ -202,7 +202,7 @@ test("proposeAction creates proposal after substantiated finding", async () => {
 });
 
 test("proposeAction rejects when no actionable findings exist", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cpa_nofinding");
+  const { group, reviewerAccount, report } = await createFixture("cpa_nofinding");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "unsubstantiated", "No issue found.");
@@ -216,7 +216,7 @@ test("proposeAction rejects when no actionable findings exist", async () => {
 });
 
 test("revised proposal supersedes prior rejected proposal", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cpa_supersede");
+  const { group, reviewerAccount, report } = await createFixture("cpa_supersede");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Verified.");
@@ -241,7 +241,7 @@ test("revised proposal supersedes prior rejected proposal", async () => {
 // --- closeConcern ---
 
 test("closeConcern closes concern with recorded reason and ActionLog", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cc_close");
+  const { group, reviewerAccount, report } = await createFixture("cc_close");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "unsubstantiated", "No issue.");
@@ -260,7 +260,7 @@ test("closeConcern closes concern with recorded reason and ActionLog", async () 
 });
 
 test("closeConcern blocks review_complete_no_action when actionable finding exists", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cc_guardrail");
+  const { group, reviewerAccount, report } = await createFixture("cc_guardrail");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Issue verified.");
@@ -306,7 +306,7 @@ test("administrative_closure rejected without reviewer authority", async () => {
 
 test("reviewer from Group A cannot start review on concern from Group B", async () => {
   const { group: groupA, reviewerAccount } = await createFixture("cg_groupa");
-  const { group: groupB, report: reportB } = await createFixture("cg_groupb");
+  const { report: reportB } = await createFixture("cg_groupb");
   try {
     await assert.rejects(
       () => startReview(prisma, reviewerAccount.id, groupA.id, reportB.id),
@@ -319,7 +319,7 @@ test("reviewer from Group A cannot start review on concern from Group B", async 
 });
 
 test("startReview rejects closed concerns", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cg_start_closed");
+  const { group, reviewerAccount, report } = await createFixture("cg_start_closed");
   try {
     await prisma.report.update({ where: { id: report.id }, data: { status: "closed", closureReason: "review_complete_no_action", closedAt: new Date() } });
     await assert.rejects(
@@ -332,7 +332,7 @@ test("startReview rejects closed concerns", async () => {
 });
 
 test("issueFindings rejects closed concerns", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cg_findings_closed");
+  const { group, reviewerAccount, report } = await createFixture("cg_findings_closed");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await prisma.report.update({ where: { id: report.id }, data: { status: "closed", closureReason: "reporter_withdrawal", closedAt: new Date() } });
@@ -346,7 +346,7 @@ test("issueFindings rejects closed concerns", async () => {
 });
 
 test("proposeAction rejects closed concerns", async () => {
-  const { account, group, reviewerAccount, report } = await createFixture("cg_propose_closed");
+  const { group, reviewerAccount, report } = await createFixture("cg_propose_closed");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Verified.");
@@ -381,7 +381,7 @@ async function createFixture(prefix: string) {
     data: { id: `${prefix}_reviewer`, homeNodeId: node.id, displayName: `Reviewer ${prefix}`, accountType: "member", profileVisibility: "private" },
   });
 
-  const [reporterMembership, reviewerMembership] = await Promise.all([
+  const [, reviewerMembership] = await Promise.all([
     prisma.groupMembership.create({
       data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
     }),

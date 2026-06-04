@@ -122,7 +122,7 @@ test("listLivingDocuments returns results in lastRevisedAt desc order", async ()
   const { group, account } = await createFixture("ld_order");
   try {
     const { document: d1 } = await createLivingDocument(prisma, { spaceType: "group", spaceId: group.id, authorId: account.id, title: "First", body: "V1." });
-    const { document: d2 } = await createLivingDocument(prisma, { spaceType: "group", spaceId: group.id, authorId: account.id, title: "Second", body: "V1." });
+    await createLivingDocument(prisma, { spaceType: "group", spaceId: group.id, authorId: account.id, title: "Second", body: "V1." });
     // Revise d1 to make it more recently revised
     await reviseLivingDocument(prisma, { livingDocumentId: d1.id, authorId: account.id, body: "V2." });
 

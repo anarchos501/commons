@@ -3,8 +3,7 @@ import type { GovernanceCategory } from "./governance-categories";
 import { isGovernanceCategory } from "./governance-categories";
 
 export const SIGNAL_CHANGE_COOLDOWN_HOURS = 1;
-const VALID_SIGNALS = [-1, 0, 1] as const;
-type GovernanceSignal = (typeof VALID_SIGNALS)[number];
+type GovernanceSignal = -1 | 0 | 1;
 
 export type UpsertSignalResult =
   | { ok: true }

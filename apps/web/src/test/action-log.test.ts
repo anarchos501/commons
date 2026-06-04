@@ -142,7 +142,7 @@ test("leaveGroup logs membership.left", async () => {
 // --- request.routed, route.accepted, route.declined ---
 
 test("routeSupportRequest logs request.routed for each new route", async () => {
-  const { requester, contributor, group } = await createRoutingFixture("al_route");
+  const { requester, group } = await createRoutingFixture("al_route");
   try {
     const request = await createSupportRequest(prisma, {
       id: "al_route_req",

@@ -58,7 +58,7 @@ test("upsertGovernanceSignal rejects invalid signal values", async () => {
 });
 
 test("upsertGovernanceSignal rejects mismatched membershipId/groupId", async () => {
-  const { group, memberships } = await createFixture("gt_mismatch");
+  const { memberships } = await createFixture("gt_mismatch");
   try {
     const result = await upsertGovernanceSignal(prisma, { membershipId: memberships[0].id, groupId: "wrong_group", category: "membership", signal: 1 });
     assert.equal(result.ok, false);

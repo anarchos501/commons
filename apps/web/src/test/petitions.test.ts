@@ -429,7 +429,7 @@ test("Fix 2: requireApprovedPetition throws for wrong family", async () => {
 });
 
 test("Fix 3: openPetition rejects creator from a different group", async () => {
-  const { group, memberships } = await createFixture("pet_sec_creator");
+  const { group } = await createFixture("pet_sec_creator");
   const { memberships: otherMemberships } = await createFixture("pet_sec_other");
   try {
     // Creator membership belongs to a different group
@@ -561,7 +561,7 @@ test("addPetitionSupport succeeds for project member on project-scoped petition"
 });
 
 test("getActiveVoterCount returns group count for null-scoped petition", async () => {
-  const { group, memberships } = await createFixture("pet_vc_group", 3);
+  const { group } = await createFixture("pet_vc_group", 3);
   try {
     const { getActiveVoterCount } = await import("../lib/participation");
     const count = await getActiveVoterCount(prisma, { groupId: group.id, voterScope: null });

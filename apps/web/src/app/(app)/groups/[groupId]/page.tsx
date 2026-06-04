@@ -1,15 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import {
-  BookOpen,
-  FileText,
-  Megaphone,
-  MessageCircle,
-  Shield,
-} from "lucide-react";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
-import { requireGroupMembership } from "../../../../lib/group-membership";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { getCoverageStatus } from "../../../../lib/concerns";
@@ -28,7 +20,7 @@ import {
   openThreadClosurePetition,
   postDiscussionMessage,
 } from "../../../../lib/discussions";
-import { addPetitionSupport, evaluatePetition, withdrawPetitionSupport } from "../../../../lib/petitions";
+import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
 import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
@@ -86,7 +78,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   const { group, currentMembership } = data;
   const isActive = currentMembership?.participationStatus === "active";
-  const membershipId = currentMembership?.id ?? "";
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -1028,7 +1019,7 @@ async function createBulletinAction(formData: FormData) {
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  const membership = await requireMembership(session.accountId, groupId);
+  await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
     await createBulletin(prisma, { spaceType: "group", spaceId: groupId, title, body, authorId: session.accountId });
@@ -1045,7 +1036,7 @@ async function createPublicationAction(formData: FormData) {
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
-  const membership = await requireMembership(session.accountId, groupId);
+  await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
     await createPublication(prisma, { spaceType: "group", spaceId: groupId, title, createdByAccountId: session.accountId });
@@ -1063,7 +1054,7 @@ async function createLivingDocumentAction(formData: FormData) {
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  const membership = await requireMembership(session.accountId, groupId);
+  await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
     await createLivingDocument(prisma, { spaceType: "group", spaceId: groupId, title, body, authorId: session.accountId });

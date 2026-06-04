@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { recordGroupPresence, applyParticipationTransitions, getActiveParticipantCount, getParticipatingMemberCount } from "../lib/participation";
+import { recordGroupPresence, applyParticipationTransitions } from "../lib/participation";
 import { createSupportRequest, declareServiceCapability, routeSupportRequest } from "../lib/capability-routing";
 
 const prisma = createPrismaClient();
@@ -110,7 +110,7 @@ test("recordGroupPresence skips non-active memberships", async () => {
 // --- applyParticipationTransitions ---
 
 test("applyParticipationTransitions transitions Active → Quiet after 90-day threshold", async () => {
-  const { account, group, membership } = await createFixture("ps_to_quiet");
+  const { group, membership } = await createFixture("ps_to_quiet");
   try {
     const oldSeen = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000); // 100 days ago
     await prisma.groupMembership.update({
@@ -134,7 +134,7 @@ test("applyParticipationTransitions transitions Active → Quiet after 90-day th
 });
 
 test("applyParticipationTransitions transitions Quiet → Dormant after 365-day threshold", async () => {
-  const { account, group, membership } = await createFixture("ps_to_dormant");
+  const { group, membership } = await createFixture("ps_to_dormant");
   try {
     const oldSeen = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000); // 400 days ago
     await prisma.groupMembership.update({
@@ -158,7 +158,7 @@ test("applyParticipationTransitions transitions Quiet → Dormant after 365-day 
 });
 
 test("applyParticipationTransitions skips members who visited recently", async () => {
-  const { account, group, membership } = await createFixture("ps_skip_recent");
+  const { group, membership } = await createFixture("ps_skip_recent");
   try {
     await prisma.groupMembership.update({
       where: { id: membership.id },
@@ -175,7 +175,7 @@ test("applyParticipationTransitions skips members who visited recently", async (
 });
 
 test("applyParticipationTransitions uses joinedAt as fallback when lastSeenAt is null", async () => {
-  const { account, group, membership } = await createFixture("ps_joinedat");
+  const { group, membership } = await createFixture("ps_joinedat");
   try {
     const oldJoinedAt = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
     await prisma.groupMembership.update({
