@@ -280,7 +280,7 @@ export async function getTrustedProvidersForCategory(
   // Resolve offering entity name for attribution
   const entityIds = [...new Set(statuses.map((s) => s.category.offeringEntityId))];
   const entityType = statuses[0]?.category.offeringEntityType;
-  let nameMap = new Map<string, string>();
+  const nameMap = new Map<string, string>();
 
   if (entityIds.length > 0 && entityType) {
     if (entityType === "group") {

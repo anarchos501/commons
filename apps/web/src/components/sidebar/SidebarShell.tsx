@@ -1,50 +1,49 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 interface Props {
-  trigger: ReactNode;
+  open: boolean;
+  onClose: () => void;
   children: ReactNode;
 }
 
-export function SidebarShell({ trigger, children }: Props) {
-  const [open, setOpen] = useState(false);
-
+export function SidebarShell({ open, onClose, children }: Props) {
   return (
     <>
-      {/* Mobile trigger */}
-      <div className="lg:hidden fixed top-0 left-0 z-40 p-3" onClick={() => setOpen(true)}>
-        {trigger}
-      </div>
-
-      {/* Overlay */}
-      {open && (
-        <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/40"
-          onClick={() => setOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
       {/* Sidebar panel */}
       <aside
+        id="commons-mobile-navigation"
         className={`
-          fixed inset-y-0 left-0 z-50 w-64 flex flex-col bg-[var(--surface)] border-r border-[var(--border)]
+          sidebar-panel
+          fixed top-0 bottom-0 left-0 z-50 w-[min(20rem,100vw)] h-[100dvh] max-h-[100dvh] flex flex-col bg-[var(--surface)] border-r border-[var(--border)]
           transition-transform duration-200
-          ${open ? "translate-x-0" : "-translate-x-full"}
-          lg:static lg:translate-x-0 lg:flex
+          lg:static lg:h-auto lg:max-h-none lg:flex lg:pointer-events-auto
         `}
+        data-open={open ? "true" : "false"}
       >
         <div className="flex items-center justify-between px-4 py-3 lg:hidden">
           <span className="text-sm font-semibold text-[var(--text)]">Commons</span>
-          <button onClick={() => setOpen(false)} aria-label="Close navigation" className="btn-icon p-1 hover:bg-[var(--hover)]">
-            <X className="h-4 w-4 text-[var(--muted)]" />
-          </button>
+          <a
+            href="#"
+            onClick={onClose}
+            aria-label="Close navigation"
+            role="button"
+            className="flex items-center justify-center min-h-[44px] min-w-[44px] hover:bg-[var(--hover)] text-[var(--muted)]"
+          >
+            <X className="h-5 w-5" />
+          </a>
         </div>
         {children}
       </aside>
+
+      <a
+        href="#"
+        className={`${open ? "block" : "sidebar-target-overlay"} lg:hidden fixed inset-0 z-40 bg-black/40`}
+        onClick={onClose}
+        aria-label="Close navigation"
+      />
     </>
   );
 }

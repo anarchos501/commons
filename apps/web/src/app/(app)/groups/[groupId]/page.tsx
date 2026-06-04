@@ -18,8 +18,6 @@ import { createPublication } from "../../../../lib/publications";
 import {
   createLivingDocument,
   draftLivingDocumentRevision,
-  onLivingDocumentArchivalPetitionApproved,
-  onRevisionPetitionApproved,
   openRevisionPetition,
 } from "../../../../lib/living-documents";
 import {
@@ -27,7 +25,6 @@ import {
   ensureGeneralDiscussion,
   listDiscussionMessages,
   listDiscussionThreads,
-  onThreadClosurePetitionApproved,
   openThreadClosurePetition,
   postDiscussionMessage,
 } from "../../../../lib/discussions";
@@ -35,7 +32,6 @@ import { addPetitionSupport, evaluatePetition, withdrawPetitionSupport } from ".
 import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
 import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
 import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
-import { confirmResponsibilityAssignment } from "../../../../lib/responsibilities";
 import {
   evaluateAndApplyPetition,
   describePetitionSubject,
@@ -55,7 +51,6 @@ import {
 } from "../../../../lib/trusted-providers";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
-import { Section } from "../../../../components/shared/Section";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
@@ -70,11 +65,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   const sp = await searchParams;
   const notice = typeof sp.notice === "string" ? sp.notice : null;
   const selectedThreadId = typeof sp.discussionThread === "string" ? sp.discussionThread : null;
+  const activityFilter = typeof sp.activityFilter === "string" ? sp.activityFilter : "month";
 
   const session = await getSession();
   if (!session.accountId) redirect("/login");
 
-  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId);
+  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter);
 
   // Server action: update session.activeGroupId after confirmed membership.
   // Must be a server action (not inline code) because cookies can only be written
@@ -98,37 +94,66 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
-      {/* ── Overview (always open) ─────────────────────────────────── */}
-      <Section id="overview" title={group.name} eyebrow="Group coordination space">
-        {group.description && <p className="text-sm leading-6 text-[var(--soft-text)]">{group.description}</p>}
-        <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--muted)]">
-          <span>{data.activeParticipantCount} active {data.activeParticipantCount === 1 ? "member" : "members"}</span>
-          {currentMembership && (
-            <span className="capitalize">You: {currentMembership.participationStatus}</span>
-          )}
-        </div>
-      </Section>
+      {/* ── Overview + Discussion (connected) ─────────────────────── */}
+      <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
+        <div id="overview" className="bg-[var(--surface)] p-5 sm:p-6">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Group coordination space</span>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)]">{group.name}</h1>
+          {group.description && <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">{group.description}</p>}
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--muted)]">
+            <span>{data.activeParticipantCount} active {data.activeParticipantCount === 1 ? "member" : "members"}</span>
+            {currentMembership && (
+              <span className="capitalize">You: {currentMembership.participationStatus}</span>
+            )}
+          </div>
 
-      <div className="mt-4 space-y-4">
-
-        {/* ── Activity ──────────────────────────────────────────────── */}
-        <CollapsibleSection id="activity" title="Activity" eyebrow="Help given" storageKey={`group:${groupId}:section:activity`}>
-          {data.groupContributions.length > 0 ? (
-            <div className="space-y-2">
-              {data.groupContributions.map((c) => (
-                <div key={c.type} className="flex items-center justify-between bg-[var(--subtle)] px-3 py-2 text-sm">
-                  <span className="capitalize text-[var(--soft-text)]">{c.type}</span>
-                  <span className="text-[var(--muted)]">{c.count} {c.count === 1 ? "time" : "times"}</span>
+          {/* ── Activity (inline collapsible) ─────────────────────────── */}
+          <details className="group/activity mt-4">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-[var(--soft-text)] hover:text-[var(--text)] select-none">
+              <span>Activity</span>
+              <span className="text-[var(--muted)] group-open/activity:hidden">▸</span>
+              <span className="hidden text-[var(--muted)] group-open/activity:inline">▾</span>
+            </summary>
+            <div className="mt-3">
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {[
+                  { value: "week", label: "1 week" },
+                  { value: "month", label: "1 month" },
+                  { value: "3month", label: "3 months" },
+                  { value: "6month", label: "6 months" },
+                  { value: "all", label: "All time" },
+                ].map((opt) => (
+                  <a
+                    key={opt.value}
+                    href={`/groups/${groupId}?activityFilter=${opt.value}#overview`}
+                    className={`border px-2 py-0.5 text-xs font-medium transition focus:outline-none focus:ring-1 focus:ring-[var(--accent)] ${
+                      activityFilter === opt.value
+                        ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
+                        : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
+                    }`}
+                  >
+                    {opt.label}
+                  </a>
+                ))}
+              </div>
+              {data.groupContributions.length > 0 ? (
+                <div className="space-y-1.5">
+                  {data.groupContributions.map((c) => (
+                    <div key={c.type} className="flex items-center justify-between bg-[var(--subtle)] px-3 py-2 text-sm">
+                      <span className="capitalize text-[var(--soft-text)]">{c.type}</span>
+                      <span className="text-[var(--muted)]">{c.count} {c.count === 1 ? "time" : "times"}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <p className="text-sm text-[var(--muted)]">No activity recorded for this period.</p>
+              )}
             </div>
-          ) : (
-            <EmptyState text="No contributions recorded yet." />
-          )}
-        </CollapsibleSection>
+          </details>
+        </div>
 
-        {/* ── Discussion ────────────────────────────────────────────── */}
-        <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`group:${groupId}:section:discussion`}>
+
+        <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`group:${groupId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
           {data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
               <div className="space-y-2">
@@ -209,9 +234,21 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             </form>
           )}
         </CollapsibleSection>
+        {/* ══ Library ═══════════════════════════════════════════════════ */}
+        <CollapsibleSection id="library" title="Library" eyebrow="Group resources" storageKey={`group:${groupId}:section:library`} className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+          <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
 
-        {/* ── Bulletins ─────────────────────────────────────────────── */}
-        <CollapsibleSection id="bulletins" title="Bulletins" eyebrow="Group updates" storageKey={`group:${groupId}:section:bulletins`}>
+            {/* Bulletins nested */}
+            <details id="bulletins" className="group/lib">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
+                <span>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Group updates</span>
+                  <span className="mt-1 block text-xl font-bold tracking-tight">Bulletins</span>
+                </span>
+                <span className="text-sm text-[var(--muted)] select-none group-open/lib:hidden">Expand</span>
+                <span className="hidden text-sm text-[var(--muted)] select-none group-open/lib:inline">Collapse</span>
+              </summary>
+              <div className="px-5 sm:px-6 pb-5 space-y-3">
           {data.bulletins.length > 0 ? (
             <div className="mb-4 space-y-3">
               {data.bulletins.map((b) => (
@@ -241,10 +278,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <SubmitButton variant="secondary">Post bulletin</SubmitButton>
             </form>
           )}
-        </CollapsibleSection>
+              </div>
+            </details>
 
-        {/* ── Publications ──────────────────────────────────────────── */}
-        <CollapsibleSection id="publications" title="Publications" eyebrow="Knowledge collections" storageKey={`group:${groupId}:section:publications`}>
+            {/* Publications nested */}
+            <details id="publications" className="group/lib">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
+                <span>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Knowledge collections</span>
+                  <span className="mt-1 block text-xl font-bold tracking-tight">Publications</span>
+                </span>
+                <span className="text-sm text-[var(--muted)] select-none group-open/lib:hidden">Expand</span>
+                <span className="hidden text-sm text-[var(--muted)] select-none group-open/lib:inline">Collapse</span>
+              </summary>
+              <div className="px-5 sm:px-6 pb-5 space-y-3">
           {data.publications.length > 0 ? (
             <div className="mb-4 space-y-3">
               {data.publications.map((p) => (
@@ -270,10 +317,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <SubmitButton variant="secondary">Create publication</SubmitButton>
             </form>
           )}
-        </CollapsibleSection>
+              </div>
+            </details>
 
-        {/* ── Living Documents ──────────────────────────────────────── */}
-        <CollapsibleSection id="documents" title="Living Documents" eyebrow="Current reference texts" storageKey={`group:${groupId}:section:documents`}>
+            {/* Living Documents nested */}
+            <details id="documents" className="group/lib">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
+                <span>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Current reference texts</span>
+                  <span className="mt-1 block text-xl font-bold tracking-tight">Living Documents</span>
+                </span>
+                <span className="text-sm text-[var(--muted)] select-none group-open/lib:hidden">Expand</span>
+                <span className="hidden text-sm text-[var(--muted)] select-none group-open/lib:inline">Collapse</span>
+              </summary>
+              <div className="px-5 sm:px-6 pb-5 space-y-4">
           {data.livingDocuments.length > 0 ? (
             <div className="mb-4 space-y-4">
               {data.livingDocuments.map((doc) => (
@@ -312,10 +369,103 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <SubmitButton variant="secondary">Create document</SubmitButton>
             </form>
           )}
+              </div>
+            </details>
+
+          </div>
+        </CollapsibleSection>
+      </div>{/* end top container */}
+
+      <div className="mt-4 flex flex-col gap-6">
+
+        {/* ══ Participation ═════════════════════════════════════════════ */}
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
+
+        {/* ── Responsibilities ──────────────────────────────────────── */}
+        <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage" storageKey={`group:${groupId}:section:responsibilities`} className="bg-[var(--surface)] p-5 sm:p-6">
+          <div className="space-y-4">
+            <div className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Reviewer coverage</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                    {data.coverageStatus === "available"
+                      ? "At least one active reviewer can handle concern reviews."
+                      : "No active reviewer is currently available."}
+                  </p>
+                </div>
+                <span className={`shrink-0 px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                  {data.coverageStatus === "available" ? "Covered" : "Needed"}
+                </span>
+              </div>
+              {data.coverageStatus === "unavailable" && isActive && (
+                <form action={volunteerForReviewerAction} className="mt-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <SubmitButton variant="secondary">Volunteer as reviewer</SubmitButton>
+                </form>
+              )}
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* ── Projects ──────────────────────────────────────────────── */}
+        <CollapsibleSection id="projects" title="Projects" eyebrow="Active coordination spaces" storageKey={`group:${groupId}:section:projects`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {data.projects.length > 0 ? (
+            <div className="space-y-3">
+              {data.projects.map((project) => (
+                <a key={project.id} href={`/projects/${project.id}`} className="block border border-[var(--border)] bg-[var(--subtle)] p-3 hover:bg-[var(--hover)] transition">
+                  <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
+                  {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
+                  <p className="mt-1 text-xs text-[var(--muted)] capitalize">{project.status}</p>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="No active projects." />
+          )}
+        </CollapsibleSection>
+
+        {/* ── Members ───────────────────────────────────────────────── */}
+        <CollapsibleSection id="members" title="Members" eyebrow="Participation" storageKey={`group:${groupId}:section:members`} className="bg-[var(--surface)] p-5 sm:p-6">
+          <div className="space-y-2 text-sm text-[var(--soft-text)]">
+            <p>{data.activeParticipantCount} fully active {data.activeParticipantCount === 1 ? "member" : "members"}</p>
+            {currentMembership && (
+              <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        </div>{/* end Participation */}
+
+        {/* ══ Governance ════════════════════════════════════════════════ */}
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
+
+        {/* ── Petitions ─────────────────────────────────────────────── */}
+        <CollapsibleSection id="petitions" title="Petitions" eyebrow="Community decisions" storageKey={`group:${groupId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
+          <div className="space-y-4">
+            <form action={evaluateClosedPetitionsAction}>
+              <input type="hidden" name="groupId" value={groupId} />
+              <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
+            </form>
+            {data.petitions.length > 0 ? (
+              <div className="space-y-3">
+                {data.petitions.map((petition) => (
+                  <PetitionCard
+                    key={petition.id}
+                    petition={petition}
+                    canSupport={isActive}
+                    groupId={groupId}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState text="No petitions yet. Proposed document revisions and responsibility volunteers will appear here." />
+            )}
+          </div>
         </CollapsibleSection>
 
         {/* ── Concerns ──────────────────────────────────────────────── */}
-        <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`group:${groupId}:section:concerns`}>
+        <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`group:${groupId}:section:concerns`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="mb-4 flex items-center gap-2">
             <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
               Review Coverage: {data.coverageStatus === "available" ? "Available" : "Unavailable"}
@@ -384,59 +534,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           </form>
         </CollapsibleSection>
 
-        {/* ── Petitions ─────────────────────────────────────────────── */}
-        <CollapsibleSection id="petitions" title="Petitions" eyebrow="Community decisions" storageKey={`group:${groupId}:section:petitions`}>
-          <div className="space-y-4">
-            <form action={evaluateClosedPetitionsAction}>
-              <input type="hidden" name="groupId" value={groupId} />
-              <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
-            </form>
-            {data.petitions.length > 0 ? (
-              <div className="space-y-3">
-                {data.petitions.map((petition) => (
-                  <PetitionCard
-                    key={petition.id}
-                    petition={petition}
-                    canSupport={isActive}
-                    groupId={groupId}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyState text="No petitions yet. Proposed document revisions and responsibility volunteers will appear here." />
-            )}
-          </div>
-        </CollapsibleSection>
-
-        {/* ── Members ───────────────────────────────────────────────── */}
-        <CollapsibleSection id="members" title="Members" eyebrow="Participation" storageKey={`group:${groupId}:section:members`}>
-          <div className="space-y-2 text-sm text-[var(--soft-text)]">
-            <p>{data.activeParticipantCount} fully active {data.activeParticipantCount === 1 ? "member" : "members"}</p>
-            {currentMembership && (
-              <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
-            )}
-          </div>
-        </CollapsibleSection>
-
-        {/* ── Projects ──────────────────────────────────────────────── */}
-        <CollapsibleSection id="projects" title="Projects" eyebrow="Active coordination spaces" storageKey={`group:${groupId}:section:projects`}>
-          {data.projects.length > 0 ? (
-            <div className="space-y-3">
-              {data.projects.map((project) => (
-                <a key={project.id} href={`/projects/${project.id}`} className="block border border-[var(--border)] bg-[var(--subtle)] p-3 hover:bg-[var(--hover)] transition">
-                  <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
-                  {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
-                  <p className="mt-1 text-xs text-[var(--muted)] capitalize">{project.status}</p>
-                </a>
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="No active projects." />
-          )}
-        </CollapsibleSection>
-
         {/* ── Contribution Categories ───────────────────────────────── */}
-        <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this community offers" storageKey={`group:${groupId}:section:categories`}>
+        <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this community offers" storageKey={`group:${groupId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
             {data.contributionCategories.length > 0 ? (
               <div className="space-y-3">
@@ -460,7 +559,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         </form>
                       )}
                     </div>
-                    {/* Trusted Providers */}
                     {cat.trustedProviders.length > 0 && (
                       <div className="mt-3 border-t border-[var(--border)] pt-2">
                         <p className="text-xs font-medium text-[var(--soft-text)] mb-1">Trusted providers</p>
@@ -483,7 +581,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         </div>
                       </div>
                     )}
-                    {/* Propose trusted provider */}
                     {isActive && data.groupMembers.length > 0 && (
                       <details className="mt-3">
                         <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose trusted provider</summary>
@@ -506,7 +603,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             ) : (
               <EmptyState text="No contribution categories defined yet." />
             )}
-            {/* Propose new category */}
             {isActive && (
               <details>
                 <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new category</summary>
@@ -537,7 +633,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         </CollapsibleSection>
 
         {/* ── Trusted Providers ─────────────────────────────────────── */}
-        <CollapsibleSection id="trusted-providers" title="Trusted Providers" eyebrow="Recognized contributors" storageKey={`group:${groupId}:section:trusted-providers`}>
+        <CollapsibleSection id="trusted-providers" title="Trusted Providers" eyebrow="Recognized contributors" storageKey={`group:${groupId}:section:trusted-providers`} className="bg-[var(--surface)] p-5 sm:p-6">
           {data.contributionCategories.some((cat) => cat.trustedProviders.length > 0) ? (
             <div className="space-y-2">
               {data.contributionCategories.flatMap((cat) =>
@@ -571,35 +667,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
-        {/* ── Responsibilities ──────────────────────────────────────── */}
-        <CollapsibleSection id="responsibilities" title="Responsibilities" eyebrow="Community coverage" storageKey={`group:${groupId}:section:responsibilities`}>
-          <div className="space-y-4">
-            <div className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-[var(--text)]">Reviewer coverage</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                    {data.coverageStatus === "available"
-                      ? "At least one active reviewer can handle concern reviews."
-                      : "No active reviewer is currently available."}
-                  </p>
-                </div>
-                <span className={`shrink-0 px-2 py-1 text-xs font-medium ${data.coverageStatus === "available" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
-                  {data.coverageStatus === "available" ? "Covered" : "Needed"}
-                </span>
-              </div>
-              {data.coverageStatus === "unavailable" && isActive && (
-                <form action={volunteerForReviewerAction} className="mt-3">
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <SubmitButton variant="secondary">Volunteer as reviewer</SubmitButton>
-                </form>
-              )}
-            </div>
-          </div>
-        </CollapsibleSection>
-
-        {/* ── Governance ────────────────────────────────────────────── */}
-        <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`}>
+        {/* ── Governance Settings ───────────────────────────────────── */}
+        <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
             {data.governanceSettings.map((setting) => (
               <div key={setting.category} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
@@ -637,6 +706,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           </div>
         </CollapsibleSection>
 
+        </div>{/* end Governance + Accountability */}
+
       </div>
     </main>
   );
@@ -644,7 +715,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
 // ── Data Loading ─────────────────────────────────────────────────────────────
 
-async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null) {
+function activityFilterCutoff(filter: string): Date | null {
+  const days: Record<string, number> = { week: 7, month: 30, "3month": 90, "6month": 180 };
+  const d = days[filter];
+  if (!d) return null;
+  const date = new Date();
+  date.setDate(date.getDate() - d);
+  return date;
+}
+
+async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, activityFilter = "month") {
   const prisma = createPrismaClient();
   try {
     await recordGroupPresence(prisma, accountId, groupId);
@@ -703,7 +783,11 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
       prisma.contribution.groupBy({
         by: ["contributionType"],
-        where: { groupId, visibility: "group" },
+        where: {
+          groupId,
+          visibility: "group",
+          ...(activityFilterCutoff(activityFilter) ? { createdAt: { gte: activityFilterCutoff(activityFilter)! } } : {}),
+        },
         _count: { contributionType: true },
         orderBy: { _count: { contributionType: "desc" } },
       }),

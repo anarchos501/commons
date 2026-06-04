@@ -1,122 +1,92 @@
 import Link from "next/link";
-import { ArrowLeft, Flag, HandHeart, HelpCircle, Shield, Star, UserPlus } from "lucide-react";
+import { ArrowLeft, HelpCircle, Key, Shield } from "lucide-react";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { randomUUID } from "crypto";
 import { createPrismaClient } from "../../../lib/prisma";
 import { resolveCurrentNode } from "../../../lib/node-context";
-import { capitalize } from "../../../lib/support-form";
-
-function AlphaNotice() {
-  return (
-    <div
-      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
-      role="status"
-    >
-      <p className="font-medium">Commons Open Alpha</p>
-      <div className="mt-0.5">
-        Experimental software — not for sensitive real-world use yet.{" "}
-        <details className="mt-1">
-          <summary className="cursor-pointer underline-offset-2 hover:underline">Alpha limits</summary>
-          <div className="mt-2 space-y-1 text-xs leading-5">
-            <p>Do not use for medical emergencies, legal emergencies, private organizing, or confidential information.</p>
-            <p>Alpha data is plaintext and visible to the server operator. No end-to-end encryption exists yet.</p>
-            <p>This version is intended for hypothetical testing, architecture review, and governance feedback.</p>
-          </div>
-        </details>
-      </div>
-    </div>
-  );
-}
-
-const PLANNED_INTERACTIONS = [
-  {
-    label: "Request to Join",
-    description: "Ask to become a member of this group.",
-    icon: UserPlus,
-  },
-  {
-    label: "Offer Contribution",
-    description: "Signal that you have something to offer this group.",
-    icon: HandHeart,
-  },
-  {
-    label: "Propose Endorsement",
-    description: "Formally recognize this group's work.",
-    icon: Star,
-  },
-  {
-    label: "Propose Sanction",
-    description: "Raise a concern about this group's conduct.",
-    icon: Flag,
-  },
-] as const;
+import { createSupportRequest, routeSupportRequest } from "../../../lib/capability-routing";
+import { buildRequestDescription } from "../../../lib/support-form";
+import { generateGuestAccessToken } from "../../../lib/request-lifecycle";
+import { AlphaNotice } from "../../../components/shared/Notice";
+import { RequestHelpForm } from "../../../components/shared/RequestHelpForm";
+import type { GroupOption } from "../../../components/shared/RequestHelpForm";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-export default async function RequestDiscoveryPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function RequestPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
-  // Backwards-compatible success confirmation for any links that still point here
+  // ── Success state (Type C — centered, wider card) ─────────────────────────
   if (params.submitted === "1") {
+    const cookieStore = await cookies();
+    const rawToken = cookieStore.get("pending_request_token")?.value ?? null;
+    const headersList = await headers();
+    const host = headersList.get("host") ?? "";
+    const proto = headersList.get("x-forwarded-proto") ?? (host.split(":")[0] === "localhost" ? "http" : "https");
+    const privateLink = rawToken ? `${proto}://${host}/request/status/${rawToken}` : null;
+
     return (
-      <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-        <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
-          <header>
-            <Link href="/" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
-              <ArrowLeft className="h-3 w-3" aria-hidden="true" />
-              Home
-            </Link>
-          </header>
-          <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+      <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl">
+          <Link href="/" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
+            <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+            Home
+          </Link>
+          <div className="mt-6 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <div className="flex items-center gap-3">
               <HelpCircle className="h-6 w-6 text-[var(--accent)]" aria-hidden="true" />
               <h1 className="text-xl font-semibold">Request received</h1>
             </div>
             <p className="mt-4 text-sm leading-7 text-[var(--soft-text)]">
-              Your request has been shared with people in the group who may be able to help. Someone will reach out using the contact information you provided.
+              Your request has been shared with people in the group who may be able to provide support. Someone will reach out using the contact information you provided.
             </p>
+            {privateLink && (
+              <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm">
+                <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+                  <Key className="h-4 w-4" aria-hidden="true" />
+                  Your private request link
+                </div>
+                <a href={privateLink} className="mt-2 block break-all font-mono text-xs text-[var(--accent)] hover:underline">{privateLink}</a>
+                <p className="mt-2 text-[var(--soft-text)]">Save this link. You can use it to check status, mark support received, or delete the request — without creating an account.</p>
+              </div>
+            )}
             <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
               <div className="flex items-center gap-2 font-medium text-[var(--text)]">
                 <Shield className="h-4 w-4" aria-hidden="true" />
                 Privacy reminder
               </div>
-              <p className="mt-1">Your contact information will not be stored after your request expires or is filled. No account was created.</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>No account was created.</li>
+                <li>Contact details are removed after your request expires or is fulfilled.</li>
+              </ul>
             </div>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-              <Link
-                href="/request"
-                className="btn-secondary flex min-h-11 flex-1 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
-              >
+              <Link href="/request" className="btn-secondary flex min-h-11 flex-1 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
                 Submit another request
               </Link>
-              <Link
-                href="/"
-                className="btn-primary flex min-h-11 flex-1 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
-              >
+              <Link href="/" className="btn-primary flex min-h-11 flex-1 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
                 Back to home
               </Link>
             </div>
           </div>
-        </section>
+        </div>
       </main>
     );
   }
 
+  // ── Load groups ───────────────────────────────────────────────────────────
   const prisma = createPrismaClient();
-  let groups: Array<{
-    id: string;
-    name: string;
-    description: string | null;
-    serviceOfferings: Array<{ serviceType: string }>;
-  }> = [];
+  let groupOptions: GroupOption[] = [];
+  let allServices: string[] = [];
 
   try {
     const node = await resolveCurrentNode(prisma);
     if (node) {
-      groups = await prisma.group.findMany({
-        where: {
-          nodeId: node.id,
-        },
+      const groups = await prisma.group.findMany({
+        where: { nodeId: node.id },
         include: {
           serviceOfferings: {
             where: { status: "active" },
@@ -126,113 +96,144 @@ export default async function RequestDiscoveryPage({ searchParams }: { searchPar
         },
         orderBy: { createdAt: "asc" },
       });
+
+      const trustedGroups = groups.length > 0
+        ? await prisma.trustedProviderStatus.findMany({
+            where: { groupId: { in: groups.map((g) => g.id) }, status: "active" },
+            select: { groupId: true },
+            distinct: ["groupId"],
+          })
+        : [];
+      const trustedGroupIds = new Set(trustedGroups.map((t) => t.groupId));
+
+      groupOptions = groups.map((g) => ({
+        groupId: g.id,
+        groupName: g.name,
+        services: g.serviceOfferings.map((o) => o.serviceType),
+        hasTrustedProviders: trustedGroupIds.has(g.id),
+      }));
+
+      const serviceSet = new Set<string>();
+      for (const g of groups) for (const o of g.serviceOfferings) serviceSet.add(o.serviceType);
+      allServices = [...serviceSet].sort();
     }
   } finally {
     await prisma.$disconnect();
   }
 
+  // ── Server action ─────────────────────────────────────────────────────────
+  async function submitVisitorRequest(formData: FormData) {
+    "use server";
+
+    const serviceType = ((formData.get("serviceType") as string) ?? "").trim();
+    const groupId = ((formData.get("groupId") as string) ?? "").trim();
+    const contact = ((formData.get("contact") as string) ?? "").trim();
+    const trustPreference = ((formData.get("trustPreference") as string) ?? "lightweight") as "lightweight" | "elevated";
+    const urgency = ((formData.get("urgency") as string) ?? "normal") as "low" | "normal" | "high" | "urgent";
+    const location = ((formData.get("location") as string) ?? "").trim() || undefined;
+    const language = ((formData.get("language") as string) ?? "").trim() || undefined;
+    const activeDays = Math.min(90, Math.max(3, parseInt((formData.get("activeDays") as string) ?? "30", 10) || 30));
+
+    if (!groupId || !serviceType || !contact) redirect("/request?error=1");
+
+    const actionPrisma = createPrismaClient();
+    let rawToken: string | null = null;
+    try {
+      const [actionNode, actionGroup] = await Promise.all([
+        resolveCurrentNode(actionPrisma),
+        actionPrisma.group.findUnique({ where: { id: groupId }, select: { id: true, nodeId: true } }),
+      ]);
+      if (!actionGroup || !actionNode || actionGroup.nodeId !== actionNode.id) redirect("/request");
+
+      const description = buildRequestDescription({ contact, location, language });
+      const expiresAt = new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000);
+
+      const request = await createSupportRequest(actionPrisma, {
+        guestRequestId: randomUUID(),
+        submittedByAccountId: null,
+        groupId: actionGroup.id,
+        requestType: serviceType,
+        requestedServices: [{ serviceType, trustRequirement: trustPreference }],
+        description,
+        urgency,
+        privacyLevel: "private",
+        expiresAt,
+      });
+
+      rawToken = await generateGuestAccessToken(actionPrisma, request.id, expiresAt);
+      await routeSupportRequest(actionPrisma, { supportRequestId: request.id });
+    } finally {
+      await actionPrisma.$disconnect();
+    }
+
+    if (rawToken) {
+      (await cookies()).set("pending_request_token", rawToken, {
+        httpOnly: true,
+        maxAge: 120,
+        sameSite: "strict",
+        path: "/",
+      });
+    }
+    redirect("/request?submitted=1");
+  }
+
+  // ── Form page (Type A — two-column on lg:) ────────────────────────────────
   return (
-    <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-      <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
-        <header>
+    <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl">
+        <header className="mb-6">
           <Link href="/" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
             <ArrowLeft className="h-3 w-3" aria-hidden="true" />
             Home
           </Link>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight">Find Groups</h1>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight">Request support</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">
-            Groups you can connect with on this node.
+            No account needed. Provide only what is necessary to coordinate support.
           </p>
         </header>
 
         <AlphaNotice />
 
-        {groups.length === 0 ? (
-          <div className="border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--soft-text)]">
-            No groups are currently listed on this node.
+        <div className="mt-6 grid gap-8 lg:grid-cols-[1fr_320px]">
+          {/* Left — form */}
+          <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+            <RequestHelpForm
+              groupOptions={groupOptions}
+              allServices={allServices}
+              action={submitVisitorRequest}
+              submitLabel="Send request"
+              noGroupsMessage="No groups are currently available on this node."
+            />
           </div>
-        ) : (
-          <ul className="flex flex-col gap-4">
-            {groups.map((group) => (
-              <li key={group.id}>
-                <div className="border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-                  {/* Group info */}
-                  <p className="font-semibold text-[var(--text)]">{group.name}</p>
-                  {group.description && (
-                    <p className="mt-1 text-sm text-[var(--soft-text)]">{group.description}</p>
-                  )}
-                  {group.serviceOfferings.length > 0 && (
-                    <p className="mt-2 text-xs text-[var(--muted)]">
-                      {group.serviceOfferings.map((o) => capitalize(o.serviceType)).join(" · ")}
-                    </p>
-                  )}
 
-                  {/* Actions */}
-                  <div className="mt-4 flex flex-col gap-2">
-                    {/* Primary: Request Support */}
-                    {group.serviceOfferings.length > 0 ? (
-                      <Link
-                        href={`/request/${group.id}`}
-                        className="btn-primary flex items-center justify-between gap-2 bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--surface)]"
-                      >
-                        <span className="flex items-center gap-2">
-                          <HelpCircle className="h-4 w-4" aria-hidden="true" />
-                          Request Support
-                        </span>
-                      </Link>
-                    ) : (
-                      <div className="flex items-center justify-between border border-[var(--border)] px-4 py-2.5 text-sm text-[var(--muted)]">
-                        <span className="flex items-center gap-2">
-                          <HelpCircle className="h-4 w-4" aria-hidden="true" />
-                          Request Support
-                        </span>
-                        <span className="text-xs">No active services</span>
-                      </div>
-                    )}
+          {/* Right — info panel */}
+          <aside className="flex flex-col gap-4">
+            <div className="border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm leading-6 text-[var(--soft-text)]">
+              <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+                <Shield className="h-4 w-4" aria-hidden="true" />
+                Privacy
+              </div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                <li>No account is created.</li>
+                <li>Your contact note is only shared after someone accepts to provide support.</li>
+                <li>You will receive a private link to manage or delete your request at any time.</li>
+                <li>Contact details are removed once your request expires or is fulfilled.</li>
+              </ul>
+            </div>
 
-                    {/* Expandable: planned interactions */}
-                    <details>
-                      <summary className="cursor-pointer list-none px-1 py-1 text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] select-none">
-                        More interactions ▸
-                      </summary>
-                      <div className="mt-2 space-y-px border-t border-[var(--border)] pt-3">
-                        {PLANNED_INTERACTIONS.map(({ label, description, icon: Icon }) => (
-                          <div
-                            key={label}
-                            className="flex items-start justify-between gap-3 px-1 py-2"
-                          >
-                            <div className="flex items-start gap-2 min-w-0">
-                              <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" aria-hidden="true" />
-                              <div className="min-w-0">
-                                <p className="text-sm text-[var(--soft-text)]">{label}</p>
-                                <p className="mt-0.5 text-xs leading-4 text-[var(--muted)]">{description}</p>
-                              </div>
-                            </div>
-                            <span className="shrink-0 border border-[var(--border)] px-1.5 py-0.5 text-xs text-[var(--muted)]">
-                              α
-                            </span>
-                          </div>
-                        ))}
-                        <p className="pt-2 text-xs leading-5 text-[var(--muted)]">
-                          These interactions are planned features. They will allow individuals and groups to build accountability relationships with each other.
-                        </p>
-                      </div>
-                    </details>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <p className="text-center text-sm text-[var(--muted)]">
-          Want to offer help or participate in governance?{" "}
-          <Link href="/register" className="font-medium text-[var(--accent)] hover:underline">
-            Create a member account
-          </Link>
-          .
-        </p>
-      </section>
+            <div className="border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+              <p className="font-medium text-[var(--text)]">Want to do more?</p>
+              <p className="mt-1 text-xs text-[var(--soft-text)]">Create a member account to offer support, participate in group governance, and track your requests.</p>
+              <Link
+                href="/register"
+                className="mt-3 inline-block border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+              >
+                Create an account
+              </Link>
+            </div>
+          </aside>
+        </div>
+      </div>
     </main>
   );
 }

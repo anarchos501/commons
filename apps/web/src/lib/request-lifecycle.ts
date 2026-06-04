@@ -7,10 +7,10 @@ export const DEFAULT_ACCOUNTABILITY_DAYS = 30;
 
 // Status labels for UI surfaces. Both guest and member pages use this map.
 export const REQUEST_STATUS_LABELS: Record<string, string> = {
-  open: "Submitted — looking for help",
-  routed: "Looking for someone to help",
+  open: "Submitted — looking for support",
+  routed: "Looking for someone to provide support",
   matched: "A volunteer has accepted",
-  fulfilled: "Help completed",
+  fulfilled: "Support completed",
   expired: "Expired",
   deleted: "Removed",
 };

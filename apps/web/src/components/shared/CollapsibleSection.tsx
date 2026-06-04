@@ -5,12 +5,13 @@ interface Props {
   title: string;
   eyebrow: string;
   storageKey?: string;
+  className?: string;
   children: React.ReactNode;
 }
 
-export function CollapsibleSection({ id, title, eyebrow, storageKey, children }: Props) {
+export function CollapsibleSection({ id, title, eyebrow, storageKey, className, children }: Props) {
   return (
-    <section id={id} className="border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
+    <section id={id} className={className ?? "border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6"}>
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
           <span>

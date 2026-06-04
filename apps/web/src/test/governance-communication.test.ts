@@ -21,6 +21,7 @@ import {
   onPublicationEntryArchivalPetitionApproved,
 } from "../lib/publications";
 import { evaluatePetition } from "../lib/petitions";
+import { isProposalFamily } from "../lib/governance-proposal-families";
 
 const prisma = createPrismaClient();
 
@@ -286,7 +287,6 @@ test("Fix 3 (revision-doc mismatch): openRevisionPetition rejects when revisionI
 });
 
 test("Fix 2 (typed archive families): retired archive_proposal family is rejected", () => {
-  const { isProposalFamily } = require("../lib/governance-proposal-families");
   assert.equal(isProposalFamily("archive_proposal"), false);
   assert.equal(isProposalFamily("bulletin_archive"), true);
   assert.equal(isProposalFamily("publication_archive"), true);

@@ -57,19 +57,19 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
       }
 
       return (
-        <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-          <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
+        <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+          <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
             <header>
               <Link href={`/request/status/${rawToken}`} className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
                 <ArrowLeft className="h-3 w-3" aria-hidden="true" />
                 Back
               </Link>
-              <h1 className="mt-4 text-2xl font-semibold">Mark help received?</h1>
+              <h1 className="mt-4 text-2xl font-semibold">Mark support received?</h1>
               <p className="mt-2 text-sm text-[var(--soft-text)]">This will mark your request as fulfilled and open a 30-day window to report concerns if needed.</p>
             </header>
             <form action={fulfillAction} className="flex flex-col gap-3">
               <button type="submit" className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
-                Yes, help was received
+                Yes, support was received
               </button>
               <Link href={`/request/status/${rawToken}`} className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
                 Cancel
@@ -93,8 +93,8 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
       }
 
       return (
-        <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-          <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
+        <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+          <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
             <header>
               <Link href={`/request/status/${rawToken}`} className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
                 <ArrowLeft className="h-3 w-3" aria-hidden="true" />
@@ -157,15 +157,15 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
       }
 
       return (
-        <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-          <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
+        <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+          <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
             <header>
               <Link href={`/request/status/${rawToken}`} className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
                 <ArrowLeft className="h-3 w-3" aria-hidden="true" />
                 Back
               </Link>
               <h1 className="mt-4 text-2xl font-semibold">Report a concern</h1>
-              <p className="mt-2 text-sm text-[var(--soft-text)]">Describe what happened. This will be reviewed by the group's members. No account is required.</p>
+              <p className="mt-2 text-sm text-[var(--soft-text)]">Describe what happened. This will be reviewed by the group&apos;s members. No account is required.</p>
             </header>
             <form action={submitConcernAction} className="flex flex-col gap-4 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
               <label className="block">
@@ -191,8 +191,8 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
     const notice = typeof resolvedSearch.notice === "string" ? resolvedSearch.notice : null;
 
     return (
-      <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-        <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
+      <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+        <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <header>
             <Link href="/" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
               <ArrowLeft className="h-3 w-3" aria-hidden="true" />
@@ -205,7 +205,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
           {notice === "fulfilled" && (
             <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
               <CheckCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden="true" />
-              Help marked as received. A concern reporting window is now open for 30 days.
+              Support marked as received. A concern reporting window is now open for 30 days.
             </div>
           )}
           {notice === "deleted" && (
@@ -254,7 +254,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
                   className="btn-primary flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
                 >
                   <CheckCircle className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Mark help received
+                  Mark support received
                 </Link>
               )}
               {supportRequest.status !== "deleted" && (

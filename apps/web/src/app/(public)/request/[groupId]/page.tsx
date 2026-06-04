@@ -5,36 +5,16 @@
 import Link from "next/link";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-react";
-
-function AlphaNotice() {
-  return (
-    <div
-      className="notice-bar px-4 py-3 text-sm text-[var(--notice-text)]"
-      role="status"
-    >
-      <p className="font-medium">Commons Open Alpha</p>
-      <div className="mt-0.5">
-        Experimental software — not for sensitive real-world use yet.{" "}
-        <details className="mt-1">
-          <summary className="cursor-pointer underline-offset-2 hover:underline">Alpha limits</summary>
-          <div className="mt-2 space-y-1 text-xs leading-5">
-            <p>Do not use for medical emergencies, legal emergencies, private organizing, or confidential information.</p>
-            <p>Alpha data is plaintext and visible to the server operator. No end-to-end encryption exists yet.</p>
-            <p>This version is intended for hypothetical testing, architecture review, and governance feedback.</p>
-          </div>
-        </details>
-      </div>
-    </div>
-  );
-}
 import { randomUUID } from "crypto";
+import { ArrowLeft, Clock, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-react";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { resolveCurrentNode } from "../../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
 import { buildRequestDescription, capitalize, trustPreferenceOptions } from "../../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
 import { getAvailableCategoriesForScope, trustedProviderExistsForCategory } from "../../../../lib/contribution-categories";
+import { AlphaNotice } from "../../../../components/shared/Notice";
+import { InfoIcon } from "../../../../components/shared/InfoIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -80,21 +60,19 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       const privateLink = rawToken ? `${proto}://${host}/request/status/${rawToken}` : null;
 
       return (
-        <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-          <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
-            <header>
-              <Link href="/request" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
-                <ArrowLeft className="h-3 w-3" aria-hidden="true" />
-                All groups
-              </Link>
-            </header>
-            <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+        <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-2xl">
+            <Link href="/request" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
+              <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+              All groups
+            </Link>
+            <div className="mt-6 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <HelpCircle className="h-6 w-6 text-[var(--accent)]" aria-hidden="true" />
                 <h1 className="text-xl font-semibold">Request received</h1>
               </div>
               <p className="mt-4 text-sm leading-7 text-[var(--soft-text)]">
-                Your request has been shared with people in {group.name} who may be able to help. Someone will reach out using the contact information you provided.
+                Your request has been shared with people in {group.name} who may be able to provide support. Someone will reach out using the contact information you provided.
               </p>
 
               {privateLink && (
@@ -104,7 +82,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                     Your private request link
                   </div>
                   <a href={privateLink} className="mt-2 block break-all font-mono text-xs text-[var(--accent)] hover:underline">{privateLink}</a>
-                  <p className="mt-2 text-[var(--soft-text)]">Save this link. You can use it to check status, mark help received, delete the request, or report a concern — without creating an account.</p>
+                  <p className="mt-2 text-[var(--soft-text)]">Save this link. You can use it to check status, mark support received, delete the request, or report a concern — without creating an account.</p>
                 </div>
               )}
 
@@ -134,7 +112,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                 </Link>
               </div>
             </div>
-          </section>
+          </div>
         </main>
       );
     }
@@ -237,9 +215,9 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
     }
 
     return (
-      <main className="min-h-screen bg-[var(--page)] text-[var(--text)]">
-        <section className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-16 sm:px-6">
-          <header>
+      <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-5xl">
+          <header className="mb-6">
             <Link href="/request" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
               <ArrowLeft className="h-3 w-3" aria-hidden="true" />
               All groups
@@ -247,15 +225,20 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
             <h1 className="mt-4 text-3xl font-bold tracking-tight">Request support</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">{group.name}</p>
             <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">
-              No account needed. Provide only what is necessary to coordinate help.
+              No account needed. Provide only what is necessary to coordinate support.
             </p>
           </header>
 
           <AlphaNotice />
 
+          <div className="mt-6 grid gap-8 lg:grid-cols-[1fr_320px]">
+          {/* Left — form */}
           <form action={submitGroupScopedRequest} className="flex flex-col gap-5 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <div className="block">
-              <span className="field-label">What do you need help with?</span>
+              <span className="field-label inline-flex items-center gap-1.5">
+                What do you need support with?
+                <InfoIcon description="" />
+              </span>
               {categories.length > 0 ? (
                 <>
                   <select name="categoryId" className="field-input">
@@ -286,22 +269,28 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               )}
             </div>
 
-            {anyTrustedProviders && (
-              <label className="block">
-                <span className="field-label">Who should help?</span>
-                <select name="trustPreference" className="field-input" defaultValue="lightweight">
-                  {trustPreferenceOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  Trusted providers have been recognized by {group.name}. You decide whether that matters.
-                </p>
-              </label>
-            )}
+            <label className="block">
+              <span className="field-label inline-flex items-center gap-1.5">
+                Who should provide support?
+                <InfoIcon description="" />
+              </span>
+              <select name="trustPreference" className="field-input" defaultValue="lightweight">
+                {trustPreferenceOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                {anyTrustedProviders
+                  ? `Trusted providers have been recognized by ${group.name}. You decide whether that matters.`
+                  : "Choose whether any available contributor can provide support, or only those recognized by the group."}
+              </p>
+            </label>
 
             <label className="block">
-              <span className="field-label">Safe contact note</span>
+              <span className="field-label inline-flex items-center gap-1.5">
+                Safe contact note
+                <InfoIcon description="" />
+              </span>
               <input
                 name="contact"
                 className="field-input"
@@ -310,13 +299,17 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                 required
               />
               <p id="contact-help" className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                Only shared after someone agrees to help. Not stored after your request expires.
+                Only shared after someone agrees to provide support. Not stored after your request expires.
               </p>
             </label>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="field-label">How soon?</span>
+                <span className="field-label !inline-flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" aria-hidden="true" />
+                  How soon?
+                  <InfoIcon description="" />
+                </span>
                 <select name="urgency" className="field-input" defaultValue="normal">
                   <option value="low">Whenever someone can</option>
                   <option value="normal">Soon</option>
@@ -325,24 +318,29 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                 </select>
               </label>
               <label className="block">
-                <span className="field-label inline-flex items-center gap-1">
+                <span className="field-label !inline-flex items-center gap-1.5">
                   <Languages className="h-4 w-4" aria-hidden="true" />
                   Language
+                  <InfoIcon description="" />
                 </span>
                 <input name="language" className="field-input" placeholder="Optional" />
               </label>
             </div>
 
             <label className="block">
-              <span className="field-label inline-flex items-center gap-1">
+              <span className="field-label !inline-flex items-center gap-1.5">
                 <MapPin className="h-4 w-4" aria-hidden="true" />
                 General area
+                <InfoIcon description="" />
               </span>
               <input name="location" className="field-input" placeholder="Neighborhood or nearby area (optional)" />
             </label>
 
             <label className="block">
-              <span className="field-label">How long should this request stay active?</span>
+              <span className="field-label inline-flex items-center gap-1.5">
+                How long should this request stay active?
+                <InfoIcon description="" />
+              </span>
               <select name="activeDays" className="field-input" defaultValue="30">
                 {DURATION_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -350,19 +348,6 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               </select>
               <p className="mt-1 text-xs text-[var(--muted)]">Requests expire automatically. You can also delete yours at any time using your private link.</p>
             </label>
-
-            <div className="border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">
-              <div className="flex items-center gap-2 font-medium text-[var(--text)]">
-                <Shield className="h-4 w-4" aria-hidden="true" />
-                Privacy
-              </div>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>No account is created.</li>
-                <li>Your request will only be shared with {group.name}.</li>
-                <li>Your contact note is only shared after someone accepts.</li>
-                <li>You will receive a private link to manage or delete this request.</li>
-              </ul>
-            </div>
 
             <button
               type="submit"
@@ -372,14 +357,35 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
             </button>
           </form>
 
-          <p className="text-center text-sm text-[var(--muted)]">
-            Want to offer help or participate in governance?{" "}
-            <Link href="/register" className="font-medium text-[var(--accent)] hover:underline">
-              Create a member account
-            </Link>
-            .
-          </p>
-        </section>
+          {/* Right — info panel */}
+          <aside className="flex flex-col gap-4">
+            <div className="border border-[var(--border)] bg-[var(--subtle)] p-4 text-sm leading-6 text-[var(--soft-text)]">
+              <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+                <Shield className="h-4 w-4" aria-hidden="true" />
+                Privacy
+              </div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                <li>No account is created.</li>
+                <li>Your request will only be shared with {group.name}.</li>
+                <li>Your contact note is only shared after someone accepts.</li>
+                <li>You will receive a private link to manage or delete this request.</li>
+              </ul>
+            </div>
+
+            <div className="border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+              <p className="font-medium text-[var(--text)]">Want to do more?</p>
+              <p className="mt-1 text-xs text-[var(--soft-text)]">Create a member account to offer support, participate in group governance, and track your requests.</p>
+              <Link
+                href="/register"
+                className="mt-3 inline-block border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+              >
+                Create an account
+              </Link>
+            </div>
+          </aside>
+
+          </div>{/* end grid */}
+        </div>
       </main>
     );
   } finally {
