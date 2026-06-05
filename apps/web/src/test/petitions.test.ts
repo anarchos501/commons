@@ -78,11 +78,11 @@ test("openPetition creates petition with correct defaults", async () => {
     assert.equal(petition.category, "membership");
     assert.ok(petition.governanceSnapshot);
     const snap = petition.governanceSnapshot as { threshold: number; petitionDuration: number };
-    assert.equal(snap.threshold, 0.60); // default at temperature 0
-    assert.equal(snap.petitionDuration, 7);
-    // closesAt should be ~7 days from now
+    assert.equal(snap.threshold, 0.50); // default at temperature 0
+    assert.equal(snap.petitionDuration, 3);
+    // closesAt should be ~3 days from now
     const diffMs = petition.closesAt.getTime() - petition.opensAt.getTime();
-    assert.ok(Math.abs(diffMs - 7 * 24 * 60 * 60 * 1000) < 5000);
+    assert.ok(Math.abs(diffMs - 3 * 24 * 60 * 60 * 1000) < 5000);
   } finally {
     await cleanupFixture("pet_create");
   }
@@ -96,20 +96,20 @@ test("governanceSnapshot is frozen at open time (temperature changes do not alte
     if (!result.ok) return;
 
     const snapBefore = (await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } })).governanceSnapshot as { threshold: number };
-    assert.ok(Math.abs(snapBefore.threshold - 0.60) < 0.001);
+    assert.ok(Math.abs(snapBefore.threshold - 0.50) < 0.001);
 
-    // All members signal +1 → temperature = 1.0 → threshold should become 0.40 for new petitions
+    // All members signal +1 means temperature = 1.0 and threshold resolves to the permissive anchor.
     for (const m of memberships) {
       await prisma.memberGovernanceSignal.upsert({
-        where: { membershipId_category: { membershipId: m.id, category: "membership" } },
+        where: { membershipId_category_parameter: { membershipId: m.id, category: "membership", parameter: "_" } },
         update: { signal: 1 },
-        create: { membershipId: m.id, groupId: group.id, category: "membership", signal: 1 },
+        create: { membershipId: m.id, groupId: group.id, category: "membership", parameter: "_", signal: 1 },
       });
     }
 
     // Existing petition snapshot must not change
     const snapAfter = (await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } })).governanceSnapshot as { threshold: number };
-    assert.ok(Math.abs(snapAfter.threshold - 0.60) < 0.001, "Snapshot must be frozen at open time");
+    assert.ok(Math.abs(snapAfter.threshold - 0.50) < 0.001, "Snapshot must be frozen at open time");
   } finally {
     await cleanupFixture("pet_snapshot");
   }
@@ -197,7 +197,7 @@ test("evaluatePetition returns blocked when no active members", async () => {
 test("evaluatePetition: threshold met → approved", async () => {
   const { group, memberships } = await createFixture("pet_approved", 3);
   try {
-    // Default threshold at temp=0 is 0.60 → need 2 of 3 active members
+    // Default threshold at temp=0 is 0.50, so 2 of 3 active members crosses it.
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
@@ -216,7 +216,7 @@ test("evaluatePetition: threshold met → approved", async () => {
 test("evaluatePetition: threshold not met → rejected", async () => {
   const { group, memberships } = await createFixture("pet_rejected", 5);
   try {
-    // Need 3/5 (60%) — only 2 support
+    // Need 3/5 at the default 50% threshold; only 2 support.
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
@@ -241,7 +241,7 @@ test("competing petitions: highest support wins; others rejected", async () => {
     assert.equal(r2.ok, true);
     if (!r1.ok || !r2.ok) return;
 
-    // r1 gets 4/5 support (above 0.60 threshold); r2 gets 1/5
+    // r1 gets 4/5 support above the default threshold; r2 gets 1/5.
     for (let i = 0; i < 4; i++) {
       await addPetitionSupport(prisma, { petitionId: r1.petitionId, membershipId: memberships[i].id });
     }
@@ -328,8 +328,8 @@ test("emergency petition evaluates immediately on threshold", async () => {
     const result = await openPetition(prisma, { groupId: group.id, category: "emergency", subjectType: "emergency_declaration", subjectId: group.id, createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
 
-    // Default emergency threshold = 0.80 → need 4 of 5 active members
-    for (let i = 0; i < 4; i++) {
+    // Default emergency threshold = 0.50, so 3 of 5 active members crosses it.
+    for (let i = 0; i < 3; i++) {
       await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
     }
 

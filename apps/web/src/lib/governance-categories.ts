@@ -47,63 +47,67 @@ type CategoryRegistry = {
 
 export const CATEGORY_REGISTRY: CategoryRegistry = {
   membership: {
-    threshold: { anchors: [0.80, 0.60, 0.40] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   project: {
-    threshold: { anchors: [0.80, 0.60, 0.40] },
-    petitionDuration: { anchors: [28, 14, 7] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   responsibility: {
-    threshold: { anchors: [0.70, 0.50, 0.30] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
     // Restrictive = shorter terms (more oversight); permissive = longer terms (more trust)
-    reconfirmationPeriod: { anchors: [90, 365, 730], min: 30, max: 730 },
+    reconfirmationPeriod: { anchors: [7, 14, 30], min: 3, max: 30 },
   },
   accountability: {
-    threshold: { anchors: [0.85, 0.70, 0.55] },
-    petitionDuration: { anchors: [21, 14, 7] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   living_document: {
-    threshold: { anchors: [0.80, 0.60, 0.40] },
-    petitionDuration: { anchors: [21, 14, 7] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   archival: {
-    threshold: { anchors: [0.80, 0.60, 0.40] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   support_request: {
-    threshold: { anchors: [0.70, 0.50, 0.30] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   contribution_offer: {
-    threshold: { anchors: [0.70, 0.50, 0.30] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   emergency: {
-    threshold: { anchors: [0.90, 0.80, 0.65] },
-    petitionDuration: { anchors: [5, 3, 1] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [3, 1, 0.125] },
     // Restrictive = shorter emergencies (high-friction prefers quick resolution)
     // Permissive = longer emergencies (sustained activation tolerated)
-    duration: { anchors: [14, 30, 60] },
+    duration: { anchors: [7, 14, 30] },
   },
   discussion: {
-    threshold: { anchors: [0.75, 0.55, 0.35] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
     // Discussion retention is bounded: governance can shorten/lengthen, never disable expiration.
     messageRetentionDays: { anchors: [7, 30, 90], min: 1, max: 90 },
-    threadInactivityDays: { anchors: [14, 60, 180], min: 1, max: 180 },
+    threadInactivityDays: { anchors: [7, 14, 30], min: 1, max: 30 },
   },
   // RFC: Contribution Categories & Trusted Provider Status
   contribution_category: {
-    threshold: { anchors: [0.70, 0.50, 0.30] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
   trusted_provider: {
-    threshold: { anchors: [0.70, 0.50, 0.30] },
-    petitionDuration: { anchors: [14, 7, 3] },
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
   },
 };
+
+export function isGovernanceParameter(category: GovernanceCategory, parameter: string): boolean {
+  return parameter === "_" || parameter in CATEGORY_REGISTRY[category];
+}
 
 export type ResolvedCategoryParams = {
   threshold: number;
@@ -145,12 +149,18 @@ export function resolveAllParameters(
   category: GovernanceCategory,
   temperature: number,
 ): ResolvedCategoryParams {
+  return resolveAllParametersWithIndividualTemps(category, new Map([["_", temperature]]));
+}
+
+export function resolveAllParametersWithIndividualTemps(
+  category: GovernanceCategory,
+  temperatures: Map<string, number>,
+): ResolvedCategoryParams {
   const categoryDef = CATEGORY_REGISTRY[category];
   const result: Record<string, number> = {};
-  for (const [param, def] of Object.entries(categoryDef)) {
-    const raw = interpolate(def.anchors, temperature);
-    const clamped = def.min !== undefined ? Math.max(def.min, raw) : raw;
-    result[param] = def.max !== undefined ? Math.min(def.max, clamped) : clamped;
+  const categoryTemperature = temperatures.get("_") ?? 0;
+  for (const param of Object.keys(categoryDef)) {
+    result[param] = resolveParameter(category, param, temperatures.get(param) ?? categoryTemperature);
   }
   return result as unknown as ResolvedCategoryParams;
 }

@@ -3,9 +3,9 @@ import {
   type GovernanceCategory,
   type ResolvedCategoryParams,
   isGovernanceCategory,
-  resolveAllParameters,
+  resolveAllParametersWithIndividualTemps,
 } from "./governance-categories";
-import { computeGroupTemperature } from "./governance-temperature";
+import { computeAllParameterTemperatures } from "./governance-temperature";
 
 export async function resolveGovernanceParams(
   prisma: PrismaClient,
@@ -15,8 +15,8 @@ export async function resolveGovernanceParams(
   if (!isGovernanceCategory(category)) {
     throw new Error(`Unknown governance category: "${category}"`);
   }
-  const temperature = await computeGroupTemperature(prisma, groupId, category);
-  return resolveAllParameters(category, temperature);
+  const temperatures = await computeAllParameterTemperatures(prisma, groupId, category);
+  return resolveAllParametersWithIndividualTemps(category, temperatures);
 }
 
 // Convenience: resolves all parameters for a category and returns them as a

@@ -23,11 +23,14 @@ import {
 import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { proposeProject } from "../../../../lib/projects";
-import { GOVERNANCE_CATEGORIES, type GovernanceCategory } from "../../../../lib/governance-categories";
-import { resolveGovernanceParams } from "../../../../lib/governance-resolver";
-import { computeGroupTemperature } from "../../../../lib/governance-temperature";
+import {
+  CATEGORY_REGISTRY,
+  GOVERNANCE_CATEGORIES,
+  resolveParameter,
+  type GovernanceCategory,
+} from "../../../../lib/governance-categories";
 import { openEmergencyPetition } from "../../../../lib/emergency";
-import { upsertGovernanceSignal } from "../../../../lib/governance-temperature";
+import { computeAllParameterTemperatures, upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
   describePetitionSubject,
@@ -769,8 +772,9 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               </form>
             )}
 
+            <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
             {data.governanceSettings.map((setting) => (
-              <div key={setting.category} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+              <div key={setting.category} className="bg-[var(--subtle)] p-3">
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
                   {/* Temperature indicator: -1 (blue/careful) → 0 (neutral) → +1 (green/permissive) */}
@@ -783,11 +787,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  {formatPercent(setting.threshold)} threshold &middot; {Math.round(setting.petitionDuration)}d window
+                  {setting.parameters.map((p) => `${PARAM_LABELS[p.name] ?? p.name}: ${formatParamValue(p.name, p.value)}`).join(" · ")}
                 </p>
                 <form action={updateGovernanceSignalAction} className="mt-3">
                   <input type="hidden" name="groupId" value={groupId} />
                   <input type="hidden" name="category" value={setting.category} />
+                  <input type="hidden" name="parameter" value="_" />
                   <div className="flex gap-2 flex-wrap">
                     {([
                       { value: "-1", label: "More Careful" },
@@ -800,7 +805,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         name="signal"
                         value={opt.value}
                         className={`border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
-                          setting.signal === Number(opt.value)
+                          setting.categorySignal === Number(opt.value)
                             ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
                             : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
                         }`}
@@ -810,8 +815,48 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     ))}
                   </div>
                 </form>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--text)] select-none">
+                    Characteristics
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {setting.parameters.map((parameter) => (
+                      <div key={parameter.name} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="text-xs text-[var(--soft-text)]">
+                          {PARAM_LABELS[parameter.name] ?? parameter.name} · {formatParamValue(parameter.name, parameter.value)}
+                          {!parameter.hasOwnSignal && setting.categorySignal !== 0 ? " · using bulk vote" : ""}
+                        </span>
+                        <form action={updateGovernanceSignalAction} className="flex gap-1.5">
+                          <input type="hidden" name="groupId" value={groupId} />
+                          <input type="hidden" name="category" value={setting.category} />
+                          <input type="hidden" name="parameter" value={parameter.name} />
+                          {([
+                            { value: "-1", label: "More Careful" },
+                            { value: "0", label: "Neutral" },
+                            { value: "1", label: "Easier To Act" },
+                          ] as const).map((opt) => (
+                            <button
+                              key={opt.value}
+                              type="submit"
+                              name="signal"
+                              value={opt.value}
+                              className={`border px-2 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
+                                parameter.signal === Number(opt.value)
+                                  ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
+                                  : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </form>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </div>
             ))}
+            </div>
           </div>
         </CollapsibleSection>
 
@@ -945,21 +990,26 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // Governance — all 12 categories
     const currentSignals = await prisma.memberGovernanceSignal.findMany({
       where: { membershipId: currentMembership.id },
-      select: { category: true, signal: true },
+      select: { category: true, parameter: true, signal: true },
     });
-    const signalByCategory = new Map(currentSignals.map((s) => [s.category, s.signal]));
+    const signalMap = new Map(currentSignals.map((s) => [`${s.category}:${s.parameter}`, s.signal]));
     const governanceSettings = await Promise.all(
       GOVERNANCE_CATEGORIES.map(async (category) => {
-        const [params, temperature] = await Promise.all([
-          resolveGovernanceParams(prisma, groupId, category),
-          computeGroupTemperature(prisma, groupId, category),
-        ]);
+        const temperatures = await computeAllParameterTemperatures(prisma, groupId, category);
         return {
           category,
-          threshold: params.threshold,
-          petitionDuration: params.petitionDuration,
-          signal: signalByCategory.get(category) ?? 0,
-          temperature,
+          categorySignal: signalMap.get(`${category}:_`) ?? 0,
+          temperature: temperatures.get("_") ?? 0,
+          parameters: Object.keys(CATEGORY_REGISTRY[category]).map((parameter) => {
+            const temperature = temperatures.get(parameter) ?? temperatures.get("_") ?? 0;
+            return {
+              name: parameter,
+              value: resolveParameter(category, parameter, temperature),
+              temperature,
+              signal: signalMap.get(`${category}:${parameter}`) ?? signalMap.get(`${category}:_`) ?? 0,
+              hasOwnSignal: signalMap.has(`${category}:${parameter}`),
+            };
+          }),
         };
       }),
     );
@@ -1605,17 +1655,23 @@ async function updateGovernanceSignalAction(formData: FormData) {
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const category = requiredString(formData, "category") as GovernanceCategory;
+  const parameterRaw = formData.get("parameter");
+  const parameter = typeof parameterRaw === "string" && parameterRaw.length > 0 ? parameterRaw : "_";
   const signalRaw = formData.get("signal");
   const signal = signalRaw === "-1" ? -1 : signalRaw === "1" ? 1 : 0;
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
+  let notice: string | null = null;
   try {
-    await upsertGovernanceSignal(prisma, { membershipId: membership.id, groupId, category, signal });
+    const result = await upsertGovernanceSignal(prisma, { membershipId: membership.id, groupId, category, parameter, signal });
+    if (!result.ok) {
+      notice = governanceSignalFailureNotice(result.reason);
+    }
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#governance`);
+  redirect(notice ? `/groups/${groupId}?notice=${encodeURIComponent(notice)}#governance` : `/groups/${groupId}#governance`);
 }
 
 // ── Local Components ──────────────────────────────────────────────────────────
@@ -1682,12 +1738,37 @@ function PetitionCard({ petition, canSupport, groupId }: { petition: SpacePetiti
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
+const PARAM_LABELS: Record<string, string> = {
+  threshold: "Approval Threshold",
+  petitionDuration: "Petition Window",
+  reconfirmationPeriod: "Reconfirmation Period",
+  duration: "Emergency Duration",
+  messageRetentionDays: "Message Retention",
+  threadInactivityDays: "Thread Inactivity",
+};
+
+function formatParamValue(param: string, value: number): string {
+  if (param === "threshold") return formatPercent(value);
+  return `${Math.round(value * 10) / 10}d`;
+}
+
 function formatRelativeDate(date: Date) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function governanceSignalFailureNotice(reason: string) {
+  switch (reason) {
+    case "cooldown": return "Governance signal changes are limited for a short cooldown window.";
+    case "invalid_signal": return "That governance signal value is not valid.";
+    case "invalid_category": return "That governance category is not valid.";
+    case "invalid_parameter": return "That governance characteristic is not valid.";
+    case "membership_group_mismatch": return "That membership does not belong to this group.";
+    default: return "That governance signal could not be saved.";
+  }
 }
 
 function discussionPetitionFailureNotice(reason: string) {

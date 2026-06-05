@@ -34,14 +34,14 @@ test("emergency petition activates immediately on threshold", async () => {
     assert.equal(result.ok, true);
     if (!result.ok) return;
 
-    // Default threshold = 0.80 → need 4 of 5 active members
-    for (let i = 0; i < 4; i++) {
+    // Default threshold = 0.50, so 3 of 5 active members crosses it.
+    for (let i = 0; i < 3; i++) {
       const { eval: evalResult } = await signalAndEvaluateEmergency(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
-      if (i < 3) {
+      if (i < 2) {
         // Not yet at threshold
         assert.ok(evalResult === null || evalResult.outcome !== "approved");
       } else {
-        // 4th support crosses threshold
+        // 3rd support crosses threshold
         assert.equal(evalResult?.outcome, "approved");
       }
     }
@@ -102,7 +102,7 @@ test("emergency duration uses governanceSnapshot (not live resolver)", async () 
   }
 });
 
-test("emergency duration at default temperature is 30 days", async () => {
+test("emergency duration at default temperature is 14 days", async () => {
   const { group, memberships } = await createFixture("ge_30days", 5);
   try {
     const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
@@ -116,7 +116,7 @@ test("emergency duration at default temperature is 30 days", async () => {
     const period = await prisma.emergencyPeriod.findFirst({ where: { groupId: group.id } });
     assert.ok(period);
     const durationDays = (period.expiresAt.getTime() - period.startedAt.getTime()) / (24 * 60 * 60 * 1000);
-    assert.ok(Math.abs(durationDays - 30) < 0.01, `Expected 30 days, got ${durationDays}`);
+    assert.ok(Math.abs(durationDays - 14) < 0.01, `Expected 14 days, got ${durationDays}`);
   } finally {
     await cleanupFixture("ge_30days");
   }

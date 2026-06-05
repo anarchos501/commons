@@ -920,6 +920,7 @@ model MemberGovernanceSignal {
   membershipId String
   groupId      String
   category     String          // GovernanceCategory key, validated at service layer
+  parameter    String          @default("_") // "_" = category-level, otherwise a category parameter key
   signal       Int             // constrained to -1 | 0 | +1 at service layer
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
@@ -927,7 +928,7 @@ model MemberGovernanceSignal {
   membership GroupMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   group      Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
-  @@unique([membershipId, category])
+  @@unique([membershipId, category, parameter])
   @@index([groupId, category])
 }
 

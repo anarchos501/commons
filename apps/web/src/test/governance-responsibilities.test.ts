@@ -65,9 +65,9 @@ test("confirmResponsibilityAssignment creates assignment with snapshot reconfirm
     const assignment = await prisma.responsibilityAssignment.findFirst({ where: { membershipId: membership.id } });
     assert.ok(assignment);
 
-    // expiresAt must be ~365 days from now (default reconfirmationPeriod at temp=0)
+    // expiresAt must use the default reconfirmationPeriod at temp=0.
     const daysUntilExpiry = (assignment.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
-    assert.ok(Math.abs(daysUntilExpiry - 365) < 1, `Expected ~365 days, got ${daysUntilExpiry}`);
+    assert.ok(Math.abs(daysUntilExpiry - 14) < 1, `Expected ~14 days, got ${daysUntilExpiry}`);
 
     // Coverage is now covered
     const coverage = await getResponsibilityCoverage(prisma, group.id, "reviewer");
@@ -132,15 +132,15 @@ test("volunteer withdrawal closes responsibility petition as withdrawn", async (
   }
 });
 
-test("declareTempStewardship uses resolver duration (default 30 days at neutral temperature)", async () => {
+test("declareTempStewardship uses resolver duration (default 14 days at neutral temperature)", async () => {
   const { membership } = await createFixture("grsp_steward");
   try {
     await declareTempStewardship(prisma, membership.id, "reviewer");
     const assignment = await prisma.responsibilityAssignment.findFirst({ where: { membershipId: membership.id } });
     assert.ok(assignment);
     const daysUntilExpiry = (assignment.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
-    // Default emergency.duration at temperature=0 is 30 days
-    assert.ok(Math.abs(daysUntilExpiry - 30) < 1, `Expected ~30 days, got ${daysUntilExpiry}`);
+    // Default emergency.duration at temperature=0 is 14 days
+    assert.ok(Math.abs(daysUntilExpiry - 14) < 1, `Expected ~14 days, got ${daysUntilExpiry}`);
   } finally {
     await cleanupFixture("grsp_steward");
   }
