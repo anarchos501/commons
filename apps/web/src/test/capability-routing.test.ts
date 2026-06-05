@@ -12,8 +12,25 @@ import {
 const prisma = createPrismaClient();
 
 test.after(async () => {
+  await cleanupAllFixtures();
   await prisma.$disconnect();
 });
+
+async function cleanupAllFixtures() {
+  await cleanupFixture("caproute_food");
+  await cleanupFixture("caproute_trusted_rides");
+  await cleanupFixture("caproute_unapproved");
+  await cleanupFixture("caproute_category_trusted");
+  await cleanupFixture("caproute_unavailable");
+  await cleanupFixture("caproute_decisions");
+  await cleanupFixture("caproute_decision_finality");
+  await cleanupFixture("caproute_contribution");
+  await cleanupFixture("caproute_bypass_check");
+  await cleanupFixture("caproute_privacy_group");
+  await cleanupFixture("caproute_privacy_route");
+  await cleanupFixture("caproute_project_inherit");
+  await cleanupFixture("caproute_diff_group");
+}
 
 test("low-risk food dropoff routes without trust petition", async () => {
   const fixture = await createFixture("food");
@@ -611,7 +628,14 @@ async function cleanupFixture(prefix: string) {
   await prisma.serviceCapability.deleteMany({ where: { accountId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { accountId: { startsWith: prefix } } });
   await prisma.groupServiceOffering.deleteMany({ where: { id: { startsWith: prefix } } });
-  await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });
+  await prisma.account.deleteMany({
+    where: {
+      OR: [
+        { id: { startsWith: prefix } },
+        { homeNodeId: { startsWith: prefix } },
+      ],
+    },
+  });
   await prisma.project.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.node.deleteMany({ where: { id: { startsWith: prefix } } });

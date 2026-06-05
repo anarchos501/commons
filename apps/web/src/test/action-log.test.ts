@@ -8,6 +8,12 @@ import { joinOpenGroup, leaveGroup } from "../lib/group-membership";
 const prisma = createPrismaClient();
 
 test.after(async () => {
+  for (const prefix of ["al_create", "al_guest", "al_fulfill", "al_delete", "al_join", "al_leave"]) {
+    await cleanupFixture(prefix);
+  }
+  for (const prefix of ["al_route", "al_accept", "al_decline"]) {
+    await cleanupRoutingFixture(prefix);
+  }
   await prisma.$disconnect();
 });
 

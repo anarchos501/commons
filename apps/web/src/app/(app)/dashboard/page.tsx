@@ -295,7 +295,6 @@ async function getDashboardData(
   const prisma = createPrismaClient();
   try {
     const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } });
-    const nodeId = account.homeNodeId;
 
     // Memberships first — needed for petition + per-group queries
     const myGroupMemberships = await prisma.groupMembership.findMany({
