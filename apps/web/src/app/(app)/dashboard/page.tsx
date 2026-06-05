@@ -158,9 +158,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               ) : (
                 <EmptyState text="You are not yet a member of any group." />
               )}
-              <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <div className="mt-4 border-t border-[var(--border)] pt-4 flex items-center gap-4">
                 <Link href="/groups" className="text-xs font-medium text-[var(--accent)] hover:underline">
                   Find Groups →
+                </Link>
+                <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                  Create Group →
                 </Link>
               </div>
             </CollapsibleSection>

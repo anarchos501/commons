@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,6 +24,34 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+const stripFormFillHydrationAttributes = `
+(() => {
+  const attribute = "fdprocessedid";
+  const clean = (root) => {
+    if (!root || root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE) return;
+    if (root.nodeType === Node.ELEMENT_NODE && root.hasAttribute(attribute)) root.removeAttribute(attribute);
+    root.querySelectorAll?.("[" + attribute + "]").forEach((element) => element.removeAttribute(attribute));
+  };
+  clean(document);
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "attributes") {
+        mutation.target.removeAttribute(attribute);
+      } else {
+        mutation.addedNodes.forEach(clean);
+      }
+    }
+  });
+  observer.observe(document.documentElement, {
+    attributeFilter: [attribute],
+    attributes: true,
+    childList: true,
+    subtree: true,
+  });
+  window.addEventListener("load", () => setTimeout(() => observer.disconnect(), 5000), { once: true });
+})();
+`;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
@@ -36,7 +65,12 @@ export default async function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased ${themeClass}`.trim()}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Script id="strip-form-fill-hydration-attributes" strategy="beforeInteractive">
+          {stripFormFillHydrationAttributes}
+        </Script>
+        {children}
+      </body>
     </html>
   );
 }

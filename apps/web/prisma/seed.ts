@@ -49,6 +49,7 @@ async function main() {
     update: {
       description: "A local mutual aid collective coordinating practical support.",
       membershipPolicy: "open",
+      visibility: "public",
       governancePreferences: {
         decisionThreshold: 0.7,
         trustReviewDays: 14,
@@ -64,6 +65,7 @@ async function main() {
       name: "Gotham Mutual Aid",
       description: "A local mutual aid collective coordinating practical support.",
       membershipPolicy: "open",
+      visibility: "public",
       governancePreferences: {
         decisionThreshold: 0.7,
         trustReviewDays: 14,
@@ -80,6 +82,7 @@ async function main() {
     update: {
       description: "Eastside neighborhood coordination and mutual support.",
       membershipPolicy: "open",
+      visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
     },
@@ -89,6 +92,7 @@ async function main() {
       name: "Eastside Commons",
       description: "Eastside neighborhood coordination and mutual support.",
       membershipPolicy: "open",
+      visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
     },

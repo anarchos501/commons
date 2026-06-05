@@ -212,6 +212,65 @@ test("createContributionCategoryFromPetition creates category on approved petiti
   }
 });
 
+test("first approved contribution category makes a private group public", async () => {
+  const { group, memberships } = await createFixture("cc_publicize_first", 3);
+  try {
+    const propResult = await proposeContributionCategory(prisma, {
+      membershipId: memberships[0].id,
+      groupId: group.id,
+      offeringEntityType: "group",
+      offeringEntityId: group.id,
+      name: "Food Pantry",
+      description: "Coordinating pantry pickup and delivery.",
+    });
+    assert.ok(propResult.ok);
+    if (!propResult.ok) return;
+
+    await prisma.petition.update({ where: { id: propResult.petitionId }, data: { status: "approved" } });
+    await createContributionCategoryFromPetition(prisma, propResult.petitionId);
+
+    const updated = await prisma.group.findUniqueOrThrow({ where: { id: group.id } });
+    assert.equal(updated.visibility, "public");
+  } finally {
+    await cleanupFixture("cc_publicize_first");
+  }
+});
+
+test("additional approved contribution categories preserve private visibility when active categories already exist", async () => {
+  const { group, memberships } = await createFixture("cc_publicize_existing", 3);
+  try {
+    await prisma.contributionCategory.create({
+      data: {
+        groupId: group.id,
+        offeringEntityType: "group",
+        offeringEntityId: group.id,
+        name: "Existing",
+        description: "Existing category.",
+        status: "active",
+      },
+    });
+
+    const propResult = await proposeContributionCategory(prisma, {
+      membershipId: memberships[0].id,
+      groupId: group.id,
+      offeringEntityType: "group",
+      offeringEntityId: group.id,
+      name: "Tool Share",
+      description: "Sharing tools across the neighborhood.",
+    });
+    assert.ok(propResult.ok);
+    if (!propResult.ok) return;
+
+    await prisma.petition.update({ where: { id: propResult.petitionId }, data: { status: "approved" } });
+    await createContributionCategoryFromPetition(prisma, propResult.petitionId);
+
+    const updated = await prisma.group.findUniqueOrThrow({ where: { id: group.id } });
+    assert.equal(updated.visibility, "private");
+  } finally {
+    await cleanupFixture("cc_publicize_existing");
+  }
+});
+
 test("createContributionCategoryFromPetition is idempotent on second call", async () => {
   const { group, memberships } = await createFixture("cc_idempotent", 3);
   try {

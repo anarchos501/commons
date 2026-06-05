@@ -30,6 +30,7 @@ import {
   type GovernanceCategory,
 } from "../../../../lib/governance-categories";
 import { openEmergencyPetition } from "../../../../lib/emergency";
+import { proposeGroupVisibility } from "../../../../lib/group-settings";
 import { computeAllParameterTemperatures, upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
@@ -711,6 +712,11 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                       ))}
                     </select>
                   </div>
+                  {data.group.visibility === "private" && data.hasNoActiveCategories && (
+                    <p className="text-xs border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800">
+                      Approving this contribution category will make this group publicly visible on the Find Groups page.
+                    </p>
+                  )}
                   <SubmitButton>Open petition</SubmitButton>
                 </form>
               </details>
@@ -756,6 +762,25 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Governance Settings ───────────────────────────────────── */}
         <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
+
+            {/* Group visibility */}
+            {data.group.visibility === "private" ? (
+              <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                <p className="text-sm font-medium text-[var(--text)]">Group Visibility</p>
+                <p className="mt-1 text-xs text-[var(--soft-text)]">
+                  This group is private and will not appear on the Find Groups page.
+                  {isActive && " Active members can petition to make it publicly discoverable."}
+                </p>
+                {isActive && (
+                  <form action={proposeGroupVisibilityAction} className="mt-3">
+                    <input type="hidden" name="groupId" value={groupId} />
+                    <SubmitButton variant="secondary">Propose Public Visibility</SubmitButton>
+                  </form>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">This group is publicly visible on the Find Groups page.</p>
+            )}
 
             {/* Emergency period status + declaration */}
             {data.activeEmergency ? (
@@ -1046,6 +1071,11 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       })),
     );
 
+    // Whether this group has any active contribution categories (used for auto-publicize warning)
+    const activeCategoryCount = await prisma.contributionCategory.count({
+      where: { groupId, status: "active" },
+    });
+
     // Projects for entity selector in category proposal form
     const allProjects = await prisma.project.findMany({
       where: { groupId, status: "active", archivedAt: null },
@@ -1126,6 +1156,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       activeEmergency,
       responsibilityTypes,
       myResponsibilityTypes,
+      hasNoActiveCategories: activeCategoryCount === 0,
     };
   } finally {
     await prisma.$disconnect();
@@ -1149,6 +1180,27 @@ async function declareEmergencyAction(formData: FormData) {
       redirect(`/groups/${groupId}`);
     }
     await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function proposeGroupVisibilityAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      select: { id: true, status: true, participationStatus: true },
+    });
+    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
+      redirect(`/groups/${groupId}`);
+    }
+    await proposeGroupVisibility(prisma, { groupId, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }

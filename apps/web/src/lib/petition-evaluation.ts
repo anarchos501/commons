@@ -16,6 +16,7 @@ import {
 } from "./trusted-providers";
 import { approveMembershipRequest } from "./group-membership";
 import { onEmergencyPetitionApproved } from "./emergency";
+import { applyGroupVisibilityFromPetition } from "./group-settings";
 import { createProjectFromPetition } from "./projects";
 import { onBulletinArchivalPetitionApproved } from "./bulletins";
 import { onPublicationArchivalPetitionApproved, onPublicationEntryArchivalPetitionApproved } from "./publications";
@@ -58,6 +59,8 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
     await onPublicationArchivalPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "publication_entry_archive") {
     await onPublicationEntryArchivalPetitionApproved(prisma, petitionId);
+  } else if (petition.subjectType === "group_visibility_proposal") {
+    await applyGroupVisibilityFromPetition(prisma, petitionId);
   }
 }
 
@@ -145,6 +148,14 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return req ? `Revoke trusted provider status for ${req.membership.account.displayName}` : subjectId;
   }
 
+  if (subjectType === "group_visibility_proposal") {
+    const group = await prisma.group.findUnique({
+      where: { id: subjectId },
+      select: { name: true },
+    });
+    return group ? `Make "${group.name}" publicly visible` : subjectId;
+  }
+
   return subjectId;
 }
 
@@ -178,6 +189,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "contribution_category_archive": return "Contribution category archival";
     case "trusted_provider_proposal": return "Trusted provider recognition";
     case "trusted_provider_revocation": return "Trusted provider revocation";
+    case "group_visibility_proposal": return "Group visibility proposal";
     default: return subjectType.replace(/_/g, " ");
   }
 }
@@ -196,6 +208,7 @@ export function governanceCategoryLabel(category: string) {
     case "contribution_offer": return "Contribution Offers";
     case "contribution_category": return "Contribution Categories";
     case "trusted_provider": return "Trusted Providers";
+    case "group_settings": return "Group Settings";
     default: return category.replace(/_/g, " ");
   }
 }

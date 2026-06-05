@@ -45,7 +45,7 @@ export default async function FindGroupsPage() {
     if (node) {
       const [groupRows, memberships] = await Promise.all([
         prisma.group.findMany({
-          where: { nodeId: node.id },
+          where: { nodeId: node.id, visibility: "public" },
           select: {
             id: true,
             name: true,
@@ -83,14 +83,21 @@ export default async function FindGroupsPage() {
               Request Support
             </Link>
           )}
-          <h1 className={`${accountId ? "" : "mt-4 "}text-2xl font-bold tracking-tight`}>Find Groups</h1>
-          <p className="mt-1 text-sm text-[var(--soft-text)]">Groups active on this node.</p>
+          <div className="flex items-baseline justify-between gap-4">
+            <h1 className={`${accountId ? "" : "mt-4 "}text-2xl font-bold tracking-tight`}>Find Groups</h1>
+            {accountId && (
+              <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                Create Group
+              </Link>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-[var(--soft-text)]">Publicly listed groups on this node.</p>
         </header>
 
         <div>
           {groups.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--soft-text)]">
-              No groups are currently listed on this node.
+              No groups are currently publicly listed on this node.
             </div>
           ) : (
             <ul className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">

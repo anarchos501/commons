@@ -29,6 +29,7 @@ test("all proposal families map to a governance category", () => {
     "emergency_declaration", "discussion_thread_close", "collective_support_request", "collective_contribution_offer",
     "contribution_category_proposal", "contribution_category_archive",
     "trusted_provider_proposal", "trusted_provider_revocation",
+    "group_visibility_proposal",
   ] as const;
   for (const f of families) {
     assert.ok(isProposalFamily(f), `${f} not recognized`);

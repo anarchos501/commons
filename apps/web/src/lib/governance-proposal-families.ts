@@ -20,7 +20,9 @@ export type ProposalFamily =
   | "contribution_category_proposal"
   | "contribution_category_archive"
   | "trusted_provider_proposal"
-  | "trusted_provider_revocation";
+  | "trusted_provider_revocation"
+  // RFC: Private-By-Default Groups
+  | "group_visibility_proposal";
 
 const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
@@ -40,6 +42,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   contribution_category_archive: "contribution_category",
   trusted_provider_proposal: "trusted_provider",
   trusted_provider_revocation: "trusted_provider",
+  group_visibility_proposal: "group_settings",
 };
 
 export function isProposalFamily(value: string): value is ProposalFamily {
@@ -68,6 +71,8 @@ export function deriveCompetitionKey(
     case "contribution_category_archive":
     case "trusted_provider_proposal":
     case "trusted_provider_revocation":
+    // Non-competing: making a group public is idempotent; multiple concurrent proposals are allowed
+    case "group_visibility_proposal":
       return null;
     // All others: groupId:family:subjectId is unique per decision within a group
     default:

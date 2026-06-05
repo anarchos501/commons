@@ -10,7 +10,8 @@ export type GovernanceCategory =
   | "emergency"
   | "discussion"
   | "contribution_category"
-  | "trusted_provider";
+  | "trusted_provider"
+  | "group_settings";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -25,6 +26,7 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "discussion",
   "contribution_category",
   "trusted_provider",
+  "group_settings",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -100,6 +102,11 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     petitionDuration: { anchors: [7, 3, 1] },
   },
   trusted_provider: {
+    threshold: { anchors: [0.95, 0.50, 0.05] },
+    petitionDuration: { anchors: [7, 3, 1] },
+  },
+  // RFC: Private-By-Default Groups
+  group_settings: {
     threshold: { anchors: [0.95, 0.50, 0.05] },
     petitionDuration: { anchors: [7, 3, 1] },
   },

@@ -220,6 +220,19 @@ export async function createContributionCategoryFromPetition(
       status: "active",
     },
   });
+
+  // Auto-publicize: when the first active contribution category is approved for a private group,
+  // make the group publicly discoverable so requesters can find and contact it.
+  // Uses updateMany with visibility guard to be idempotent if Path A (petition) already made it public.
+  const activeCount = await prisma.contributionCategory.count({
+    where: { groupId: draft.groupId, status: "active" },
+  });
+  if (activeCount === 1) {
+    await prisma.group.updateMany({
+      where: { id: draft.groupId, visibility: "private" },
+      data: { visibility: "public" },
+    });
+  }
 }
 
 export type ProposeArchivalResult =
