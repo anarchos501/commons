@@ -29,7 +29,8 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
           </Link>
           <h1 className="mt-4 text-2xl font-bold tracking-tight">Create Group</h1>
           <p className="mt-1 text-sm text-[var(--soft-text)]">
-            New groups start private. You can invite people or later petition to make the group publicly discoverable.
+            New groups start private — they won't appear on Find Groups until a public visibility petition is approved.
+            Membership policy controls how people join; visibility controls who can discover the group.
           </p>
         </header>
 
@@ -60,6 +61,19 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
               className="w-full border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)]"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-[var(--text)] mb-1" htmlFor="membershipPolicy">
+              Membership Policy
+            </label>
+            <select
+              id="membershipPolicy"
+              name="membershipPolicy"
+              className="w-full border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm text-[var(--text)]"
+            >
+              <option value="request_required">Application required — members must sponsor, then a petition approves</option>
+              <option value="open">Open — anyone can join directly</option>
+            </select>
+          </div>
           <SubmitButton>Create Group</SubmitButton>
         </form>
       </div>
@@ -74,6 +88,7 @@ async function createGroupAction(formData: FormData) {
 
   const name = (formData.get("name") as string | null)?.trim() ?? "";
   const description = (formData.get("description") as string | null)?.trim() || undefined;
+  const membershipPolicy = formData.get("membershipPolicy") as string | null;
   if (!name) redirect("/groups/new?notice=Group+name+is+required.");
 
   const prisma = createPrismaClient();
@@ -87,6 +102,7 @@ async function createGroupAction(formData: FormData) {
       name,
       description,
       creatorAccountId: session.accountId,
+      membershipPolicy: membershipPolicy === "open" ? "open" : "request_required",
     });
 
     if (!result.ok) {

@@ -81,7 +81,7 @@ async function main() {
     where: { nodeId_name: { nodeId: node.id, name: "Eastside Commons" } },
     update: {
       description: "Eastside neighborhood coordination and mutual support.",
-      membershipPolicy: "open",
+      membershipPolicy: "request_required",
       visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
@@ -91,7 +91,7 @@ async function main() {
       nodeId: node.id,
       name: "Eastside Commons",
       description: "Eastside neighborhood coordination and mutual support.",
-      membershipPolicy: "open",
+      membershipPolicy: "request_required",
       visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },

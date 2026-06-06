@@ -38,6 +38,63 @@ test("createGroup creates a private request-required group with the creator as a
   }
 });
 
+test("createGroup with explicit 'open' policy creates an open group", async () => {
+  await cleanupFixture("gs_open");
+  try {
+    const { node, account } = await createBase("gs_open");
+    const result = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "Open Group",
+      creatorAccountId: account.id,
+      membershipPolicy: "open",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: result.groupId } });
+    assert.equal(group.membershipPolicy, "open");
+  } finally {
+    await cleanupFixture("gs_open");
+  }
+});
+
+test("createGroup with explicit 'request_required' policy creates a request_required group", async () => {
+  await cleanupFixture("gs_rr");
+  try {
+    const { node, account } = await createBase("gs_rr");
+    const result = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "RR Group",
+      creatorAccountId: account.id,
+      membershipPolicy: "request_required",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: result.groupId } });
+    assert.equal(group.membershipPolicy, "request_required");
+  } finally {
+    await cleanupFixture("gs_rr");
+  }
+});
+
+test("createGroup with missing or invalid policy defaults to request_required", async () => {
+  await cleanupFixture("gs_fallback");
+  try {
+    const { node, account } = await createBase("gs_fallback");
+    // No membershipPolicy provided
+    const result = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "Fallback Group",
+      creatorAccountId: account.id,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: result.groupId } });
+    assert.equal(group.membershipPolicy, "request_required");
+  } finally {
+    await cleanupFixture("gs_fallback");
+  }
+});
+
 test("group visibility petition approval makes the group public", async () => {
   await cleanupFixture("gs_visibility");
   try {

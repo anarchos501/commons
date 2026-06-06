@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
@@ -31,6 +32,11 @@ import {
 } from "../../../../lib/governance-categories";
 import { openEmergencyPetition } from "../../../../lib/emergency";
 import { proposeGroupVisibility } from "../../../../lib/group-settings";
+import {
+  generateGroupInviteToken,
+  getActiveGroupInvitePreview,
+  revokeAllGroupInviteTokens,
+} from "../../../../lib/group-invites";
 import { computeAllParameterTemperatures, upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
@@ -55,6 +61,8 @@ import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
 import { GroupContextSync } from "../../../../components/shared/GroupContextSync";
+import { CopyInviteLinkButton } from "../../../../components/shared/CopyInviteLinkButton";
+import { ClearPendingInviteToken } from "../../../../components/shared/ClearPendingInviteToken";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +77,22 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   const session = await getSession();
   if (!session.accountId) redirect("/login");
+
+  // One-time invite URL: read raw token from session on ?invite=new.
+  // Clearing happens via route handler after render; Server Components cannot write cookies.
+  let oneTimeInviteUrl: string | null = null;
+  if (sp.invite === "new") {
+    const pending = session.pendingInviteToken;
+    if (pending && pending.groupId === groupId) {
+      const hdrList = await headers();
+      const host = hdrList.get("host") ?? "localhost:3000";
+      const proto =
+        process.env.NODE_ENV === "production"
+          ? (hdrList.get("x-forwarded-proto") ?? "https")
+          : "http";
+      oneTimeInviteUrl = `${proto}://${host}/invite/${pending.rawToken}`;
+    }
+  }
 
   const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter);
 
@@ -518,6 +542,55 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Invite link — visible to active members only */}
+          {isActive && (
+            <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <p className="text-xs font-medium text-[var(--muted)] mb-3">Invite link</p>
+              {oneTimeInviteUrl ? (
+                <div className="space-y-2">
+                  <ClearPendingInviteToken groupId={groupId} />
+                  <p className="text-xs text-[var(--soft-text)]">Copy this link now — it will not be shown again.</p>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      value={oneTimeInviteUrl}
+                      className="flex-1 field-input text-xs font-mono"
+                    />
+                    <CopyInviteLinkButton url={oneTimeInviteUrl} />
+                  </div>
+                  <form action={generateInviteLinkAction}>
+                    <input type="hidden" name="groupId" value={groupId} />
+                    <SubmitButton variant="secondary">Regenerate</SubmitButton>
+                  </form>
+                </div>
+              ) : data.invitePreview ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--soft-text)]">
+                    Active invite: <span className="font-mono">{data.invitePreview.tokenPreview}…</span>
+                    {" "}· Expires {formatRelativeDate(data.invitePreview.expiresAt)}
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    <form action={generateInviteLinkAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <SubmitButton variant="secondary">Regenerate</SubmitButton>
+                    </form>
+                    <form action={revokeInviteLinkAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">
+                        Revoke
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ) : (
+                <form action={generateInviteLinkAction}>
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <SubmitButton variant="secondary">Generate Invite Link</SubmitButton>
+                </form>
+              )}
             </div>
           )}
         </CollapsibleSection>
@@ -1076,6 +1149,9 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       where: { groupId, status: "active" },
     });
 
+    // Active invite preview (preview chars + expiry only — never the full token)
+    const invitePreview = await getActiveGroupInvitePreview(prisma, groupId);
+
     // Projects for entity selector in category proposal form
     const allProjects = await prisma.project.findMany({
       where: { groupId, status: "active", archivedAt: null },
@@ -1157,6 +1233,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       responsibilityTypes,
       myResponsibilityTypes,
       hasNoActiveCategories: activeCategoryCount === 0,
+      invitePreview,
     };
   } finally {
     await prisma.$disconnect();
@@ -1313,6 +1390,41 @@ async function dismissApplicationAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
+}
+
+async function generateInviteLinkAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const result = await generateGroupInviteToken(prisma, { groupId, createdByMembershipId: membership.id });
+    if (result.ok) {
+      session.pendingInviteToken = { groupId, rawToken: result.rawToken };
+      await session.save();
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  redirect(`/groups/${groupId}?invite=new#members`);
+}
+
+async function revokeInviteLinkAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await revokeAllGroupInviteTokens(prisma, { groupId, membershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}#members`);
 }
 
 // Full active participation required — for content creation, petitions, governance signals.

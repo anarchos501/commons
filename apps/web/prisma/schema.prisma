@@ -408,6 +408,7 @@ model Group {
   trustedProviderApplications    TrustedProviderApplication[]
   trustedProviderRevocations     TrustedProviderRevocationRequest[]
   trustedProviderStatuses        TrustedProviderStatus[]
+  inviteTokens                   GroupInviteToken[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -433,6 +434,7 @@ model GroupMembership {
   trustedProviderApplications   TrustedProviderApplication[]
   trustedProviderRevocations    TrustedProviderRevocationRequest[]
   trustedProviderStatuses       TrustedProviderStatus[]
+  createdInviteTokens           GroupInviteToken[]
 
   @@unique([accountId, groupId])
   @@index([accountId])
@@ -456,6 +458,22 @@ model GroupServiceOffering {
   @@index([groupId])
   @@index([status])
   @@index([projectId])
+}
+
+model GroupInviteToken {
+  id                    String    @id @default(cuid())
+  tokenHash             String    @unique   // SHA-256 of raw token; raw token is never stored
+  tokenPreview          String              // first 8 chars of raw token for display after reload
+  groupId               String
+  createdByMembershipId String
+  createdAt             DateTime  @default(now())
+  expiresAt             DateTime
+  revokedAt             DateTime?
+
+  group     Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy GroupMembership @relation(fields: [createdByMembershipId], references: [id])
+
+  @@index([groupId])
 }
 
 model Project {

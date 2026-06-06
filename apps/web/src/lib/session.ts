@@ -6,6 +6,8 @@ export type SessionData = {
   displayName: string;
   nodeId: string;
   activeGroupId: string | null;
+  // One-time invite token display: set after generateGroupInviteToken, consumed on next render
+  pendingInviteToken?: { groupId: string; rawToken: string };
 };
 
 if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {

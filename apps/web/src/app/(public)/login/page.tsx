@@ -4,6 +4,7 @@ import { HandHeart, Shield, Users } from "lucide-react";
 import { createPrismaClient } from "../../../lib/prisma";
 import { getSession } from "../../../lib/session";
 import { loginAccount } from "../../../lib/auth";
+import { safeRelativeRedirectPath } from "../../../lib/safe-redirect";
 import { AlphaNotice } from "../../../components/shared/Notice";
 
 export const dynamic = "force-dynamic";
@@ -12,10 +13,11 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function LoginPage({ searchParams }: { searchParams: SearchParams }) {
   const session = await getSession();
-  if (session.accountId) redirect("/dashboard");
 
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : null;
+  const next = safeRelativeRedirectPath(params.next);
+  if (session.accountId) redirect(next ?? "/dashboard");
 
   return (
     <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
@@ -72,6 +74,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
               )}
 
               <form action={loginAction} className="mt-5 flex flex-col gap-5">
+                {next && <input type="hidden" name="next" value={next} />}
                 <label className="block">
                   <span className="field-label">Email</span>
                   <input name="email" type="email" className="field-input" autoComplete="email" required />
@@ -118,5 +121,5 @@ async function loginAction(formData: FormData) {
     await prisma.$disconnect();
   }
 
-  redirect("/dashboard");
+  redirect(safeRelativeRedirectPath(formData.get("next")) ?? "/dashboard");
 }

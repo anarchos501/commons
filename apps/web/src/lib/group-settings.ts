@@ -2,11 +2,22 @@ import type { PrismaClient } from "../generated/prisma/client";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import type { OpenPetitionResult } from "./petitions";
 
+export type GroupMembershipPolicy = "open" | "request_required";
+
+const VALID_MEMBERSHIP_POLICIES: ReadonlySet<string> = new Set<GroupMembershipPolicy>(["open", "request_required"]);
+
+function sanitizeMembershipPolicy(value: unknown): GroupMembershipPolicy {
+  return typeof value === "string" && VALID_MEMBERSHIP_POLICIES.has(value)
+    ? (value as GroupMembershipPolicy)
+    : "request_required";
+}
+
 export type CreateGroupInput = {
   nodeId: string;
   name: string;
   description?: string;
   creatorAccountId: string;
+  membershipPolicy?: GroupMembershipPolicy;
 };
 
 export type CreateGroupResult =
@@ -23,13 +34,15 @@ export async function createGroup(
   });
   if (existing) return { ok: false, reason: "duplicate_name" };
 
+  const membershipPolicy = sanitizeMembershipPolicy(input.membershipPolicy);
+
   const result = await prisma.$transaction(async (tx) => {
     const group = await tx.group.create({
       data: {
         nodeId: input.nodeId,
         name: input.name,
         description: input.description,
-        membershipPolicy: "request_required",
+        membershipPolicy,
         visibility: "private",
       },
     });
