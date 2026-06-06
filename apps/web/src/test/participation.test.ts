@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { recordGroupPresence, applyParticipationTransitions } from "../lib/participation";
+import { recordGroupPresence, applyParticipationTransitions, resolveParticipationThresholds } from "../lib/participation";
 import { createSupportRequest, declareServiceCapability, routeSupportRequest } from "../lib/capability-routing";
 
 const prisma = createPrismaClient();
@@ -241,6 +241,88 @@ test("routeSupportRequest excludes Dormant members from routing", async () => {
     assert.equal(routes.length, 0);
   } finally {
     await cleanupRoutingFixture("ps_route_dormant");
+  }
+});
+
+// --- resolveParticipationThresholds ---
+
+test("resolveParticipationThresholds at T=0 returns default anchors (90/365)", async () => {
+  const { group } = await createFixture("pt_thresh_default");
+  try {
+    const { quietDays, dormantDays } = await resolveParticipationThresholds(prisma, group.id);
+    assert.equal(quietDays, 90);
+    assert.equal(dormantDays, 365);
+  } finally {
+    await cleanupFixture("pt_thresh_default");
+  }
+});
+
+test("resolveParticipationThresholds with restrictive category signal returns shorter thresholds", async () => {
+  const { group, membership } = await createFixture("pt_thresh_restrict");
+  try {
+    // Full restrictive signal on the "_" (category) parameter
+    await prisma.memberGovernanceSignal.create({
+      data: { membershipId: membership.id, groupId: group.id, category: "participation", parameter: "_", signal: -1 },
+    });
+    const { quietDays, dormantDays } = await resolveParticipationThresholds(prisma, group.id);
+    assert.equal(quietDays, 30);
+    assert.equal(dormantDays, 180);
+  } finally {
+    await cleanupFixture("pt_thresh_restrict");
+  }
+});
+
+test("resolveParticipationThresholds with permissive signal returns longer thresholds", async () => {
+  const { group, membership } = await createFixture("pt_thresh_permissive");
+  try {
+    await prisma.memberGovernanceSignal.create({
+      data: { membershipId: membership.id, groupId: group.id, category: "participation", parameter: "_", signal: 1 },
+    });
+    const { quietDays, dormantDays } = await resolveParticipationThresholds(prisma, group.id);
+    assert.equal(quietDays, 180);
+    assert.equal(dormantDays, 730);
+  } finally {
+    await cleanupFixture("pt_thresh_permissive");
+  }
+});
+
+test("resolveParticipationThresholds clamps dormant >= quiet + 1", async () => {
+  const { group, membership } = await createFixture("pt_thresh_clamp");
+  try {
+    // Force quietThresholdDays to be very high (permissive) and dormantThresholdDays also permissive
+    // At T=+1: quiet=180, dormant=730 — no clamp needed. Test the guard logic directly
+    // by using mixed signals that would make dormant < quiet (impossible with normal ranges,
+    // so we just verify the normal case produces dormant >= quiet + 1 at all temps)
+    await prisma.memberGovernanceSignal.create({
+      data: { membershipId: membership.id, groupId: group.id, category: "participation", parameter: "_", signal: 0.5 },
+    });
+    const { quietDays, dormantDays } = await resolveParticipationThresholds(prisma, group.id);
+    assert.ok(dormantDays >= quietDays + 1, `dormant (${dormantDays}) must be at least quiet (${quietDays}) + 1`);
+  } finally {
+    await cleanupFixture("pt_thresh_clamp");
+  }
+});
+
+test("applyParticipationTransitions action log includes resolved threshold value", async () => {
+  const { group, membership } = await createFixture("pt_thresh_log");
+  try {
+    const oldSeen = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+    await prisma.groupMembership.update({
+      where: { id: membership.id },
+      data: { participationStatus: "active", lastSeenAt: oldSeen },
+    });
+
+    await applyParticipationTransitions(prisma, group.id);
+
+    const logs = await prisma.actionLog.findMany({
+      where: { targetId: membership.id, action: "participation.quieted" },
+    });
+    assert.equal(logs.length, 1);
+    const meta = logs[0].metadata as Record<string, unknown>;
+    assert.equal(typeof meta.thresholdDays, "number");
+    assert.equal(meta.previousStatus, "active");
+  } finally {
+    await cleanupFixture("pt_thresh_log");
   }
 });
 

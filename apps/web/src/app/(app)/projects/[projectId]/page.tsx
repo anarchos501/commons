@@ -7,10 +7,10 @@ import {
   recordProjectPresence,
   leaveProject,
 } from "../../../../lib/project-membership";
-import { createBulletin, openProjectBulletinArchivalPetition } from "../../../../lib/bulletins";
-import { createPublication, openProjectPublicationArchivalPetition } from "../../../../lib/publications";
+import { proposeBulletinCreation, openProjectBulletinArchivalPetition } from "../../../../lib/bulletins";
+import { proposePublicationCreation, proposePubEntryCreation, openProjectPublicationArchivalPetition } from "../../../../lib/publications";
 import {
-  createLivingDocument,
+  proposeLivingDocumentCreation,
   draftLivingDocumentRevision,
   openProjectRevisionPetition,
 } from "../../../../lib/living-documents";
@@ -195,7 +195,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="A short title" /></label>
                     <label className="block"><span className="field-label">Body</span><textarea name="body" required rows={4} className="field-input resize-none" placeholder="Update text" /></label>
-                    <SubmitButton variant="secondary">Post bulletin</SubmitButton>
+                    <SubmitButton variant="secondary">Propose bulletin</SubmitButton>
                   </form>
                 )}
               </div>
@@ -214,12 +214,12 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 {data.publications.length > 0 ? (
                   <div className="space-y-3">
                     {data.publications.map((p) => (
-                      <div key={p.id} className="border border-[var(--border)] p-3">
+                      <div key={p.id} className="border border-[var(--border)] p-3 space-y-2">
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
                           <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
                         </div>
-                        <div className="mt-1 flex items-center justify-between gap-2">
+                        <div className="flex items-center justify-between gap-2">
                           <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
                           {isActive && (
                             <form action={archivePublicationAction}>
@@ -229,6 +229,18 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                             </form>
                           )}
                         </div>
+                        {isActive && (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
+                            <form action={proposePubEntryCreationAction} className="mt-2 space-y-2">
+                              <input type="hidden" name="projectId" value={projectId} />
+                              <input type="hidden" name="publicationId" value={p.id} />
+                              <label className="block"><span className="field-label text-xs">Title (optional)</span><input name="title" type="text" className="field-input text-sm" placeholder="Entry title" /></label>
+                              <label className="block"><span className="field-label text-xs">Body</span><textarea name="body" required rows={3} className="field-input resize-none text-sm" placeholder="Entry content" /></label>
+                              <SubmitButton variant="secondary">Propose entry</SubmitButton>
+                            </form>
+                          </details>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -239,7 +251,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                   <form action={createPublicationAction} className="space-y-3">
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="e.g. Project Resources" /></label>
-                    <SubmitButton variant="secondary">Create publication</SubmitButton>
+                    <SubmitButton variant="secondary">Propose publication</SubmitButton>
                   </form>
                 )}
               </div>
@@ -283,7 +295,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="e.g. Charter, Guidelines" /></label>
                     <label className="block"><span className="field-label">Body</span><textarea name="body" required rows={4} className="field-input resize-none" placeholder="The current text." /></label>
-                    <SubmitButton variant="secondary">Create document</SubmitButton>
+                    <SubmitButton variant="secondary">Propose document</SubmitButton>
                   </form>
                 )}
               </div>
@@ -304,6 +316,19 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
               )}
             </div>
+            {isActive && data.projectMembers.length > 0 && (
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
+                <div className="space-y-1">
+                  {data.projectMembers.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between text-sm">
+                      <span className="text-[var(--text)]">{m.account.displayName}</span>
+                      <span className="text-xs capitalize text-[var(--muted)]">{m.participationStatus}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CollapsibleSection>
         </div>
 
@@ -483,6 +508,13 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     // Contribution categories for project scope
     const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: hostGroupId, projectId });
 
+    // Member roster
+    const projectMembers = await prisma.projectMembership.findMany({
+      where: { projectId, status: "active" },
+      select: { id: true, participationStatus: true, account: { select: { displayName: true } } },
+      orderBy: { account: { displayName: "asc" } },
+    });
+
     return {
       project,
       currentMembership,
@@ -497,6 +529,7 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       discussionMessages,
       petitions,
       contributionCategories: rawCategories,
+      projectMembers,
     };
   } finally {
     await prisma.$disconnect();
@@ -572,10 +605,11 @@ async function createBulletinAction(formData: FormData) {
   const projectId = formData.get("projectId") as string;
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    await createBulletin(prisma, { spaceType: "project", spaceId: projectId, title, body, authorId: session.accountId });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
+    await proposeBulletinCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -604,10 +638,30 @@ async function createPublicationAction(formData: FormData) {
   if (!session.accountId) redirect("/login");
   const projectId = formData.get("projectId") as string;
   const title = requiredString(formData, "title");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    await createPublication(prisma, { spaceType: "project", spaceId: projectId, title, createdByAccountId: session.accountId });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
+    await proposePublicationCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, createdByProjectMembershipId: projectMembership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+}
+
+async function proposePubEntryCreationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = formData.get("projectId") as string;
+  const publicationId = requiredString(formData, "publicationId");
+  const body = requiredString(formData, "body");
+  const title = formData.get("title") as string | null;
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
+  const prisma = createPrismaClient();
+  try {
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
+    await proposePubEntryCreation(prisma, { spaceType: "project", spaceId: projectId, publicationId, groupId: project.groupId, body, title: title || undefined, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -637,10 +691,11 @@ async function createLivingDocumentAction(formData: FormData) {
   const projectId = formData.get("projectId") as string;
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  await requireProjectMembership(session.accountId, projectId);
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    await createLivingDocument(prisma, { spaceType: "project", spaceId: projectId, title, body, authorId: session.accountId });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
+    await proposeLivingDocumentCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }

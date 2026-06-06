@@ -22,7 +22,12 @@ export type ProposalFamily =
   | "trusted_provider_proposal"
   | "trusted_provider_revocation"
   // RFC: Private-By-Default Groups
-  | "group_visibility_proposal";
+  | "group_visibility_proposal"
+  // RFC: Governed Publishing
+  | "bulletin_creation"
+  | "publication_creation"
+  | "publication_entry_creation"
+  | "living_document_creation";
 
 const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
@@ -43,6 +48,10 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   trusted_provider_proposal: "trusted_provider",
   trusted_provider_revocation: "trusted_provider",
   group_visibility_proposal: "group_settings",
+  bulletin_creation: "publishing",
+  publication_creation: "publishing",
+  publication_entry_creation: "publishing",
+  living_document_creation: "publishing",
 };
 
 export function isProposalFamily(value: string): value is ProposalFamily {

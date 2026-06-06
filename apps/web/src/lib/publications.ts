@@ -5,6 +5,7 @@ import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
+import { proposeContentCreation } from "./content-creation-drafts";
 
 /**
  * Creates a Publication in the given Coordination Space.
@@ -212,6 +213,36 @@ export async function onPublicationEntryArchivalPetitionApproved(prisma: PrismaC
     where: { id: petition.subjectId, archivedAt: null },
     data: { archivedAt: new Date(), archivedByAccountId: accountId, archiveProposalId: petitionId, archiveReason: "approved_by_community_petition" },
   });
+}
+
+export async function proposePublicationCreation(
+  prisma: PrismaClient,
+  opts: {
+    spaceType: CoordinationSpaceType;
+    spaceId: string;
+    groupId: string;
+    createdByMembershipId?: string;
+    createdByProjectMembershipId?: string;
+    title: string;
+  },
+) {
+  return proposeContentCreation(prisma, { ...opts, contentType: "publication" });
+}
+
+export async function proposePubEntryCreation(
+  prisma: PrismaClient,
+  opts: {
+    spaceType: CoordinationSpaceType;
+    spaceId: string;
+    publicationId: string;
+    groupId: string;
+    createdByMembershipId?: string;
+    createdByProjectMembershipId?: string;
+    title?: string;
+    body: string;
+  },
+) {
+  return proposeContentCreation(prisma, { ...opts, contentType: "publication_entry" });
 }
 
 /**

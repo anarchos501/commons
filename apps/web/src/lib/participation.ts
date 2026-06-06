@@ -2,13 +2,26 @@ import type { PrismaClient } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import { endAssignmentsForMember } from "./responsibilities";
 import { applyGroupDormancyToProjectMemberships } from "./project-membership";
+import { computeAllParameterTemperatures } from "./governance-temperature";
+import { resolveParameter } from "./governance-categories";
 
-const QUIET_THRESHOLD_DAYS = 90;
-const DORMANT_THRESHOLD_DAYS = 365;
 const SEEN_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+export async function resolveParticipationThresholds(
+  prisma: PrismaClient,
+  groupId: string,
+): Promise<{ quietDays: number; dormantDays: number }> {
+  const temps = await computeAllParameterTemperatures(prisma, groupId, "participation");
+  const categoryTemp = temps.get("_") ?? 0;
+  const quietRaw = resolveParameter("participation", "quietThresholdDays", temps.get("quietThresholdDays") ?? categoryTemp);
+  const dormantRaw = resolveParameter("participation", "dormantThresholdDays", temps.get("dormantThresholdDays") ?? categoryTemp);
+  const quietDays = Math.round(quietRaw);
+  const dormantDays = Math.max(Math.round(dormantRaw), quietDays + 1);
+  return { quietDays, dormantDays };
 }
 
 /**
@@ -72,8 +85,9 @@ export async function applyParticipationTransitions(
   prisma: PrismaClient,
   groupId: string,
 ): Promise<void> {
-  const quietCutoff = daysAgo(QUIET_THRESHOLD_DAYS);
-  const dormantCutoff = daysAgo(DORMANT_THRESHOLD_DAYS);
+  const { quietDays, dormantDays } = await resolveParticipationThresholds(prisma, groupId);
+  const quietCutoff = daysAgo(quietDays);
+  const dormantCutoff = daysAgo(dormantDays);
 
   // Active → Quiet
   const toQuiet = await prisma.groupMembership.findMany({
@@ -101,7 +115,7 @@ export async function applyParticipationTransitions(
         action: "participation.quieted",
         targetType: "group_membership",
         targetId: m.id,
-        metadata: { previousStatus: "active", thresholdDays: QUIET_THRESHOLD_DAYS },
+        metadata: { previousStatus: "active", thresholdDays: quietDays },
       });
     }
   }
@@ -132,7 +146,7 @@ export async function applyParticipationTransitions(
         action: "participation.dormanted",
         targetType: "group_membership",
         targetId: m.id,
-        metadata: { previousStatus: "quiet", thresholdDays: DORMANT_THRESHOLD_DAYS },
+        metadata: { previousStatus: "quiet", thresholdDays: dormantDays },
       });
     }
     // RFC-005: remove project memberships for members now dormant in all host groups

@@ -6,10 +6,10 @@ import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { getCoverageStatus } from "../../../../lib/concerns";
-import { createBulletin, openBulletinArchivalPetition } from "../../../../lib/bulletins";
-import { createPublication, openPublicationArchivalPetition } from "../../../../lib/publications";
+import { proposeBulletinCreation, openBulletinArchivalPetition } from "../../../../lib/bulletins";
+import { proposePublicationCreation, proposePubEntryCreation, openPublicationArchivalPetition } from "../../../../lib/publications";
 import {
-  createLivingDocument,
+  proposeLivingDocumentCreation,
   draftLivingDocumentRevision,
   openRevisionPetition,
 } from "../../../../lib/living-documents";
@@ -299,7 +299,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No bulletins yet." />
           )}
           {isActive && (
-            <form action={createBulletinAction} className="space-y-3">
+            <form action={proposeBulletinCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
@@ -309,7 +309,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <span className="field-label">Body</span>
                 <textarea name="body" required rows={4} className="field-input resize-none" placeholder="Update text" />
               </label>
-              <SubmitButton variant="secondary">Post bulletin</SubmitButton>
+              <SubmitButton variant="secondary">Propose bulletin</SubmitButton>
             </form>
           )}
               </div>
@@ -329,12 +329,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {data.publications.length > 0 ? (
             <div className="mb-4 space-y-3">
               {data.publications.map((p) => (
-                <div key={p.id} className="border border-[var(--border)] p-3">
+                <div key={p.id} className="border border-[var(--border)] p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
                     <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
                     {isActive && (
                       <form action={archivePublicationAction}>
@@ -346,6 +346,24 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                       </form>
                     )}
                   </div>
+                  {isActive && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
+                      <form action={proposePubEntryCreationAction} className="mt-2 space-y-2">
+                        <input type="hidden" name="groupId" value={groupId} />
+                        <input type="hidden" name="publicationId" value={p.id} />
+                        <label className="block">
+                          <span className="field-label text-xs">Title (optional)</span>
+                          <input name="title" type="text" className="field-input text-sm" placeholder="Entry title" />
+                        </label>
+                        <label className="block">
+                          <span className="field-label text-xs">Body</span>
+                          <textarea name="body" required rows={3} className="field-input resize-none text-sm" placeholder="Entry content" />
+                        </label>
+                        <SubmitButton variant="secondary">Propose entry</SubmitButton>
+                      </form>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
@@ -353,13 +371,13 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No publications yet." />
           )}
           {isActive && (
-            <form action={createPublicationAction} className="space-y-3">
+            <form action={proposePublicationCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
                 <input name="title" type="text" required className="field-input" placeholder="e.g. Community Resources" />
               </label>
-              <SubmitButton variant="secondary">Create publication</SubmitButton>
+              <SubmitButton variant="secondary">Propose publication</SubmitButton>
             </form>
           )}
               </div>
@@ -401,7 +419,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No living documents yet." />
           )}
           {isActive && (
-            <form action={createLivingDocumentAction} className="space-y-3">
+            <form action={proposeLivingDocumentCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
@@ -411,7 +429,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <span className="field-label">Body</span>
                 <textarea name="body" required rows={4} className="field-input resize-none" placeholder="The current text of this document." />
               </label>
-              <SubmitButton variant="secondary">Create document</SubmitButton>
+              <SubmitButton variant="secondary">Propose document</SubmitButton>
             </form>
           )}
               </div>
@@ -514,6 +532,21 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
             )}
           </div>
+
+          {/* Member roster — visible to active members */}
+          {isActive && data.groupMembers.length > 0 && (
+            <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
+              <div className="space-y-1">
+                {data.groupMembers.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between text-sm">
+                    <span className="text-[var(--text)]">{m.account.displayName}</span>
+                    <span className="text-xs capitalize text-[var(--muted)]">{m.participationStatus}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Pending membership applications — visible to active members */}
           {isActive && data.pendingApplications.length > 0 && (
@@ -1159,10 +1192,10 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       orderBy: { name: "asc" },
     });
 
-    // Members for trusted provider petition form
+    // Members for trusted provider petition form and member roster
     const groupMembers = await prisma.groupMembership.findMany({
       where: { groupId, status: "active" },
-      select: { id: true, account: { select: { displayName: true } } },
+      select: { id: true, participationStatus: true, account: { select: { displayName: true } } },
       orderBy: { account: { displayName: "asc" } },
     });
 
@@ -1515,57 +1548,84 @@ async function openThreadClosurePetitionAction(formData: FormData) {
   redirect(`/groups/${groupId}?discussionThread=${threadId}&notice=${encodeURIComponent(notice)}#discussion`);
 }
 
-async function createBulletinAction(formData: FormData) {
+async function proposeBulletinCreationAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  await requireMembership(session.accountId, groupId);
+  const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await createBulletin(prisma, { spaceType: "group", spaceId: groupId, title, body, authorId: session.accountId });
+    await proposeBulletinCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#bulletins`);
+  redirect(`/groups/${groupId}?notice=bulletin_proposed#bulletins`);
 }
 
-async function createPublicationAction(formData: FormData) {
+async function proposePublicationCreationAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
-  await requireMembership(session.accountId, groupId);
+  const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await createPublication(prisma, { spaceType: "group", spaceId: groupId, title, createdByAccountId: session.accountId });
+    await proposePublicationCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#publications`);
+  redirect(`/groups/${groupId}?notice=publication_proposed#publications`);
 }
 
-async function createLivingDocumentAction(formData: FormData) {
+async function proposeLivingDocumentCreationAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
   const body = requiredString(formData, "body");
-  await requireMembership(session.accountId, groupId);
+  const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await createLivingDocument(prisma, { spaceType: "group", spaceId: groupId, title, body, authorId: session.accountId });
+    await proposeLivingDocumentCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#documents`);
+  redirect(`/groups/${groupId}?notice=document_proposed#documents`);
+}
+
+async function proposePubEntryCreationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const publicationId = requiredString(formData, "publicationId");
+  const body = requiredString(formData, "body");
+  const title = formData.get("title") as string | null;
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await proposePubEntryCreation(prisma, {
+      spaceType: "group",
+      spaceId: groupId,
+      publicationId,
+      groupId,
+      body,
+      title: title || undefined,
+      createdByMembershipId: membership.id,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=entry_proposed#publications`);
 }
 
 async function proposeLivingDocumentRevisionAction(formData: FormData) {
@@ -1909,6 +1969,8 @@ const PARAM_LABELS: Record<string, string> = {
   duration: "Emergency Duration",
   messageRetentionDays: "Message Retention",
   threadInactivityDays: "Thread Inactivity",
+  quietThresholdDays: "Quiet After",
+  dormantThresholdDays: "Dormant After",
 };
 
 function formatParamValue(param: string, value: number): string {

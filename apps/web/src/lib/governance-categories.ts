@@ -11,7 +11,9 @@ export type GovernanceCategory =
   | "discussion"
   | "contribution_category"
   | "trusted_provider"
-  | "group_settings";
+  | "group_settings"
+  | "publishing"
+  | "participation";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -27,6 +29,8 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "contribution_category",
   "trusted_provider",
   "group_settings",
+  "publishing",
+  "participation",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -110,6 +114,16 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     threshold: { anchors: [0.95, 0.50, 0.05] },
     petitionDuration: { anchors: [7, 3, 1] },
   },
+  publishing: {
+    threshold: { anchors: [0.95, 0.50, 0.05], min: 0.1, max: 1.0 },
+    petitionDuration: { anchors: [7, 3, 1], min: 1, max: 30 },
+  },
+  participation: {
+    threshold: { anchors: [0.95, 0.50, 0.05], min: 0.1, max: 1.0 },
+    petitionDuration: { anchors: [7, 3, 1], min: 1, max: 30 },
+    quietThresholdDays: { anchors: [30, 90, 180], min: 14, max: 365 },
+    dormantThresholdDays: { anchors: [180, 365, 730], min: 90, max: 1825 },
+  },
 };
 
 export function isGovernanceParameter(category: GovernanceCategory, parameter: string): boolean {
@@ -123,6 +137,8 @@ export type ResolvedCategoryParams = {
   duration?: number;
   messageRetentionDays?: number;
   threadInactivityDays?: number;
+  quietThresholdDays?: number;
+  dormantThresholdDays?: number;
 };
 
 // Piecewise linear interpolation between three anchor points.

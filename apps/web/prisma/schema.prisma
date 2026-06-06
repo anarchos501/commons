@@ -286,6 +286,13 @@ enum ConcernProposalStatus {
   superseded
 }
 
+enum ContentCreationType {
+  bulletin
+  publication
+  publication_entry
+  living_document
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -409,6 +416,7 @@ model Group {
   trustedProviderRevocations     TrustedProviderRevocationRequest[]
   trustedProviderStatuses        TrustedProviderStatus[]
   inviteTokens                   GroupInviteToken[]
+  contentCreationDrafts          ContentCreationDraft[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -1372,4 +1380,26 @@ model TrustedProviderStatus {
   @@index([categoryId])
   @@index([groupId])
   @@index([status])
+}
+
+model ContentCreationDraft {
+  id                           String                @id @default(cuid())
+  contentType                  ContentCreationType
+  groupId                      String
+  spaceType                    CoordinationSpaceType
+  spaceId                      String
+  publicationId                String?
+  authorAccountId              String
+  createdByMembershipId        String?
+  createdByProjectMembershipId String?
+  title                        String?
+  body                         String?
+  createdAt                    DateTime              @default(now())
+  appliedAt                    DateTime?
+  createdContentId             String?
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([appliedAt])
 }

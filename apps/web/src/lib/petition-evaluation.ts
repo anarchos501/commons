@@ -20,6 +20,7 @@ import { applyGroupVisibilityFromPetition } from "./group-settings";
 import { createProjectFromPetition } from "./projects";
 import { onBulletinArchivalPetitionApproved } from "./bulletins";
 import { onPublicationArchivalPetitionApproved, onPublicationEntryArchivalPetitionApproved } from "./publications";
+import { applyContentCreationDraft } from "./content-creation-drafts";
 
 export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string) {
   const result = await evaluatePetition(prisma, petitionId);
@@ -61,6 +62,14 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
     await onPublicationEntryArchivalPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(prisma, petitionId);
+  } else if (petition.subjectType === "bulletin_creation") {
+    await applyContentCreationDraft(prisma, petitionId, "bulletin_creation");
+  } else if (petition.subjectType === "publication_creation") {
+    await applyContentCreationDraft(prisma, petitionId, "publication_creation");
+  } else if (petition.subjectType === "publication_entry_creation") {
+    await applyContentCreationDraft(prisma, petitionId, "publication_entry_creation");
+  } else if (petition.subjectType === "living_document_creation") {
+    await applyContentCreationDraft(prisma, petitionId, "living_document_creation");
   }
 }
 
@@ -156,6 +165,21 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return group ? `Make "${group.name}" publicly visible` : subjectId;
   }
 
+  if (
+    subjectType === "bulletin_creation" ||
+    subjectType === "publication_creation" ||
+    subjectType === "publication_entry_creation" ||
+    subjectType === "living_document_creation"
+  ) {
+    const draft = await prisma.contentCreationDraft.findUnique({
+      where: { id: subjectId },
+      select: { contentType: true, title: true },
+    });
+    if (!draft) return subjectId;
+    const typeLabel = draft.contentType.replace(/_/g, " ");
+    return `Propose ${typeLabel}: ${draft.title ?? "(untitled)"}`;
+  }
+
   return subjectId;
 }
 
@@ -190,6 +214,10 @@ export function proposalFamilyLabel(subjectType: string) {
     case "trusted_provider_proposal": return "Trusted provider recognition";
     case "trusted_provider_revocation": return "Trusted provider revocation";
     case "group_visibility_proposal": return "Group visibility proposal";
+    case "bulletin_creation": return "Bulletin Creation";
+    case "publication_creation": return "Publication Creation";
+    case "publication_entry_creation": return "Publication Entry";
+    case "living_document_creation": return "Living Document Creation";
     default: return subjectType.replace(/_/g, " ");
   }
 }
@@ -209,6 +237,8 @@ export function governanceCategoryLabel(category: string) {
     case "contribution_category": return "Contribution Categories";
     case "trusted_provider": return "Trusted Providers";
     case "group_settings": return "Group Settings";
+    case "publishing": return "Publishing";
+    case "participation": return "Participation";
     default: return category.replace(/_/g, " ");
   }
 }

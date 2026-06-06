@@ -5,6 +5,7 @@ import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
+import { proposeContentCreation } from "./content-creation-drafts";
 
 /**
  * Creates a LivingDocument and seeds its first revision in a single transaction.
@@ -328,4 +329,19 @@ export async function getLivingDocumentHistory(prisma: PrismaClient, documentId:
     where: { livingDocumentId: documentId },
     orderBy: { createdAt: "desc" },
   });
+}
+
+export async function proposeLivingDocumentCreation(
+  prisma: PrismaClient,
+  opts: {
+    spaceType: CoordinationSpaceType;
+    spaceId: string;
+    groupId: string;
+    createdByMembershipId?: string;
+    createdByProjectMembershipId?: string;
+    title: string;
+    body: string;
+  },
+) {
+  return proposeContentCreation(prisma, { ...opts, contentType: "living_document" });
 }

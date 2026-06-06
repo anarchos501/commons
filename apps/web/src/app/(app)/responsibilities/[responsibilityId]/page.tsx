@@ -2,8 +2,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
-import { createBulletin } from "../../../../lib/bulletins";
-import { createLivingDocument, draftLivingDocumentRevision, openRevisionPetition } from "../../../../lib/living-documents";
+import { proposeBulletinCreation } from "../../../../lib/bulletins";
+import { proposePublicationCreation, proposePubEntryCreation } from "../../../../lib/publications";
+import { proposeLivingDocumentCreation, draftLivingDocumentRevision, openRevisionPetition } from "../../../../lib/living-documents";
 import { createDiscussionThread, listDiscussionMessages, listDiscussionThreads, postDiscussionMessage } from "../../../../lib/discussions";
 import { resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { requiredString } from "../../../../lib/support-form";
@@ -57,9 +58,12 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
             <div className="mt-4 space-y-1">
               <p className="text-xs font-medium text-[var(--muted)]">Current holders</p>
               {data.holders.map((h) => (
-                <div key={h.membershipId} className="flex items-center justify-between text-sm text-[var(--soft-text)]">
+                <div key={h.membershipId} className="flex items-start justify-between text-sm text-[var(--soft-text)]">
                   <span>{h.displayName}</span>
-                  <span className="text-xs text-[var(--muted)]">expires {formatDate(h.expiresAt)}</span>
+                  <div className="text-right">
+                    <p className="text-xs capitalize text-[var(--muted)]">{h.participationStatus}</p>
+                    <p className="text-xs text-[var(--muted)]">expires {formatDate(h.expiresAt)}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -184,7 +188,52 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
                     <label className="block"><span className="field-label">Body</span><textarea name="body" required rows={3} className="field-input resize-none" /></label>
-                    <SubmitButton variant="secondary">Post bulletin</SubmitButton>
+                    <SubmitButton variant="secondary">Propose bulletin</SubmitButton>
+                  </form>
+                )}
+              </div>
+            </details>
+
+            <details id="publications" className="group/lib">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
+                <span>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Knowledge collections</span>
+                  <span className="mt-1 block text-xl font-bold tracking-tight">Publications</span>
+                </span>
+                <span className="text-sm text-[var(--muted)] select-none group-open/lib:hidden">Expand</span>
+                <span className="hidden text-sm text-[var(--muted)] select-none group-open/lib:inline">Collapse</span>
+              </summary>
+              <div className="px-5 sm:px-6 pb-5 space-y-3">
+                {data.publications.length > 0 ? (
+                  <div className="space-y-3">
+                    {data.publications.map((p) => (
+                      <div key={p.id} className="border border-[var(--border)] p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium text-[var(--text)]">{p.title}</p>
+                          <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
+                        </div>
+                        <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
+                        {isActive && (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
+                            <form action={proposePubEntryAction} className="mt-2 space-y-2">
+                              <input type="hidden" name="responsibilityId" value={responsibilityId} />
+                              <input type="hidden" name="publicationId" value={p.id} />
+                              <label className="block"><span className="field-label text-xs">Title (optional)</span><input name="title" type="text" className="field-input text-sm" /></label>
+                              <label className="block"><span className="field-label text-xs">Body</span><textarea name="body" required rows={3} className="field-input resize-none text-sm" /></label>
+                              <SubmitButton variant="secondary">Propose entry</SubmitButton>
+                            </form>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : <EmptyState text="No publications yet." />}
+                {isActive && (
+                  <form action={createPublicationAction} className="space-y-3">
+                    <input type="hidden" name="responsibilityId" value={responsibilityId} />
+                    <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
+                    <SubmitButton variant="secondary">Propose publication</SubmitButton>
                   </form>
                 )}
               </div>
@@ -228,7 +277,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
                     <label className="block"><span className="field-label">Body</span><textarea name="body" required rows={4} className="field-input resize-none" /></label>
-                    <SubmitButton variant="secondary">Create document</SubmitButton>
+                    <SubmitButton variant="secondary">Propose document</SubmitButton>
                   </form>
                 )}
               </div>
@@ -257,11 +306,19 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
     });
     if (!currentMembership || currentMembership.status !== "active") redirect("/dashboard");
 
-    const [bulletins, livingDocuments, assignments] = await Promise.all([
+    const [bulletins, publications, livingDocuments, assignments] = await Promise.all([
       prisma.bulletin.findMany({
         where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
         include: { author: { select: { displayName: true } } },
         orderBy: { publishedAt: "desc" },
+      }),
+      prisma.publication.findMany({
+        where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
+        include: {
+          creator: { select: { displayName: true } },
+          _count: { select: { entries: { where: { archivedAt: null } } } },
+        },
+        orderBy: { createdAt: "desc" },
       }),
       prisma.livingDocument.findMany({
         where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
@@ -269,13 +326,14 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
       }),
       prisma.responsibilityAssignment.findMany({
         where: { responsibility: { id: responsibilityId }, endedAt: null, expiresAt: { gt: new Date() } },
-        include: { membership: { include: { account: { select: { displayName: true } } } } },
+        include: { membership: { select: { accountId: true, participationStatus: true, account: { select: { displayName: true } } } } },
       }),
     ]);
 
     const holders = assignments.map((a) => ({
       membershipId: a.membershipId,
       displayName: a.membership.account.displayName,
+      participationStatus: a.membership.participationStatus,
       expiresAt: a.expiresAt,
     }));
 
@@ -296,6 +354,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
       holders,
       isHolder,
       bulletins,
+      publications,
       livingDocuments,
       discussionThreads,
       selectedThread,
@@ -391,7 +450,45 @@ async function createBulletinAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    await createBulletin(prisma, { spaceType: "responsibility", spaceId: responsibilityId, title, body, authorId: session.accountId });
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
+    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    await proposeBulletinCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/responsibilities/${responsibilityId}`);
+}
+
+async function createPublicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const responsibilityId = formData.get("responsibilityId") as string;
+  const title = requiredString(formData, "title");
+  const prisma = createPrismaClient();
+  try {
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
+    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    await proposePublicationCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/responsibilities/${responsibilityId}`);
+}
+
+async function proposePubEntryAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const responsibilityId = formData.get("responsibilityId") as string;
+  const publicationId = requiredString(formData, "publicationId");
+  const body = requiredString(formData, "body");
+  const title = formData.get("title") as string | null;
+  const prisma = createPrismaClient();
+  try {
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
+    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    await proposePubEntryCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, publicationId, groupId: responsibility.groupId, body, title: title || undefined, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -407,7 +504,9 @@ async function createDocumentAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    await createLivingDocument(prisma, { spaceType: "responsibility", spaceId: responsibilityId, title, body, authorId: session.accountId });
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
+    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    await proposeLivingDocumentCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }

@@ -2,6 +2,7 @@ import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
+import { proposeContentCreation } from "./content-creation-drafts";
 
 /**
  * Creates a Bulletin in the given Coordination Space.
@@ -142,4 +143,19 @@ export async function listBulletins(
     },
     orderBy: { publishedAt: "desc" },
   });
+}
+
+export async function proposeBulletinCreation(
+  prisma: PrismaClient,
+  opts: {
+    spaceType: CoordinationSpaceType;
+    spaceId: string;
+    groupId: string;
+    createdByMembershipId?: string;
+    createdByProjectMembershipId?: string;
+    title: string;
+    body: string;
+  },
+) {
+  return proposeContentCreation(prisma, { ...opts, contentType: "bulletin" });
 }

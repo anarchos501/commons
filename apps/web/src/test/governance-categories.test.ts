@@ -9,8 +9,8 @@ import {
   validateGovernanceSnapshot,
 } from "../lib/governance-categories";
 
-test("all 13 categories are registered", () => {
-  assert.equal(GOVERNANCE_CATEGORIES.length, 13);
+test("all 15 categories are registered", () => {
+  assert.equal(GOVERNANCE_CATEGORIES.length, 15);
   for (const category of GOVERNANCE_CATEGORIES) {
     assert.ok(CATEGORY_REGISTRY[category], `${category} missing from registry`);
   }
