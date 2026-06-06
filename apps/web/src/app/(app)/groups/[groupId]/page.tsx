@@ -63,6 +63,8 @@ import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
 import { GroupContextSync } from "../../../../components/shared/GroupContextSync";
 import { CopyInviteLinkButton } from "../../../../components/shared/CopyInviteLinkButton";
 import { ClearPendingInviteToken } from "../../../../components/shared/ClearPendingInviteToken";
+import { ActivityFilter } from "../../../../components/shared/ActivityFilter";
+import { GovernanceSignalForm } from "../../../../components/shared/GovernanceSignalForm";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +75,11 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   const sp = await searchParams;
   const notice = typeof sp.notice === "string" ? sp.notice : null;
   const selectedThreadId = typeof sp.discussionThread === "string" ? sp.discussionThread : null;
-  const activityFilter = typeof sp.activityFilter === "string" ? sp.activityFilter : "month";
+  const VALID_ACTIVITY_FILTERS = ["week", "month", "3month", "6month", "all"];
+  const activityFilter =
+    typeof sp.activityFilter === "string" && VALID_ACTIVITY_FILTERS.includes(sp.activityFilter)
+      ? sp.activityFilter
+      : "month";
 
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -138,26 +144,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <span className="hidden text-[var(--muted)] group-open/activity:inline">▾</span>
             </summary>
             <div className="mt-3">
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {[
-                  { value: "week", label: "1 week" },
-                  { value: "month", label: "1 month" },
-                  { value: "3month", label: "3 months" },
-                  { value: "6month", label: "6 months" },
-                  { value: "all", label: "All time" },
-                ].map((opt) => (
-                  <a
-                    key={opt.value}
-                    href={`/groups/${groupId}?activityFilter=${opt.value}#overview`}
-                    className={`border px-2 py-0.5 text-xs font-medium transition focus:outline-none focus:ring-1 focus:ring-[var(--accent)] ${
-                      activityFilter === opt.value
-                        ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
-                        : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
-                    }`}
-                  >
-                    {opt.label}
-                  </a>
-                ))}
+              <div className="mb-3">
+                <ActivityFilter currentFilter={activityFilter} />
               </div>
               {data.groupContributions.length > 0 ? (
                 <div className="space-y-1.5">
@@ -920,32 +908,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   {setting.parameters.map((p) => `${PARAM_LABELS[p.name] ?? p.name}: ${formatParamValue(p.name, p.value)}`).join(" · ")}
                 </p>
-                <form action={updateGovernanceSignalAction} className="mt-3">
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <input type="hidden" name="category" value={setting.category} />
-                  <input type="hidden" name="parameter" value="_" />
-                  <div className="flex gap-2 flex-wrap">
-                    {([
-                      { value: "-1", label: "More Careful" },
-                      { value: "0", label: "Neutral" },
-                      { value: "1", label: "Easier To Act" },
-                    ] as const).map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="submit"
-                        name="signal"
-                        value={opt.value}
-                        className={`border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
-                          setting.categorySignal === Number(opt.value)
-                            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
-                            : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </form>
+                <div className="mt-3">
+                  <GovernanceSignalForm
+                    action={updateGovernanceSignalAction}
+                    groupId={groupId}
+                    category={setting.category}
+                    parameter="_"
+                    currentSignal={setting.categorySignal}
+                    size="md"
+                  />
+                </div>
                 <details className="mt-2">
                   <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--text)] select-none">
                     Characteristics
@@ -957,30 +929,13 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                           {PARAM_LABELS[parameter.name] ?? parameter.name} · {formatParamValue(parameter.name, parameter.value)}
                           {!parameter.hasOwnSignal && setting.categorySignal !== 0 ? " · using bulk vote" : ""}
                         </span>
-                        <form action={updateGovernanceSignalAction} className="flex gap-1.5">
-                          <input type="hidden" name="groupId" value={groupId} />
-                          <input type="hidden" name="category" value={setting.category} />
-                          <input type="hidden" name="parameter" value={parameter.name} />
-                          {([
-                            { value: "-1", label: "More Careful" },
-                            { value: "0", label: "Neutral" },
-                            { value: "1", label: "Easier To Act" },
-                          ] as const).map((opt) => (
-                            <button
-                              key={opt.value}
-                              type="submit"
-                              name="signal"
-                              value={opt.value}
-                              className={`border px-2 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] ${
-                                parameter.signal === Number(opt.value)
-                                  ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
-                                  : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </form>
+                        <GovernanceSignalForm
+                          action={updateGovernanceSignalAction}
+                          groupId={groupId}
+                          category={setting.category}
+                          parameter={parameter.name}
+                          currentSignal={parameter.signal}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1873,7 +1828,10 @@ async function proposeTrustedProviderRevocationAction(formData: FormData) {
   redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
 }
 
-async function updateGovernanceSignalAction(formData: FormData) {
+async function updateGovernanceSignalAction(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1885,17 +1843,15 @@ async function updateGovernanceSignalAction(formData: FormData) {
   const signal = signalRaw === "-1" ? -1 : signalRaw === "1" ? 1 : 0;
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice: string | null = null;
+  let error: string | null = null;
   try {
     const result = await upsertGovernanceSignal(prisma, { membershipId: membership.id, groupId, category, parameter, signal });
-    if (!result.ok) {
-      notice = governanceSignalFailureNotice(result.reason);
-    }
+    if (!result.ok) error = governanceSignalFailureNotice(result.reason);
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(notice ? `/groups/${groupId}?notice=${encodeURIComponent(notice)}#governance` : `/groups/${groupId}#governance`);
+  return error;
 }
 
 // ── Local Components ──────────────────────────────────────────────────────────
