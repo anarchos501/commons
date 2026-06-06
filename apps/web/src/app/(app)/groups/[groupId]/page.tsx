@@ -61,10 +61,13 @@ import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
 import { GroupContextSync } from "../../../../components/shared/GroupContextSync";
-import { CopyInviteLinkButton } from "../../../../components/shared/CopyInviteLinkButton";
-import { ClearPendingInviteToken } from "../../../../components/shared/ClearPendingInviteToken";
 import { ActivityFilter } from "../../../../components/shared/ActivityFilter";
 import { GovernanceSignalForm } from "../../../../components/shared/GovernanceSignalForm";
+import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
+import { CreateThreadForm } from "../../../../components/shared/CreateThreadForm";
+import { InviteLinkSection } from "../../../../components/shared/InviteLinkSection";
+import { ThreadList } from "../../../../components/shared/ThreadList";
+import { type FormState, type ThreadFormState, type InviteFormState } from "../../../../components/shared/form-state";
 
 export const dynamic = "force-dynamic";
 
@@ -84,21 +87,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   const session = await getSession();
   if (!session.accountId) redirect("/login");
 
-  // One-time invite URL: read raw token from session on ?invite=new.
-  // Clearing happens via route handler after render; Server Components cannot write cookies.
-  let oneTimeInviteUrl: string | null = null;
-  if (sp.invite === "new") {
-    const pending = session.pendingInviteToken;
-    if (pending && pending.groupId === groupId) {
-      const hdrList = await headers();
-      const host = hdrList.get("host") ?? "localhost:3000";
-      const proto =
-        process.env.NODE_ENV === "production"
-          ? (hdrList.get("x-forwarded-proto") ?? "https")
-          : "http";
-      oneTimeInviteUrl = `${proto}://${host}/invite/${pending.rawToken}`;
-    }
-  }
 
   const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter);
 
@@ -119,6 +107,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl">
       <GroupContextSync syncAction={syncGroupContext} />
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
@@ -167,24 +156,15 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`group:${groupId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
           {data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
-              <div className="space-y-2">
-                {data.discussionThreads.map((thread) => (
-                  <a
-                    key={thread.id}
-                    href={`/groups/${groupId}?discussionThread=${thread.id}#discussion`}
-                    className={`block border p-3 text-sm transition hover:bg-[var(--hover)] ${
-                      data.selectedThread?.id === thread.id
-                        ? "border-[var(--accent)] bg-[var(--subtle)]"
-                        : "border-[var(--border)]"
-                    }`}
-                  >
-                    <span className="font-medium text-[var(--text)]">{thread.title}</span>
-                    <span className="mt-1 block text-xs text-[var(--muted)]">
-                      {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"} &middot; {formatRelativeDate(thread.lastActivityAt)}
-                    </span>
-                  </a>
-                ))}
-              </div>
+              <ThreadList
+                threads={data.discussionThreads.map((thread) => ({
+                  id: thread.id,
+                  title: thread.title,
+                  messageCount: thread.messageCount,
+                  lastActivityLabel: formatRelativeDate(thread.lastActivityAt),
+                }))}
+                selectedThreadId={data.selectedThread?.id ?? null}
+              />
               <div className="border border-[var(--border)] p-3">
                 {data.selectedThread ? (
                   <>
@@ -194,11 +174,11 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         <p className="text-xs text-[var(--muted)]">Messages expire automatically.</p>
                       </div>
                       {isActive && (
-                        <form action={openThreadClosurePetitionAction}>
+                        <FormWithNotice action={openThreadClosurePetitionAction}>
                           <input type="hidden" name="groupId" value={groupId} />
                           <input type="hidden" name="threadId" value={data.selectedThread.id} />
                           <SubmitButton variant="secondary">Propose closure</SubmitButton>
-                        </form>
+                        </FormWithNotice>
                       )}
                     </div>
                     {data.discussionMessages.length > 0 ? (
@@ -235,14 +215,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No active discussion threads yet." />
           )}
           {isActive && (
-            <form action={createDiscussionThreadAction} className="space-y-3">
-              <input type="hidden" name="groupId" value={groupId} />
-              <label className="block">
-                <span className="field-label">New thread</span>
-                <input name="title" type="text" required className="field-input" placeholder="A focused coordination topic" />
-              </label>
-              <SubmitButton variant="secondary">Create thread</SubmitButton>
-            </form>
+            <CreateThreadForm action={createDiscussionThreadAction} groupId={groupId} />
           )}
         </CollapsibleSection>
         {/* ══ Library ═══════════════════════════════════════════════════ */}
@@ -287,7 +260,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No bulletins yet." />
           )}
           {isActive && (
-            <form action={proposeBulletinCreationAction} className="space-y-3">
+            <FormWithNotice action={proposeBulletinCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
@@ -298,7 +271,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <textarea name="body" required rows={4} className="field-input resize-none" placeholder="Update text" />
               </label>
               <SubmitButton variant="secondary">Propose bulletin</SubmitButton>
-            </form>
+            </FormWithNotice>
           )}
               </div>
             </details>
@@ -337,7 +310,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   {isActive && (
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
-                      <form action={proposePubEntryCreationAction} className="mt-2 space-y-2">
+                      <FormWithNotice action={proposePubEntryCreationAction} className="mt-2 space-y-2">
                         <input type="hidden" name="groupId" value={groupId} />
                         <input type="hidden" name="publicationId" value={p.id} />
                         <label className="block">
@@ -349,7 +322,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                           <textarea name="body" required rows={3} className="field-input resize-none text-sm" placeholder="Entry content" />
                         </label>
                         <SubmitButton variant="secondary">Propose entry</SubmitButton>
-                      </form>
+                      </FormWithNotice>
                     </details>
                   )}
                 </div>
@@ -359,14 +332,14 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No publications yet." />
           )}
           {isActive && (
-            <form action={proposePublicationCreationAction} className="space-y-3">
+            <FormWithNotice action={proposePublicationCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
                 <input name="title" type="text" required className="field-input" placeholder="e.g. Community Resources" />
               </label>
               <SubmitButton variant="secondary">Propose publication</SubmitButton>
-            </form>
+            </FormWithNotice>
           )}
               </div>
             </details>
@@ -407,7 +380,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <EmptyState text="No living documents yet." />
           )}
           {isActive && (
-            <form action={proposeLivingDocumentCreationAction} className="space-y-3">
+            <FormWithNotice action={proposeLivingDocumentCreationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <label className="block">
                 <span className="field-label">Title</span>
@@ -418,7 +391,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <textarea name="body" required rows={4} className="field-input resize-none" placeholder="The current text of this document." />
               </label>
               <SubmitButton variant="secondary">Propose document</SubmitButton>
-            </form>
+            </FormWithNotice>
           )}
               </div>
             </details>
@@ -570,48 +543,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           {isActive && (
             <div className="mt-4 border-t border-[var(--border)] pt-4">
               <p className="text-xs font-medium text-[var(--muted)] mb-3">Invite link</p>
-              {oneTimeInviteUrl ? (
-                <div className="space-y-2">
-                  <ClearPendingInviteToken groupId={groupId} />
-                  <p className="text-xs text-[var(--soft-text)]">Copy this link now — it will not be shown again.</p>
-                  <div className="flex gap-2">
-                    <input
-                      readOnly
-                      value={oneTimeInviteUrl}
-                      className="flex-1 field-input text-xs font-mono"
-                    />
-                    <CopyInviteLinkButton url={oneTimeInviteUrl} />
-                  </div>
-                  <form action={generateInviteLinkAction}>
-                    <input type="hidden" name="groupId" value={groupId} />
-                    <SubmitButton variant="secondary">Regenerate</SubmitButton>
-                  </form>
-                </div>
-              ) : data.invitePreview ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-[var(--soft-text)]">
-                    Active invite: <span className="font-mono">{data.invitePreview.tokenPreview}…</span>
-                    {" "}· Expires {formatRelativeDate(data.invitePreview.expiresAt)}
-                  </p>
-                  <div className="flex gap-2 flex-wrap">
-                    <form action={generateInviteLinkAction}>
-                      <input type="hidden" name="groupId" value={groupId} />
-                      <SubmitButton variant="secondary">Regenerate</SubmitButton>
-                    </form>
-                    <form action={revokeInviteLinkAction}>
-                      <input type="hidden" name="groupId" value={groupId} />
-                      <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--soft-text)] transition">
-                        Revoke
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              ) : (
-                <form action={generateInviteLinkAction}>
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <SubmitButton variant="secondary">Generate Invite Link</SubmitButton>
-                </form>
-              )}
+              <InviteLinkSection
+                groupId={groupId}
+                invitePreview={data.invitePreview}
+                generateAction={generateInviteLinkAction}
+                revokeAction={revokeInviteLinkAction}
+              />
             </div>
           )}
         </CollapsibleSection>
@@ -733,11 +670,11 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         {cat.description && <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{cat.description}</p>}
                       </div>
                       {isActive && (
-                        <form action={proposeCategoryArchivalAction} className="shrink-0">
+                        <FormWithNotice action={proposeCategoryArchivalAction} className="shrink-0">
                           <input type="hidden" name="groupId" value={groupId} />
                           <input type="hidden" name="categoryId" value={cat.id} />
                           <SubmitButton variant="secondary">Archive</SubmitButton>
-                        </form>
+                        </FormWithNotice>
                       )}
                     </div>
                     {cat.trustedProviders.length > 0 && (
@@ -750,12 +687,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                                 {tp.memberDisplayName} — {cat.offeringEntityName ? formatTrustedByLabel(tp.offeringEntityType, cat.offeringEntityName) : ""}
                               </span>
                               {isActive && (
-                                <form action={proposeTrustedProviderRevocationAction}>
+                                <FormWithNotice action={proposeTrustedProviderRevocationAction}>
                                   <input type="hidden" name="groupId" value={groupId} />
                                   <input type="hidden" name="targetMembershipId" value={tp.membershipId} />
                                   <input type="hidden" name="statusIds" value={tp.id} />
                                   <SubmitButton variant="secondary">Revoke</SubmitButton>
-                                </form>
+                                </FormWithNotice>
                               )}
                             </div>
                           ))}
@@ -765,7 +702,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     {isActive && data.groupMembers.length > 0 && (
                       <details className="mt-3">
                         <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose trusted provider</summary>
-                        <form action={proposeTrustedProviderStatusAction} className="mt-2 space-y-2">
+                        <FormWithNotice action={proposeTrustedProviderStatusAction} className="mt-2 space-y-2">
                           <input type="hidden" name="groupId" value={groupId} />
                           <input type="hidden" name="categoryId" value={cat.id} />
                           <select name="targetMembershipId" required className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
@@ -775,7 +712,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                             ))}
                           </select>
                           <SubmitButton variant="secondary">Open petition</SubmitButton>
-                        </form>
+                        </FormWithNotice>
                       </details>
                     )}
                   </div>
@@ -787,7 +724,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             {isActive && (
               <details>
                 <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new category</summary>
-                <form action={proposeCategoryAction} className="mt-3 space-y-3">
+                <FormWithNotice action={proposeCategoryAction} className="mt-3 space-y-3">
                   <input type="hidden" name="groupId" value={groupId} />
                   <div>
                     <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Name</label>
@@ -812,7 +749,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     </p>
                   )}
                   <SubmitButton>Open petition</SubmitButton>
-                </form>
+                </FormWithNotice>
               </details>
             )}
           </div>
@@ -838,12 +775,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     </p>
                   </div>
                   {isActive && (
-                    <form action={proposeTrustedProviderRevocationAction}>
+                    <FormWithNotice action={proposeTrustedProviderRevocationAction}>
                       <input type="hidden" name="groupId" value={groupId} />
                       <input type="hidden" name="targetMembershipId" value={tp.membershipId} />
                       <input type="hidden" name="statusIds" value={tp.id} />
                       <SubmitButton variant="secondary">Revoke</SubmitButton>
-                    </form>
+                    </FormWithNotice>
                   )}
                 </div>
               ))}
@@ -948,6 +885,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
         </div>{/* end Governance + Accountability */}
 
+      </div>
       </div>
     </main>
   );
@@ -1235,15 +1173,9 @@ async function declareEmergencyAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = formData.get("groupId") as string;
+  const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true, status: true, participationStatus: true },
-    });
-    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
-      redirect(`/groups/${groupId}`);
-    }
     await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -1256,15 +1188,9 @@ async function proposeGroupVisibilityAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = formData.get("groupId") as string;
+  const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true, status: true, participationStatus: true },
-    });
-    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
-      redirect(`/groups/${groupId}`);
-    }
     await proposeGroupVisibility(prisma, { groupId, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -1380,7 +1306,10 @@ async function dismissApplicationAction(formData: FormData) {
   revalidatePath(`/groups/${groupId}`);
 }
 
-async function generateInviteLinkAction(formData: FormData) {
+async function generateInviteLinkAction(
+  _prev: InviteFormState,
+  formData: FormData,
+): Promise<InviteFormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1389,17 +1318,22 @@ async function generateInviteLinkAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     const result = await generateGroupInviteToken(prisma, { groupId, createdByMembershipId: membership.id });
-    if (result.ok) {
-      session.pendingInviteToken = { groupId, rawToken: result.rawToken };
-      await session.save();
-    }
+    if (!result.ok) return { kind: "error", message: "Could not generate invite link." };
+    revalidatePath(`/groups/${groupId}`);
+    const hdrList = await headers();
+    const host = hdrList.get("host") ?? "localhost:3000";
+    const proto = process.env.NODE_ENV === "production"
+      ? (hdrList.get("x-forwarded-proto") ?? "https") : "http";
+    return { kind: "success", message: "", inviteUrl: `${proto}://${host}/invite/${result.rawToken}` };
   } finally {
     await prisma.$disconnect();
   }
-  redirect(`/groups/${groupId}?invite=new#members`);
 }
 
-async function revokeInviteLinkAction(formData: FormData) {
+async function revokeInviteLinkAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1407,12 +1341,13 @@ async function revokeInviteLinkAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await revokeAllGroupInviteTokens(prisma, { groupId, membershipId: membership.id });
+    const result = await revokeAllGroupInviteTokens(prisma, { groupId, membershipId: membership.id });
+    if (!result.ok) return { kind: "error", message: "You are not eligible to revoke this invite link." };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#members`);
+  return { kind: "success", message: "Invite link revoked." };
 }
 
 // Full active participation required — for content creation, petitions, governance signals.
@@ -1441,7 +1376,10 @@ async function requireGroupMembershipStatus(accountId: string, groupId: string) 
   return membership;
 }
 
-async function createDiscussionThreadAction(formData: FormData) {
+async function createDiscussionThreadAction(
+  _prev: ThreadFormState,
+  formData: FormData,
+): Promise<ThreadFormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1463,7 +1401,7 @@ async function createDiscussionThreadAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?discussionThread=${threadId}#discussion`);
+  return { kind: "success", message: "", threadId };
 }
 
 async function postDiscussionMessageAction(formData: FormData) {
@@ -1481,10 +1419,12 @@ async function postDiscussionMessageAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?discussionThread=${threadId}#discussion`);
 }
 
-async function openThreadClosurePetitionAction(formData: FormData) {
+async function openThreadClosurePetitionAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1492,18 +1432,20 @@ async function openThreadClosurePetitionAction(formData: FormData) {
   const threadId = requiredString(formData, "threadId");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice = "Thread closure petition opened.";
   try {
     const result = await openThreadClosurePetition(prisma, { threadId, groupId, createdByMembershipId: membership.id });
-    if (!result.ok) notice = discussionPetitionFailureNotice(result.reason);
+    if (!result.ok) return { kind: "error", message: discussionPetitionFailureNotice(result.reason) };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?discussionThread=${threadId}&notice=${encodeURIComponent(notice)}#discussion`);
+  return { kind: "success", message: "Closure petition opened." };
 }
 
-async function proposeBulletinCreationAction(formData: FormData) {
+async function proposeBulletinCreationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1513,15 +1455,19 @@ async function proposeBulletinCreationAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await proposeBulletinCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
+    const result = await proposeBulletinCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
+    if (!result.ok) return { kind: "error", message: contentProposalFailureMessage(result.reason) };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=bulletin_proposed#bulletins`);
+  return { kind: "success", message: "Bulletin proposed — check Petitions." };
 }
 
-async function proposePublicationCreationAction(formData: FormData) {
+async function proposePublicationCreationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1530,15 +1476,19 @@ async function proposePublicationCreationAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await proposePublicationCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, createdByMembershipId: membership.id });
+    const result = await proposePublicationCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, createdByMembershipId: membership.id });
+    if (!result.ok) return { kind: "error", message: contentProposalFailureMessage(result.reason) };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=publication_proposed#publications`);
+  return { kind: "success", message: "Publication proposed — check Petitions." };
 }
 
-async function proposeLivingDocumentCreationAction(formData: FormData) {
+async function proposeLivingDocumentCreationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1548,15 +1498,19 @@ async function proposeLivingDocumentCreationAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await proposeLivingDocumentCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
+    const result = await proposeLivingDocumentCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
+    if (!result.ok) return { kind: "error", message: contentProposalFailureMessage(result.reason) };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=document_proposed#documents`);
+  return { kind: "success", message: "Document proposed — check Petitions." };
 }
 
-async function proposePubEntryCreationAction(formData: FormData) {
+async function proposePubEntryCreationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1567,7 +1521,7 @@ async function proposePubEntryCreationAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await proposePubEntryCreation(prisma, {
+    const result = await proposePubEntryCreation(prisma, {
       spaceType: "group",
       spaceId: groupId,
       publicationId,
@@ -1576,11 +1530,12 @@ async function proposePubEntryCreationAction(formData: FormData) {
       title: title || undefined,
       createdByMembershipId: membership.id,
     });
+    if (!result.ok) return { kind: "error", message: contentProposalFailureMessage(result.reason) };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=entry_proposed#publications`);
+  return { kind: "success", message: "Entry proposed — check Petitions." };
 }
 
 async function proposeLivingDocumentRevisionAction(formData: FormData) {
@@ -1599,7 +1554,6 @@ async function proposeLivingDocumentRevisionAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#documents`);
 }
 
 async function submitConcernAction(formData: FormData) {
@@ -1620,7 +1574,6 @@ async function submitConcernAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#concerns`);
 }
 
 async function supportPetitionAction(formData: FormData) {
@@ -1637,7 +1590,6 @@ async function supportPetitionAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#petitions`);
 }
 
 async function withdrawPetitionSupportAction(formData: FormData) {
@@ -1654,7 +1606,6 @@ async function withdrawPetitionSupportAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#petitions`);
 }
 
 async function evaluatePetitionAction(formData: FormData) {
@@ -1670,7 +1621,6 @@ async function evaluatePetitionAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#petitions`);
 }
 
 async function evaluateClosedPetitionsAction(formData: FormData) {
@@ -1691,7 +1641,6 @@ async function evaluateClosedPetitionsAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}#petitions`);
 }
 
 async function volunteerForResponsibilityAction(formData: FormData) {
@@ -1726,7 +1675,10 @@ async function resignResponsibilityAction(formData: FormData) {
   revalidatePath(`/groups/${groupId}`);
 }
 
-async function proposeCategoryAction(formData: FormData) {
+async function proposeCategoryAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1736,7 +1688,6 @@ async function proposeCategoryAction(formData: FormData) {
   const entityRaw = requiredString(formData, "offeringEntityType");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice = "Category proposal opened.";
   try {
     // entityRaw is either "group" or "project:<projectId>"
     const [entityType, entityId] = entityRaw.startsWith("project:")
@@ -1750,15 +1701,18 @@ async function proposeCategoryAction(formData: FormData) {
       name,
       description,
     });
-    if (!result.ok) notice = `Could not open category petition: ${result.reason}.`;
+    if (!result.ok) return { kind: "error", message: `Could not open category petition: ${result.reason}.` };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+  return { kind: "success", message: "Category proposal opened." };
 }
 
-async function proposeCategoryArchivalAction(formData: FormData) {
+async function proposeCategoryArchivalAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1766,18 +1720,20 @@ async function proposeCategoryArchivalAction(formData: FormData) {
   const categoryId = requiredString(formData, "categoryId");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice = "Category archival petition opened.";
   try {
     const result = await proposeContributionCategoryArchival(prisma, { membershipId: membership.id, groupId, categoryId });
-    if (!result.ok) notice = `Could not open archival petition: ${result.reason}.`;
+    if (!result.ok) return { kind: "error", message: `Could not open archival petition: ${result.reason}.` };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+  return { kind: "success", message: "Category archival petition opened." };
 }
 
-async function proposeTrustedProviderStatusAction(formData: FormData) {
+async function proposeTrustedProviderStatusAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1786,7 +1742,6 @@ async function proposeTrustedProviderStatusAction(formData: FormData) {
   const targetMembershipId = requiredString(formData, "targetMembershipId");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice = "Trusted provider petition opened.";
   try {
     const result = await proposeTrustedProviderStatus(prisma, {
       requestingMembershipId: membership.id,
@@ -1794,15 +1749,18 @@ async function proposeTrustedProviderStatusAction(formData: FormData) {
       groupId,
       categoryIds: [categoryId],
     });
-    if (!result.ok) notice = `Could not open trusted provider petition: ${result.reason}.`;
+    if (!result.ok) return { kind: "error", message: `Could not open trusted provider petition: ${result.reason}.` };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+  return { kind: "success", message: "Trusted provider petition opened." };
 }
 
-async function proposeTrustedProviderRevocationAction(formData: FormData) {
+async function proposeTrustedProviderRevocationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1812,7 +1770,6 @@ async function proposeTrustedProviderRevocationAction(formData: FormData) {
   const statusIds = typeof statusIdsRaw === "string" ? statusIdsRaw.split(",").filter(Boolean) : [];
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
-  let notice = "Trusted provider revocation petition opened.";
   try {
     const result = await proposeTrustedProviderRevocation(prisma, {
       requestingMembershipId: membership.id,
@@ -1820,12 +1777,12 @@ async function proposeTrustedProviderRevocationAction(formData: FormData) {
       groupId,
       statusIds,
     });
-    if (!result.ok) notice = `Could not open revocation petition: ${result.reason}.`;
+    if (!result.ok) return { kind: "error", message: `Could not open revocation petition: ${result.reason}.` };
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#contribution-categories`);
+  return { kind: "success", message: "Revocation petition opened." };
 }
 
 async function updateGovernanceSignalAction(
@@ -1950,6 +1907,16 @@ function governanceSignalFailureNotice(reason: string) {
     case "invalid_parameter": return "That governance characteristic is not valid.";
     case "membership_group_mismatch": return "That membership does not belong to this group.";
     default: return "That governance signal could not be saved.";
+  }
+}
+
+function contentProposalFailureMessage(reason: string) {
+  switch (reason) {
+    case "not_eligible": return "You are not eligible to propose this content.";
+    case "publication_archived": return "That publication has been archived.";
+    case "publication_not_found": return "Publication not found.";
+    case "missing_required_fields": return "Please fill in all required fields.";
+    default: return "This proposal could not be submitted.";
   }
 }
 
