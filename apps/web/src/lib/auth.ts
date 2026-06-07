@@ -12,7 +12,12 @@ export async function registerAccount(
     throw new Error("An account with that email already exists.");
   }
 
-  const node = await prisma.node.findFirstOrThrow({ orderBy: { createdAt: "asc" } });
+  const node = await prisma.node.findFirst({ orderBy: { createdAt: "asc" } });
+  if (!node) {
+    throw new Error(
+      "Commons is not initialized. Run `pnpm db:seed` for local development, then try again.",
+    );
+  }
   const passwordHash = await bcrypt.hash(input.password, 12);
 
   const account = await prisma.account.create({
