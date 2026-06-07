@@ -10,6 +10,9 @@ import {
   withdrawPetition,
   withdrawPetitionBySubject,
   requireApprovedPetition,
+  archiveStalePetitions,
+  petitionFilterWhere,
+  PETITION_FILTER_VALUES,
 } from "../lib/petitions";
 import { isProposalFamily, categoryForFamily } from "../lib/governance-proposal-families";
 
@@ -621,6 +624,112 @@ test("getActiveVoterCount includes project members without host-group membership
     await prisma.project.deleteMany({ where: { id: "pet_vc_proj_only_p" } });
     await cleanupFixture("pet_vc_proj_only");
   }
+});
+
+// ---- withdrawPetition outcome ----
+
+test("withdrawPetition: creator withdraws an open petition", async () => {
+  const { group, memberships } = await createFixture("pet_wd_creator");
+  try {
+    const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
+    if (!result.ok) return;
+    const outcome = await withdrawPetition(prisma, result.petitionId, memberships[0].id);
+    assert.deepEqual(outcome, { outcome: "withdrawn" });
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.status, "withdrawn");
+    assert.notEqual(petition.resolvedAt, null);
+  } finally {
+    await cleanupFixture("pet_wd_creator");
+  }
+});
+
+test("withdrawPetition: non-creator cannot withdraw", async () => {
+  const { group, memberships } = await createFixture("pet_wd_noncreator", 2);
+  try {
+    const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
+    if (!result.ok) return;
+    const outcome = await withdrawPetition(prisma, result.petitionId, memberships[1].id);
+    assert.deepEqual(outcome, { outcome: "not_eligible" });
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.status, "open");
+  } finally {
+    await cleanupFixture("pet_wd_noncreator");
+  }
+});
+
+test("withdrawPetition: creator cannot withdraw an already-resolved petition", async () => {
+  const { group, memberships } = await createFixture("pet_wd_resolved");
+  try {
+    const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
+    if (!result.ok) return;
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved", resolvedAt: new Date() } });
+    const outcome = await withdrawPetition(prisma, result.petitionId, memberships[0].id);
+    assert.deepEqual(outcome, { outcome: "not_eligible" });
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.status, "approved");
+  } finally {
+    await cleanupFixture("pet_wd_resolved");
+  }
+});
+
+// ---- archiveStalePetitions ----
+
+test("archiveStalePetitions archives resolved petitions past the 30-day cutoff", async () => {
+  const { group, memberships } = await createFixture("pet_archive");
+  try {
+    const r1 = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "old", createdByMembershipId: memberships[0].id });
+    const r2 = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "recent", createdByMembershipId: memberships[0].id });
+    if (!r1.ok || !r2.ok) return;
+
+    const now = new Date("2026-06-01T00:00:00Z");
+    const exactlyCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const newerThanCutoff = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+
+    await prisma.petition.update({ where: { id: r1.petitionId }, data: { status: "approved", resolvedAt: exactlyCutoff } });
+    await prisma.petition.update({ where: { id: r2.petitionId }, data: { status: "approved", resolvedAt: newerThanCutoff } });
+
+    await archiveStalePetitions(prisma, group.id, now);
+
+    const p1 = await prisma.petition.findUniqueOrThrow({ where: { id: r1.petitionId } });
+    const p2 = await prisma.petition.findUniqueOrThrow({ where: { id: r2.petitionId } });
+    assert.deepEqual(p1.archivedAt, now);
+    assert.equal(p2.archivedAt, null);
+
+    // Idempotent: re-running is a no-op (does not re-stamp archivedAt)
+    const later = new Date(now.getTime() + 1000);
+    await archiveStalePetitions(prisma, group.id, later);
+    const p1Again = await prisma.petition.findUniqueOrThrow({ where: { id: r1.petitionId } });
+    assert.deepEqual(p1Again.archivedAt, now);
+  } finally {
+    await cleanupFixture("pet_archive");
+  }
+});
+
+test("archiveStalePetitions leaves open petitions untouched", async () => {
+  const { group, memberships } = await createFixture("pet_archive_open");
+  try {
+    const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
+    if (!result.ok) return;
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    await archiveStalePetitions(prisma, group.id, farFuture);
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.status, "open");
+    assert.equal(petition.archivedAt, null);
+  } finally {
+    await cleanupFixture("pet_archive_open");
+  }
+});
+
+// ---- petitionFilterWhere (pure helper) ----
+
+test("petitionFilterWhere returns the expected where clause for each filter value", () => {
+  assert.deepEqual(petitionFilterWhere("all"), { archivedAt: null });
+  assert.deepEqual(petitionFilterWhere("open"), { status: "open", archivedAt: null });
+  assert.deepEqual(petitionFilterWhere("closed"), { status: { not: "open" }, archivedAt: null });
+  assert.deepEqual(petitionFilterWhere("approved"), { status: "approved", archivedAt: null });
+  assert.deepEqual(petitionFilterWhere("rejected"), { status: "rejected", archivedAt: null });
+  assert.deepEqual(petitionFilterWhere("archived"), { archivedAt: { not: null } });
+  assert.equal(PETITION_FILTER_VALUES.length, 6);
 });
 
 // ---- fixtures ----

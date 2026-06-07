@@ -29,7 +29,7 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
           </Link>
           <h1 className="mt-4 text-2xl font-bold tracking-tight">Create Group</h1>
           <p className="mt-1 text-sm text-[var(--soft-text)]">
-            New groups start private — they won't appear on Find Groups until a public visibility petition is approved.
+            New groups start private — they won&apos;t appear on Find Groups until a public visibility petition is approved.
             Membership policy controls how people join; visibility controls who can discover the group.
           </p>
         </header>

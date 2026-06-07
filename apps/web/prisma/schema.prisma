@@ -417,6 +417,7 @@ model Group {
   trustedProviderStatuses        TrustedProviderStatus[]
   inviteTokens                   GroupInviteToken[]
   contentCreationDrafts          ContentCreationDraft[]
+  responsibilityProposalDrafts   ResponsibilityProposalDraft[]
 
   @@unique([nodeId, name])
   @@index([nodeId])
@@ -439,6 +440,7 @@ model GroupMembership {
   createdPetitions              Petition[]                         @relation("PetitionCreator")
   petitionSupport               PetitionSupport[]
   proposedCategoryDrafts        ContributionCategoryDraft[]
+  responsibilityProposalDrafts  ResponsibilityProposalDraft[]
   trustedProviderApplications   TrustedProviderApplication[]
   trustedProviderRevocations    TrustedProviderRevocationRequest[]
   trustedProviderStatuses       TrustedProviderStatus[]
@@ -888,6 +890,12 @@ model Responsibility {
   type      String
   termDays  Int      @default(365)
   createdAt DateTime @default(now())
+  // Polymorphic pointer to the LivingDocument (spaceType: "responsibility", spaceId: this.id,
+  // title: "Purpose") that holds this role's editable purpose statement. Not FK-enforced —
+  // mirrors the LivingDocument.spaceId convention (see living-documents.ts). Null until a
+  // responsibility-creation proposal seeds one; pre-existing/seeded responsibilities stay null
+  // until a member proposes a living document for the role through the normal flow.
+  descriptionDocumentId String?
 
   group       Group                     @relation(fields: [groupId], references: [id])
   assignments ResponsibilityAssignment[]
@@ -929,6 +937,24 @@ model ResponsibilityAbility {
 
   @@unique([responsibilityId, ability])
   @@index([responsibilityId])
+}
+
+model ResponsibilityProposalDraft {
+  id                      String    @id @default(cuid())
+  groupId                 String
+  type                    String
+  description             String    // seed text for the responsibility's auto-created Purpose living document
+  abilities               Json      // [{ ability: CoordinationAbility, availability: AbilityAvailability }]
+  proposedByMembershipId  String
+  createdAt               DateTime  @default(now())
+  appliedAt               DateTime?
+  appliedResponsibilityId String?   // the Responsibility this proposal resulted in or was merged into
+
+  group      Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  membership GroupMembership @relation(fields: [proposedByMembershipId], references: [id])
+
+  @@index([groupId])
+  @@index([proposedByMembershipId])
 }
 
 model GovernancePreference {
@@ -1001,6 +1027,7 @@ model Petition {
   opensAt                      DateTime  @default(now())
   closesAt                     DateTime
   resolvedAt                   DateTime?
+  archivedAt                   DateTime? // set lazily ~30 days after resolvedAt by archiveStalePetitions
   createdByMembershipId        String?   // legacy: GroupMembership FK — kept for compat
   createdByProjectMembershipId String?   // new: ProjectMembership FK for project-scoped petitions
 
@@ -1011,6 +1038,7 @@ model Petition {
 
   @@index([scopeType, scopeId, status])
   @@index([groupId, status])
+  @@index([groupId, archivedAt])
   @@index([category])
   @@index([competitionKey])
   @@index([subjectType, subjectId])

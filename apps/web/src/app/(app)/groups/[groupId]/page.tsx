@@ -21,9 +21,18 @@ import {
   openThreadClosurePetition,
   postDiscussionMessage,
 } from "../../../../lib/discussions";
-import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
+import {
+  addPetitionSupport,
+  withdrawPetitionSupport,
+  withdrawPetition,
+  archiveStalePetitions,
+  petitionFilterWhere,
+  PETITION_FILTER_VALUES,
+  type PetitionFilterValue,
+} from "../../../../lib/petitions";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { proposeProject } from "../../../../lib/projects";
+import { proposeResponsibility, PROPOSABLE_RESPONSIBILITY_ABILITIES } from "../../../../lib/responsibility-proposals";
 import {
   CATEGORY_REGISTRY,
   GOVERNANCE_CATEGORIES,
@@ -62,6 +71,7 @@ import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
 import { GroupContextSync } from "../../../../components/shared/GroupContextSync";
 import { ActivityFilter } from "../../../../components/shared/ActivityFilter";
+import { PetitionFilter } from "../../../../components/shared/PetitionFilter";
 import { GovernanceSignalForm } from "../../../../components/shared/GovernanceSignalForm";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { CreateThreadForm } from "../../../../components/shared/CreateThreadForm";
@@ -83,12 +93,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
     typeof sp.activityFilter === "string" && VALID_ACTIVITY_FILTERS.includes(sp.activityFilter)
       ? sp.activityFilter
       : "month";
+  const petitionFilter: PetitionFilterValue =
+    typeof sp.petitionFilter === "string" && (PETITION_FILTER_VALUES as readonly string[]).includes(sp.petitionFilter)
+      ? (sp.petitionFilter as PetitionFilterValue)
+      : "all";
 
   const session = await getSession();
   if (!session.accountId) redirect("/login");
 
 
-  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter);
+  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter, petitionFilter);
 
   // Server action: update session.activeGroupId after confirmed membership.
   // Must be a server action (not inline code) because cookies can only be written
@@ -449,6 +463,45 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               );
             })}
           </div>
+          {isActive && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new responsibility</summary>
+              <FormWithNotice action={proposeResponsibilityAction} className="mt-3 space-y-3">
+                <input type="hidden" name="groupId" value={groupId} />
+                <label className="block">
+                  <span className="field-label">Type</span>
+                  <input name="type" type="text" required maxLength={64} className="field-input" placeholder="e.g. Communications" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Purpose</span>
+                  <textarea name="description" required maxLength={500} rows={3} className="field-input resize-none" placeholder="What does this role coordinate, and who does it serve?" />
+                  <span className="mt-1 block text-xs text-[var(--muted)]">
+                    On approval, this seeds an editable &quot;Purpose&quot; living document for the role — the group can revise it later through the normal living-document petition flow.
+                  </span>
+                </label>
+                <fieldset className="space-y-1.5">
+                  <legend className="field-label">Abilities</legend>
+                  {PROPOSABLE_RESPONSIBILITY_ABILITIES.map(({ ability, label }) => (
+                    <div key={ability} className="flex items-center gap-3 text-sm text-[var(--text)]">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name={`ability_${ability}`} value="on" />
+                        {label}
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                        <input type="radio" name={`availability_${ability}`} value="always_available" defaultChecked />
+                        Always
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                        <input type="radio" name={`availability_${ability}`} value="available_during_emergency" />
+                        Emergency only
+                      </label>
+                    </div>
+                  ))}
+                </fieldset>
+                <SubmitButton variant="secondary">Open proposal petition</SubmitButton>
+              </FormWithNotice>
+            </details>
+          )}
         </CollapsibleSection>
 
         {/* ── Projects ──────────────────────────────────────────────── */}
@@ -561,6 +614,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Petitions ─────────────────────────────────────────────── */}
         <CollapsibleSection id="petitions" title="Petitions" eyebrow="Community decisions" storageKey={`group:${groupId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
+            <PetitionFilter currentFilter={petitionFilter} />
             <form action={evaluateClosedPetitionsAction}>
               <input type="hidden" name="groupId" value={groupId} />
               <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
@@ -573,6 +627,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     petition={petition}
                     canSupport={isActive}
                     groupId={groupId}
+                    currentMembershipId={currentMembership?.id ?? null}
                   />
                 ))}
               </div>
@@ -902,12 +957,13 @@ function activityFilterCutoff(filter: string): Date | null {
   return date;
 }
 
-async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, activityFilter = "month") {
+async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, activityFilter = "month", petitionFilter: PetitionFilterValue = "all") {
   const prisma = createPrismaClient();
   try {
     await recordGroupPresence(prisma, accountId, groupId);
     await applyParticipationTransitions(prisma, groupId);
     await expireStaleAssignments(prisma, groupId);
+    await archiveStalePetitions(prisma, groupId);
 
     const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
 
@@ -985,7 +1041,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
 
     // Petitions
     const petitionRows = await prisma.petition.findMany({
-      where: { groupId },
+      where: { groupId, ...petitionFilterWhere(petitionFilter) },
       orderBy: [{ status: "asc" }, { closesAt: "asc" }],
       include: {
         _count: { select: { support: true } },
@@ -1007,6 +1063,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           supportCount: p._count.support,
           requiredSupport: Math.ceil(activeParticipantCount * threshold),
           supportedByCurrentMember: p.support.length > 0,
+          createdByMembershipId: p.createdByMembershipId,
         };
       }),
     );
@@ -1464,6 +1521,53 @@ async function proposeBulletinCreationAction(
   return { kind: "success", message: "Bulletin proposed — check Petitions." };
 }
 
+function responsibilityProposalFailureMessage(reason: string) {
+  switch (reason) {
+    case "invalid_type": return "Give this responsibility a name (up to 64 characters).";
+    case "invalid_description": return "Describe the purpose of this responsibility (up to 500 characters).";
+    case "invalid_ability": return "One of the selected abilities is not valid.";
+    case "no_abilities": return "Select at least one ability for this responsibility.";
+    case "not_eligible": return "You are not eligible to propose a new responsibility.";
+    case "duplicate_type": return "A responsibility with that name already exists.";
+    case "petition_error": return "This proposal could not be submitted.";
+    default: return "This proposal could not be submitted.";
+  }
+}
+
+async function proposeResponsibilityAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const type = requiredString(formData, "type");
+  const description = requiredString(formData, "description");
+  const abilities = PROPOSABLE_RESPONSIBILITY_ABILITIES.filter(
+    ({ ability }) => formData.get(`ability_${ability}`) === "on",
+  ).map(({ ability }) => ({
+    ability,
+    availability: (formData.get(`availability_${ability}`) as string) || "always_available",
+  }));
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const result = await proposeResponsibility(prisma, {
+      groupId,
+      createdByMembershipId: membership.id,
+      type,
+      description,
+      abilities,
+    });
+    if (!result.ok) return { kind: "error", message: responsibilityProposalFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Responsibility proposed — check Petitions." };
+}
+
 async function proposePublicationCreationAction(
   _prev: FormState,
   formData: FormData,
@@ -1621,6 +1725,30 @@ async function evaluatePetitionAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
+}
+
+async function withdrawPetitionAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const petitionId = requiredString(formData, "petitionId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let outcome: "withdrawn" | "not_eligible";
+  try {
+    ({ outcome } = await withdrawPetition(prisma, petitionId, membership.id));
+  } finally {
+    await prisma.$disconnect();
+  }
+  if (outcome === "not_eligible") {
+    return { kind: "error", message: "This petition can no longer be withdrawn — it may have already closed." };
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Petition withdrawn." };
 }
 
 async function evaluateClosedPetitionsAction(formData: FormData) {
@@ -1823,10 +1951,12 @@ type SpacePetition = {
   supportCount: number;
   requiredSupport: number;
   supportedByCurrentMember: boolean;
+  createdByMembershipId: string | null;
 };
 
-function PetitionCard({ petition, canSupport, groupId }: { petition: SpacePetition; canSupport: boolean; groupId: string }) {
+function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { petition: SpacePetition; canSupport: boolean; groupId: string; currentMembershipId: string | null }) {
   const isOpen = petition.status === "open";
+  const canWithdraw = isOpen && currentMembershipId !== null && petition.createdByMembershipId === currentMembershipId;
   return (
     <article className="border border-[var(--border)] bg-[var(--subtle)] p-3">
       <div className="flex items-start justify-between gap-3">
@@ -1867,6 +1997,13 @@ function PetitionCard({ petition, canSupport, groupId }: { petition: SpacePetiti
             <input type="hidden" name="petitionId" value={petition.id} />
             <SubmitButton variant="secondary">Check outcome</SubmitButton>
           </form>
+          {canWithdraw && (
+            <FormWithNotice action={withdrawPetitionAction}>
+              <input type="hidden" name="groupId" value={groupId} />
+              <input type="hidden" name="petitionId" value={petition.id} />
+              <SubmitButton variant="secondary">Withdraw petition</SubmitButton>
+            </FormWithNotice>
+          )}
         </div>
       )}
     </article>

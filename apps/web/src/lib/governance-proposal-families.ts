@@ -4,6 +4,7 @@ export type ProposalFamily =
   | "membership_request"
   | "project_proposal"
   | "responsibility_proposal"
+  | "responsibility_creation_proposal"
   | "accountability_action"
   | "living_document_revision"
   // Fix 2: archive_proposal split into target-typed families so the approved handler
@@ -33,6 +34,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
   project_proposal: "project",
   responsibility_proposal: "responsibility",
+  responsibility_creation_proposal: "responsibility",
   accountability_action: "accountability",
   living_document_revision: "living_document",
   bulletin_archive: "archival",

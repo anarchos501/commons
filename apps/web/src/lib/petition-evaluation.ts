@@ -18,6 +18,7 @@ import { approveMembershipRequest } from "./group-membership";
 import { onEmergencyPetitionApproved } from "./emergency";
 import { applyGroupVisibilityFromPetition } from "./group-settings";
 import { createProjectFromPetition } from "./projects";
+import { createResponsibilityFromProposal } from "./responsibility-proposals";
 import { onBulletinArchivalPetitionApproved } from "./bulletins";
 import { onPublicationArchivalPetitionApproved, onPublicationEntryArchivalPetitionApproved } from "./publications";
 import { applyContentCreationDraft } from "./content-creation-drafts";
@@ -42,6 +43,8 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
     await onThreadClosurePetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "responsibility_proposal") {
     await confirmResponsibilityAssignment(prisma, petitionId);
+  } else if (petition.subjectType === "responsibility_creation_proposal") {
+    await createResponsibilityFromProposal(prisma, petitionId);
   } else if (petition.subjectType === "contribution_category_proposal") {
     await createContributionCategoryFromPetition(prisma, petitionId);
   } else if (petition.subjectType === "contribution_category_archive") {
@@ -98,6 +101,17 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     });
     const label = type.charAt(0).toUpperCase() + type.slice(1);
     return membership ? `${membership.account.displayName} for ${label}` : subjectId;
+  }
+
+  if (subjectType === "responsibility_creation_proposal") {
+    const draft = await prisma.responsibilityProposalDraft.findUnique({
+      where: { id: subjectId },
+      select: { type: true, description: true },
+    });
+    if (!draft) return subjectId;
+    const description =
+      draft.description.length > 80 ? `${draft.description.slice(0, 80)}…` : draft.description;
+    return `Propose responsibility: ${draft.type} — ${description}`;
   }
 
   if (subjectType === "discussion_thread_close") {
@@ -209,6 +223,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "living_document_archive": return "Living document archival";
     case "discussion_thread_close": return "Discussion thread closure";
     case "responsibility_proposal": return "Responsibility volunteer";
+    case "responsibility_creation_proposal": return "Responsibility proposal";
     case "contribution_category_proposal": return "Contribution category proposal";
     case "contribution_category_archive": return "Contribution category archival";
     case "trusted_provider_proposal": return "Trusted provider recognition";

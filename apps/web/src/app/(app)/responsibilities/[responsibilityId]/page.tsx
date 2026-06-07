@@ -53,6 +53,22 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
             <span>Term: {responsibility.termDays} days</span>
           </div>
 
+          {/* Purpose */}
+          <div className="mt-4">
+            <p className="text-xs font-medium text-[var(--muted)]">Purpose</p>
+            {data.purposeDocument ? (
+              <p className="mt-1 text-sm leading-6 text-[var(--soft-text)]">{data.purposeDocument.currentBody}</p>
+            ) : (
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                No purpose statement yet — propose a &quot;Purpose&quot; living document in the{" "}
+                <a href={`/responsibilities/${responsibilityId}#documents`} className="text-[var(--accent)] hover:underline">
+                  Living Documents
+                </a>{" "}
+                section to give this role a social contract.
+              </p>
+            )}
+          </div>
+
           {/* Holders */}
           {data.holders.length > 0 && (
             <div className="mt-4 space-y-1">
@@ -296,7 +312,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
   try {
     const responsibility = await prisma.responsibility.findUnique({
       where: { id: responsibilityId },
-      select: { id: true, type: true, groupId: true, termDays: true, group: { select: { name: true } } },
+      select: { id: true, type: true, groupId: true, termDays: true, descriptionDocumentId: true, group: { select: { name: true } } },
     });
     if (!responsibility) redirect("/dashboard");
 
@@ -339,6 +355,13 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
 
     const isHolder = assignments.some((a) => a.membership.accountId === accountId);
 
+    const purposeDocument =
+      (responsibility.descriptionDocumentId
+        ? livingDocuments.find((d) => d.id === responsibility.descriptionDocumentId)
+        : undefined) ??
+      livingDocuments.find((d) => d.title === "Purpose") ??
+      null;
+
     const discussionThreads = await listDiscussionThreads(prisma, {
       spaceType: "responsibility",
       spaceId: responsibilityId,
@@ -353,6 +376,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
       currentMembership,
       holders,
       isHolder,
+      purposeDocument,
       bulletins,
       publications,
       livingDocuments,

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { resolveGroupInviteToken } from "../../../../lib/group-invites";

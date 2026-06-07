@@ -402,11 +402,12 @@ export async function withdrawPetition(
   prisma: PrismaClient,
   petitionId: string,
   byMembershipId: string,
-): Promise<void> {
-  await prisma.petition.updateMany({
+): Promise<{ outcome: "withdrawn" | "not_eligible" }> {
+  const result = await prisma.petition.updateMany({
     where: { id: petitionId, createdByMembershipId: { equals: byMembershipId }, status: "open" },
     data: { status: "withdrawn", resolvedAt: new Date() },
   });
+  return { outcome: result.count > 0 ? "withdrawn" : "not_eligible" };
 }
 
 export async function withdrawPetitionBySubject(
@@ -417,6 +418,40 @@ export async function withdrawPetitionBySubject(
     where: { subjectType, subjectId, status: "open" },
     data: { status: "withdrawn", resolvedAt: new Date() },
   });
+}
+
+// ── Lazy archival ─────────────────────────────────────────────────────────────
+
+const ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+export async function archiveStalePetitions(prisma: PrismaClient, groupId: string, now: Date = new Date()): Promise<void> {
+  const cutoff = new Date(now.getTime() - ARCHIVE_AFTER_MS);
+  await prisma.petition.updateMany({
+    where: { groupId, status: { not: "open" }, resolvedAt: { lte: cutoff }, archivedAt: null },
+    data: { archivedAt: now },
+  });
+}
+
+// ── Petition status filter ────────────────────────────────────────────────────
+
+export const PETITION_FILTER_VALUES = ["all", "open", "closed", "approved", "rejected", "archived"] as const;
+export type PetitionFilterValue = (typeof PETITION_FILTER_VALUES)[number];
+
+export function petitionFilterWhere(filter: PetitionFilterValue): Prisma.PetitionWhereInput {
+  switch (filter) {
+    case "all":
+      return { archivedAt: null };
+    case "open":
+      return { status: "open", archivedAt: null };
+    case "closed":
+      return { status: { not: "open" }, archivedAt: null };
+    case "approved":
+      return { status: "approved", archivedAt: null };
+    case "rejected":
+      return { status: "rejected", archivedAt: null };
+    case "archived":
+      return { archivedAt: { not: null } };
+  }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
