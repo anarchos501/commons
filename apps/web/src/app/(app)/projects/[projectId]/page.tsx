@@ -27,12 +27,15 @@ import {
   proposeProjectContributionCategory,
   getAvailableCategoriesForScope,
 } from "../../../../lib/contribution-categories";
+import { openProjectHostingProposal } from "../../../../lib/project-hosting";
 import { requiredString } from "../../../../lib/support-form";
 import { visibleProjectRosterAffiliations } from "../../../../lib/federation-legibility";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
-import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
+import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
+import { type FormState } from "../../../../components/shared/form-state";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
+import { SubmitButton } from "../../../../components/shared/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +102,48 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
               Hosting is endorsement and support, not ownership. Project members govern the project.
             </p>
           </div>
+          {project.pendingClosureAt && (
+            <div className="mt-4 border-l-2 border-amber-500 pl-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Propose a successor host</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                Adoption requires mutual consent — the candidate group&apos;s own governance must agree to host, and
+                the project&apos;s frozen pre-closure membership must agree to accept. Either side declining, withdrawing,
+                or timing out fails the whole proposal.
+              </p>
+              {data.eligibleAsProjectSponsor ? (
+                data.candidateHostGroups.length > 0 ? (
+                  <FormWithNotice action={proposeProjectHostingAction} className="mt-3 space-y-3">
+                    <input type="hidden" name="projectId" value={projectId} />
+                    <input type="hidden" name="projectMembershipId" value={currentMembership?.id ?? ""} />
+                    <label className="block">
+                      <span className="field-label">Candidate group</span>
+                      <select name="candidateMembershipId" required className="field-input">
+                        <option value="">Select a group&hellip;</option>
+                        {data.candidateHostGroups.map((option) => (
+                          <option key={option.groupId} value={option.id}>{option.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Rationale</span>
+                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group host the project?" />
+                    </label>
+                    <SubmitButton variant="secondary">Open hosting proposal</SubmitButton>
+                  </FormWithNotice>
+                ) : (
+                  <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                    You don&apos;t hold active participation in any group that could be proposed as a successor host.
+                  </p>
+                )
+              ) : (
+                <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                  Sponsoring the project&apos;s side of an adoption requires being part of the membership that was
+                  active when the closure clock started — that frozen group is what decides whether to accept a
+                  successor host.
+                </p>
+              )}
+            </div>
+          )}
           {currentMembership && canWrite && (
             <form action={leaveProjectAction} className="mt-3">
               <input type="hidden" name="projectId" value={projectId} />
@@ -463,7 +508,10 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
 
     const project = await prisma.project.findUniqueOrThrow({
       where: { id: projectId },
-      select: { id: true, name: true, description: true, status: true, pendingClosureAt: true, foundingGroupId: true },
+      select: {
+        id: true, name: true, description: true, status: true,
+        pendingClosureAt: true, pendingClosureElectorate: true, foundingGroupId: true,
+      },
     });
 
     // Require active project membership OR active group membership in any host group
@@ -479,6 +527,34 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       select: { groupId: true, group: { select: { id: true, name: true } } },
     });
     const hostGroups = hostings.map((h) => ({ id: h.groupId, name: h.group.name }));
+
+    // Pending-closure adoption (RFC-007 ProjectHostingProposal): the acting
+    // account can sponsor the project's side of an adoption only if its own
+    // ProjectMembership is part of the frozen pending-closure electorate (see
+    // openProjectHostingProposal) — and can sponsor a candidate group's side
+    // only where it holds active+active membership in a group that isn't
+    // already an active host.
+    let eligibleAsProjectSponsor = false;
+    let candidateHostGroups: { id: string; groupId: string; name: string }[] = [];
+    if (project.pendingClosureAt !== null) {
+      const frozenElectorate = project.pendingClosureElectorate as { projectMembershipIds: string[] } | null;
+      eligibleAsProjectSponsor = !!(
+        currentMembership &&
+        currentMembership.status === "active" &&
+        frozenElectorate?.projectMembershipIds.includes(currentMembership.id)
+      );
+
+      const hostGroupIds = hostings.map((h) => h.groupId);
+      const candidateMemberships = await prisma.groupMembership.findMany({
+        where: {
+          accountId, status: "active", participationStatus: "active",
+          groupId: { notIn: hostGroupIds },
+        },
+        select: { id: true, groupId: true, group: { select: { id: true, name: true } } },
+        orderBy: { group: { name: "asc" } },
+      });
+      candidateHostGroups = candidateMemberships.map((m) => ({ id: m.id, groupId: m.groupId, name: m.group.name }));
+    }
 
     // If not a project member, check if they're a group member of any host group
     if (!currentMembership || currentMembership.status !== "active") {
@@ -576,6 +652,8 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       project,
       currentMembership,
       hostGroups,
+      eligibleAsProjectSponsor,
+      candidateHostGroups,
       bulletins,
       publications,
       livingDocuments,
@@ -628,6 +706,60 @@ async function leaveProjectAction(formData: FormData) {
   redirect("/dashboard");
 }
 
+async function proposeProjectHostingAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const projectMembershipId = requiredString(formData, "projectMembershipId");
+  const candidateMembershipId = requiredString(formData, "candidateMembershipId");
+  const content = requiredString(formData, "content");
+
+  const prisma = createPrismaClient();
+  try {
+    const [projectMembership, candidateMembership] = await Promise.all([
+      prisma.projectMembership.findUnique({
+        where: { id: projectMembershipId },
+        select: { accountId: true, projectId: true, status: true },
+      }),
+      prisma.groupMembership.findUnique({
+        where: { id: candidateMembershipId },
+        select: { accountId: true, groupId: true, status: true, participationStatus: true },
+      }),
+    ]);
+    if (!projectMembership || projectMembership.accountId !== session.accountId || projectMembership.projectId !== projectId || projectMembership.status !== "active") {
+      return { kind: "error", message: "Your project membership could not be confirmed." };
+    }
+    if (!candidateMembership || candidateMembership.accountId !== session.accountId || candidateMembership.status !== "active" || candidateMembership.participationStatus !== "active") {
+      return { kind: "error", message: "You must hold active participation in the candidate group to sponsor its offer to host." };
+    }
+
+    const result = await openProjectHostingProposal(prisma, {
+      projectId,
+      candidateGroupId: candidateMembership.groupId,
+      groupCreatedByMembershipId: candidateMembershipId,
+      projectCreatedByProjectMembershipId: projectMembershipId,
+      content,
+    });
+    if (!result.ok) return { kind: "error", message: projectHostingProposalFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Hosting proposal opened — both the candidate group and the project's frozen membership will decide through their own petitions." };
+}
+
+function projectHostingProposalFailureMessage(reason: string) {
+  switch (reason) {
+    case "not_eligible": return "Both the candidate group and the project sponsor must hold active, active-participation membership.";
+    case "project_not_adoptable": return "This project is not currently open to successor-host adoption.";
+    case "already_hosted": return "That group is already an active host of this project.";
+    case "empty_electorate": return "This project's frozen pre-closure membership is empty, so adoption cannot proceed — its remaining participants may found a new group instead.";
+    case "petition_error": return "This proposal could not be submitted.";
+    default: return "This proposal could not be submitted.";
+  }
+}
+
 async function createDiscussionThreadAction(formData: FormData) {
   "use server";
   const session = await getSession();
@@ -671,8 +803,9 @@ async function createBulletinAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
-    await proposeBulletinCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, body, createdByProjectMembershipId: projectMembership.id });
+    const hosting = await prisma.projectHosting.findFirst({ where: { projectId, endedAt: null }, select: { groupId: true } });
+    if (!hosting) throw new Error("Project has no active host.");
+    await proposeBulletinCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: hosting.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -704,8 +837,9 @@ async function createPublicationAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
-    await proposePublicationCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, createdByProjectMembershipId: projectMembership.id });
+    const hosting = await prisma.projectHosting.findFirst({ where: { projectId, endedAt: null }, select: { groupId: true } });
+    if (!hosting) throw new Error("Project has no active host.");
+    await proposePublicationCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: hosting.groupId, title, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -723,8 +857,9 @@ async function proposePubEntryCreationAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
-    await proposePubEntryCreation(prisma, { spaceType: "project", spaceId: projectId, publicationId, groupId: project.foundingGroupId, body, title: title || undefined, createdByProjectMembershipId: projectMembership.id });
+    const hosting = await prisma.projectHosting.findFirst({ where: { projectId, endedAt: null }, select: { groupId: true } });
+    if (!hosting) throw new Error("Project has no active host.");
+    await proposePubEntryCreation(prisma, { spaceType: "project", spaceId: projectId, publicationId, groupId: hosting.groupId, body, title: title || undefined, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -757,8 +892,9 @@ async function createLivingDocumentAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
-    await proposeLivingDocumentCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, body, createdByProjectMembershipId: projectMembership.id });
+    const hosting = await prisma.projectHosting.findFirst({ where: { projectId, endedAt: null }, select: { groupId: true } });
+    if (!hosting) throw new Error("Project has no active host.");
+    await proposeLivingDocumentCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: hosting.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }

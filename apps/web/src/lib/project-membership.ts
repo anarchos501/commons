@@ -106,14 +106,15 @@ export async function applyProjectParticipationTransitions(
   if (!project || project.status === "closed") return;
 
   // RFC-007 electorate freeze: once a project has no active host, absence-based
-  // transitions are suspended — they would otherwise erode the very electorate
-  // the pending-closure adoption decision depends on, purely as a side effect
-  // of the hosting crisis rather than anyone's choice. This is what keeps a
-  // live query of "active + active" members faithful to the set that qualified
-  // when pendingClosureAt was set. Voluntary leave (leaveProject) and
-  // presence-driven reactivation (recordProjectPresence) are deliberately left
-  // untouched — both are individual acts, not the cascade the freeze guards
-  // against (see also the endedAt-filtered checks in
+  // transitions are suspended here — they would otherwise erode the very
+  // electorate the pending-closure adoption decision depends on, purely as a
+  // side effect of the hosting crisis rather than anyone's choice. This keeps
+  // a live query of "active + active" members faithful to the set that
+  // qualified when pendingClosureAt was set. Voluntary leave (leaveProject) is
+  // separately blocked via assertProjectWritable, and presence-driven
+  // reactivation (recordProjectPresence) separately no-ops — RFC-007 lists
+  // "project membership changes" among the active-work changes pending closure
+  // disallows (see also the endedAt-filtered checks in
   // applyGroupDormancyToProjectMemberships, which freeze the same way).
   const frozen = project.pendingClosureAt !== null && !(await isProjectHosted(prisma, projectId));
 

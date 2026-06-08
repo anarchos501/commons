@@ -62,12 +62,9 @@ export async function proposeContentCreation(
   } else {
     const membership = await prisma.projectMembership.findUnique({
       where: { id: opts.createdByProjectMembershipId! },
-      select: { accountId: true, projectId: true, status: true, participationStatus: true, project: { select: { foundingGroupId: true } } },
+      select: { accountId: true, projectId: true, status: true, participationStatus: true },
     });
     if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
-      return { ok: false, reason: "not_eligible" };
-    }
-    if (membership.project.foundingGroupId !== opts.groupId) {
       return { ok: false, reason: "not_eligible" };
     }
     authorAccountId = membership.accountId;

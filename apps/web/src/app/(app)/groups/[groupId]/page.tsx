@@ -33,6 +33,7 @@ import {
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { proposeProject } from "../../../../lib/projects";
 import { openProjectHostingWithdrawalPetition } from "../../../../lib/project-hosting";
+import { openCoalitionFormationProposal } from "../../../../lib/coalitions";
 import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
 import {
@@ -588,6 +589,48 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             </div>
           ) : (
             <EmptyState text="This group does not currently belong to a coalition." />
+          )}
+          {isActive && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose forming a new coalition</summary>
+              {data.eligibleCoalitionPartners.length > 0 ? (
+                <FormWithNotice action={proposeCoalitionFormationAction} className="mt-3 space-y-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <label className="block">
+                    <span className="field-label">Coalition name</span>
+                    <input name="name" type="text" required className="field-input" placeholder="e.g. Riverside Mutual Aid Network" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Description</span>
+                    <textarea name="description" rows={2} className="field-input resize-none" placeholder="What is this coalition for?" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Rationale</span>
+                    <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should these groups federate?" />
+                  </label>
+                  <fieldset className="space-y-1.5">
+                    <legend className="field-label">Partner groups (select at least one)</legend>
+                    <p className="text-xs leading-5 text-[var(--muted)]">
+                      You can only sponsor a group&apos;s side of this proposal where you hold active participation —
+                      each selected group opens its own internal petition, decided by its own members.
+                    </p>
+                    {data.eligibleCoalitionPartners.map((partner) => (
+                      <label key={partner.groupId} className="flex items-center gap-2 text-sm text-[var(--text)]">
+                        <input type="checkbox" name="partnerGroupId" value={partner.groupId} />
+                        {partner.group.name}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <SubmitButton variant="secondary">Open formation proposal</SubmitButton>
+                </FormWithNotice>
+              ) : (
+                <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                  Forming a coalition requires sponsoring every participating group&apos;s internal petition with your
+                  own active membership there. You don&apos;t currently hold active participation in any other group on
+                  this node.
+                </p>
+              )}
+            </details>
           )}
         </CollapsibleSection>
 
@@ -1175,6 +1218,25 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     ]);
 
+    // Other groups on this node where the current account holds active+active
+    // membership — the only groups it can sponsor into a coalition formation
+    // proposal alongside this one (each sponsoring group's consent is supplied
+    // by an active member's own membership; see openCoalitionFormationProposal).
+    const eligibleCoalitionPartners =
+      currentMembership.participationStatus === "active"
+        ? await prisma.groupMembership.findMany({
+            where: {
+              accountId,
+              status: "active",
+              participationStatus: "active",
+              groupId: { not: groupId },
+              group: { nodeId: group.nodeId },
+            },
+            select: { id: true, groupId: true, group: { select: { id: true, name: true } } },
+            orderBy: { group: { name: "asc" } },
+          })
+        : [];
+
     // Petitions
     const petitionRows = await prisma.petition.findMany({
       where: { groupId, ...petitionFilterWhere(petitionFilter) },
@@ -1353,6 +1415,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       currentMembership,
       projects,
       coalitions,
+      eligibleCoalitionPartners,
       bulletins,
       publications,
       livingDocuments,
@@ -1566,6 +1629,68 @@ async function openProjectHostingWithdrawalAction(formData: FormData) {
   }
   revalidatePath(`/groups/${groupId}`);
   redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#projects`);
+}
+
+async function proposeCoalitionFormationAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const name = requiredString(formData, "name");
+  const description = (formData.get("description") as string | null) ?? "";
+  const content = requiredString(formData, "content");
+  const partnerGroupIds = formData.getAll("partnerGroupId").filter((value): value is string => typeof value === "string" && value.length > 0);
+  if (partnerGroupIds.length === 0) {
+    return { kind: "error", message: "Select at least one partner group to invite into the coalition." };
+  }
+
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const partnerMemberships = await prisma.groupMembership.findMany({
+      where: {
+        accountId: session.accountId,
+        status: "active",
+        participationStatus: "active",
+        groupId: { in: partnerGroupIds },
+      },
+      select: { id: true, groupId: true },
+    });
+    if (partnerMemberships.length !== partnerGroupIds.length) {
+      return { kind: "error", message: "You must hold active participation in every group you sponsor into this proposal." };
+    }
+
+    const result = await openCoalitionFormationProposal(prisma, {
+      name,
+      description: description.trim() || null,
+      content,
+      participants: [
+        { groupId, createdByMembershipId: membership.id },
+        ...partnerMemberships.map((m) => ({ groupId: m.groupId, createdByMembershipId: m.id })),
+      ],
+    });
+    if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Coalition formation proposal opened — each group's members will decide through their own petition." };
+}
+
+function coalitionProposalFailureMessage(reason: string) {
+  switch (reason) {
+    case "invalid_participants": return "Select at least two distinct, eligible groups on the same node.";
+    case "not_eligible": return "Every sponsoring group requires an active, active-participation member to consent.";
+    case "not_found": return "This coalition could not be found.";
+    case "already_member": return "That group already belongs to this coalition.";
+    case "not_member": return "That group is not currently a member of this coalition.";
+    case "duplicate_name": return "A coalition with that name already exists on this node.";
+    case "petition_error": return "This proposal could not be submitted.";
+    default: return "This proposal could not be submitted.";
+  }
 }
 
 async function sponsorApplicationAction(formData: FormData) {
