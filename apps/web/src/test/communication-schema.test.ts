@@ -226,7 +226,7 @@ async function createFixture(prefix: string) {
   });
 
   const project = await prisma.project.create({
-    data: { id: `${prefix}_project`, groupId: group.id, name: `Project ${prefix}`, status: "active" },
+    data: { id: `${prefix}_project`, foundingGroupId: group.id, name: `Project ${prefix}`, status: "active" },
   });
 
   await prisma.projectHosting.create({ data: { projectId: project.id, groupId: group.id } });

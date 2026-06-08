@@ -44,6 +44,7 @@ test("registerAccount creates an account on the earliest configured node", async
     });
     assert.equal(account.homeNodeId, earlierNode.id);
     assert.notEqual(account.passwordHash, "testpass123");
+    assert.equal(await prisma.nodeHost.count({ where: { accountId: account.id } }), 0);
   } finally {
     await cleanup(prefix);
   }

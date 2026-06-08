@@ -13,7 +13,8 @@ export type GovernanceCategory =
   | "trusted_provider"
   | "group_settings"
   | "publishing"
-  | "participation";
+  | "participation"
+  | "node_stewardship";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -31,6 +32,7 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "group_settings",
   "publishing",
   "participation",
+  "node_stewardship",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -124,6 +126,11 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     quietThresholdDays: { anchors: [30, 90, 180], min: 14, max: 365 },
     dormantThresholdDays: { anchors: [180, 365, 730], min: 90, max: 1825 },
   },
+  node_stewardship: {
+    threshold: { anchors: [0.95, 0.50, 0.05], min: 0.05, max: 1.0 },
+    petitionDuration: { anchors: [7, 3, 1], min: 1, max: 30 },
+    noConfidenceThreshold: { anchors: [0.95, 0.667, 0.50], min: 0.50, max: 1.0 },
+  },
 };
 
 export function isGovernanceParameter(category: GovernanceCategory, parameter: string): boolean {
@@ -139,6 +146,7 @@ export type ResolvedCategoryParams = {
   threadInactivityDays?: number;
   quietThresholdDays?: number;
   dormantThresholdDays?: number;
+  noConfidenceThreshold?: number;
 };
 
 // Piecewise linear interpolation between three anchor points.
@@ -202,5 +210,6 @@ export function validateGovernanceSnapshot(
     category === "discussion" &&
     (typeof s.messageRetentionDays !== "number" || typeof s.threadInactivityDays !== "number")
   ) return false;
+  if (category === "node_stewardship" && typeof s.noConfidenceThreshold !== "number") return false;
   return true;
 }

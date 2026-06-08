@@ -5,6 +5,7 @@ import { requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { logAction } from "./action-log";
 import type { ProposalFamily } from "./governance-proposal-families";
+import { assertProjectWritable } from "./project-membership";
 
 function contentTypeToFamily(contentType: ContentCreationType): ProposalFamily {
   switch (contentType) {
@@ -61,16 +62,17 @@ export async function proposeContentCreation(
   } else {
     const membership = await prisma.projectMembership.findUnique({
       where: { id: opts.createdByProjectMembershipId! },
-      select: { accountId: true, projectId: true, status: true, participationStatus: true, project: { select: { groupId: true } } },
+      select: { accountId: true, projectId: true, status: true, participationStatus: true, project: { select: { foundingGroupId: true } } },
     });
     if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
       return { ok: false, reason: "not_eligible" };
     }
-    if (membership.project.groupId !== opts.groupId) {
+    if (membership.project.foundingGroupId !== opts.groupId) {
       return { ok: false, reason: "not_eligible" };
     }
     authorAccountId = membership.accountId;
     projectId = membership.projectId;
+    await assertProjectWritable(prisma, projectId);
   }
 
   // Validate coordination-space ownership
@@ -182,6 +184,7 @@ export async function applyContentCreationDraft(
       throw new Error(`Draft groupId "${lockedDraft.groupId}" does not match petition groupId "${petition.groupId}".`);
     }
     if (lockedDraft.spaceType === "project") {
+      await assertProjectWritable(tx as unknown as PrismaClient, lockedDraft.spaceId);
       if (petition.scopeType !== "project" || petition.scopeId !== lockedDraft.spaceId) {
         throw new Error("Project content petition scope does not match the draft project.");
       }

@@ -4,6 +4,7 @@ type LogActionInput = {
   actorAccountId?: string | null;
   groupId?: string | null;
   projectId?: string | null;
+  nodeId?: string | null;
   targetType: string;
   targetId: string;
   action: string;
@@ -21,6 +22,7 @@ export async function logAction(prisma: PrismaClient, input: LogActionInput): Pr
         actorAccountId: input.actorAccountId ?? null,
         groupId: input.groupId ?? null,
         projectId: input.projectId ?? null,
+        nodeId: input.nodeId ?? null,
         action: input.action,
         targetType: input.targetType,
         targetId: input.targetId,

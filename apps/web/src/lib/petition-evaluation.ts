@@ -22,9 +22,21 @@ import { createResponsibilityFromProposal } from "./responsibility-proposals";
 import { onBulletinArchivalPetitionApproved } from "./bulletins";
 import { onPublicationArchivalPetitionApproved, onPublicationEntryArchivalPetitionApproved } from "./publications";
 import { applyContentCreationDraft } from "./content-creation-drafts";
+import {
+  evaluateProjectHostingProposalForPetition,
+  onProjectHostingWithdrawalPetitionApproved,
+} from "./project-hosting";
+import { evaluateCoalitionProposalForPetition } from "./coalitions";
+import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
 
 export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string) {
   const result = await evaluatePetition(prisma, petitionId);
+  const hostingProposalResult = await evaluateProjectHostingProposalForPetition(prisma, petitionId);
+  if (hostingProposalResult) return;
+  const coalitionProposalResult = await evaluateCoalitionProposalForPetition(prisma, petitionId);
+  if (coalitionProposalResult) return;
+  const nodeStewardResult = await evaluateNodeStewardProposalForPetition(prisma, petitionId);
+  if (nodeStewardResult) return;
   if (result.outcome !== "approved") return;
 
   const petition = await prisma.petition.findUnique({
@@ -57,6 +69,8 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
     await onEmergencyPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "project_proposal") {
     await createProjectFromPetition(prisma, petitionId);
+  } else if (petition.subjectType === "project_hosting_withdrawal") {
+    await onProjectHostingWithdrawalPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "bulletin_archive") {
     await onBulletinArchivalPetitionApproved(prisma, petitionId);
   } else if (petition.subjectType === "publication_archive") {
@@ -233,6 +247,19 @@ export function proposalFamilyLabel(subjectType: string) {
     case "publication_creation": return "Publication Creation";
     case "publication_entry_creation": return "Publication Entry";
     case "living_document_creation": return "Living Document Creation";
+    case "project_hosting_withdrawal": return "Project host withdrawal";
+    case "project_hosting_offer": return "Project hosting offer";
+    case "project_hosting_acceptance": return "Project host acceptance";
+    case "coalition_formation": return "Coalition formation";
+    case "coalition_join": return "Coalition membership";
+    case "coalition_departure": return "Coalition departure";
+    case "coalition_removal": return "Coalition member removal";
+    case "node_steward_group_nomination": return "Node steward group nomination";
+    case "node_steward_candidate_consent": return "Node steward candidate consent";
+    case "node_steward_appointment": return "Node steward appointment";
+    case "node_steward_no_confidence_initiation": return "Node steward no-confidence initiation";
+    case "node_steward_no_confidence": return "Node steward no confidence";
+    case "node_steward_resignation": return "Node steward resignation";
     default: return subjectType.replace(/_/g, " ");
   }
 }
@@ -254,6 +281,7 @@ export function governanceCategoryLabel(category: string) {
     case "group_settings": return "Group Settings";
     case "publishing": return "Publishing";
     case "participation": return "Participation";
+    case "node_stewardship": return "Node Stewardship";
     default: return category.replace(/_/g, " ");
   }
 }

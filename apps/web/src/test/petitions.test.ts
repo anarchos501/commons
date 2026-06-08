@@ -514,7 +514,7 @@ test("Fix 3: openPetition rejects creator who is not active-participation", asyn
 
 test("addPetitionSupport rejects group-member support on project-scoped petition", async () => {
   const { group, memberships } = await createFixture("pet_vs_rej", 2);
-  const project = await prisma.project.create({ data: { id: "pet_vs_rej_proj", groupId: group.id, name: "VS Proj", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "pet_vs_rej_proj", foundingGroupId: group.id, name: "VS Proj", status: "active" } });
   try {
     // memberships[0] is NOT a project member
     const result = await openPetition(prisma, {
@@ -539,7 +539,7 @@ test("addPetitionSupport rejects group-member support on project-scoped petition
 
 test("addPetitionSupport succeeds for project member on project-scoped petition", async () => {
   const { group, memberships } = await createFixture("pet_vs_ok", 2);
-  const project = await prisma.project.create({ data: { id: "pet_vs_ok_proj", groupId: group.id, name: "VS Proj OK", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "pet_vs_ok_proj", foundingGroupId: group.id, name: "VS Proj OK", status: "active" } });
   try {
     const acct1 = await prisma.groupMembership.findUniqueOrThrow({ where: { id: memberships[0].id }, select: { accountId: true } });
     const projectMembership = await prisma.projectMembership.create({ data: { accountId: acct1.accountId, projectId: project.id, status: "active", participationStatus: "active" } });
@@ -577,7 +577,7 @@ test("getActiveVoterCount returns group count for null-scoped petition", async (
 
 test("getActiveVoterCount returns project member count for project-scoped petition", async () => {
   const { group, memberships } = await createFixture("pet_vc_proj", 3);
-  const project = await prisma.project.create({ data: { id: "pet_vc_proj_p", groupId: group.id, name: "VC Proj", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "pet_vc_proj_p", foundingGroupId: group.id, name: "VC Proj", status: "active" } });
   try {
     // Only memberships[0] and [1] are project members
     for (let i = 0; i < 2; i++) {
@@ -596,7 +596,7 @@ test("getActiveVoterCount returns project member count for project-scoped petiti
 
 test("getActiveVoterCount includes project members without host-group membership", async () => {
   const { group } = await createFixture("pet_vc_proj_only", 1);
-  const project = await prisma.project.create({ data: { id: "pet_vc_proj_only_p", groupId: group.id, name: "VC Project Only", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "pet_vc_proj_only_p", foundingGroupId: group.id, name: "VC Project Only", status: "active" } });
   try {
     const account = await prisma.account.create({
       data: {
@@ -751,8 +751,8 @@ async function cleanupFixture(prefix: string) {
   await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: { startsWith: prefix } } } });
   await prisma.petition.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

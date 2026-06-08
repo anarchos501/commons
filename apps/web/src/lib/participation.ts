@@ -164,7 +164,11 @@ export async function getActiveParticipantCount(prisma: PrismaClient, groupId: s
   });
 }
 
-type VoterScope = { type: "project"; scopeId: string } | null | undefined;
+export type ProjectVoterScope =
+  | { type: "project"; scopeId: string }
+  | { type: "project_frozen"; scopeId: string; membershipIds: string[] };
+
+type VoterScope = ProjectVoterScope | null | undefined;
 
 /**
  * Count of eligible voters for a petition, respecting its voterScope.
@@ -180,6 +184,17 @@ export async function getActiveVoterCount(
   // Coalesce groupId → scopeId for nullable groupId (P1 migration)
   const governingGroupId = petition.groupId ?? petition.scopeId ?? "";
   const scope = petition.voterScope as VoterScope;
+  if (scope?.type === "project_frozen") {
+    if (scope.membershipIds.length === 0) return 0;
+    return prisma.projectMembership.count({
+      where: {
+        id: { in: scope.membershipIds },
+        projectId: scope.scopeId,
+        status: "active",
+      },
+    });
+  }
+
   const projectScopeId = petition.scopeType === "project" ? petition.scopeId : scope?.type === "project" ? scope.scopeId : null;
   if (projectScopeId) {
     return prisma.projectMembership.count({

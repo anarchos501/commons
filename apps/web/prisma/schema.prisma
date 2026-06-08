@@ -51,9 +51,9 @@ enum PluginPolicy {
 enum ProjectStatus {
   active    // at least one active project member
   quiet     // no active members; at least one quiet member remains
-  dormant   // no project members remain; at least one host group remains
-  completed // mission intentionally fulfilled by project members
-  closed    // automatic: no members AND no host groups
+  dormant   // no active or quiet members remain — independent of hosting (RFC-007: see ProjectHosting/pendingClosureAt for the separate, derived hosting axis)
+  completed // mission intentionally fulfilled by project members; a one-way exit — never enters pending closure, never becomes closed (RFC-007)
+  closed    // automatic: pending-closure grace period (30 days) elapsed with no mutually-approved successor host (RFC-007 amends this trigger; previously "no members AND no host groups")
 }
 
 enum TrustRequirement {
@@ -163,12 +163,14 @@ enum CoordinationSpaceType {
   group
   project
   responsibility
+  coalition
 }
 
 enum GovernanceScope {
   node
   group
   project
+  coalition
   proposal
   service
   plugin
@@ -297,15 +299,26 @@ model Node {
   id                        String           @id @default(cuid())
   name                      String
   domain                    String           @unique
+  stewardGroupId            String?
+  stewardRevision           Int              @default(0)
   constitutionalPreferences Json?
   federationPolicy          FederationPolicy @default(disabled)
   pluginPolicy              PluginPolicy     @default(disabled)
   createdAt                 DateTime         @default(now())
 
+  stewardGroup         Group?                 @relation("NodeStewardGroup", fields: [stewardGroupId], references: [id], onDelete: SetNull)
   accounts            Account[]
   groups              Group[]
+  coalitions          Coalition[]
+  hosts               NodeHost[]
+  governanceSignals   NodeGovernanceSignal[]
+  petitionSupport     NodePetitionSupport[]
+  stewardProposals    NodeStewardProposal[]
+  actionLogs          ActionLog[]
   linkedNodePresences LinkedNodePresence[]
   signedEvents        SignedEvent[]
+
+  @@index([stewardGroupId])
 }
 
 model PortableIdentity {
@@ -373,6 +386,11 @@ model Account {
   livingDocumentRevisions LivingDocumentRevision[]
   discussionThreadsCreated DiscussionThread[]
   discussionMessages       DiscussionMessage[]
+  nodeHostRecords          NodeHost[]
+  nodeGovernanceSignals    NodeGovernanceSignal[]
+  nodePetitionSupport      NodePetitionSupport[]
+  nodeStewardProposals     NodeStewardProposal[]
+  createdNodePetitions     Petition[] @relation("PetitionAccountCreator")
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -391,8 +409,15 @@ model Group {
   createdAt             DateTime @default(now())
 
   node             Node                       @relation(fields: [nodeId], references: [id])
-  projects         Project[]
+  foundedProjects  Project[]
   hostedProjects   ProjectHosting[]
+  hostingProposals ProjectHostingProposal[]
+  coalitionMemberships CoalitionMembership[]
+  coalitionProposalsSponsored CoalitionProposal[] @relation("CoalitionProposalSponsor")
+  coalitionProposalPetitions CoalitionProposalPetition[]
+  stewardForNodes            Node[] @relation("NodeStewardGroup")
+  nodeStewardCandidates      NodeStewardProposal[] @relation("NodeStewardCandidate")
+  nodeStewardInitiations     NodeStewardProposal[] @relation("NodeStewardInitiatingGroup")
   trustApprovals   TrustedServiceCapability[]
   supportRequests  SupportRequest[]
   offers           Offer[]
@@ -421,6 +446,143 @@ model Group {
 
   @@unique([nodeId, name])
   @@index([nodeId])
+}
+
+model NodeHost {
+  id        String    @id @default(cuid())
+  nodeId    String
+  accountId String
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  node    Node    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+  @@index([accountId])
+  @@index([revokedAt])
+}
+
+model NodeGovernanceSignal {
+  id        String   @id @default(cuid())
+  nodeId    String
+  accountId String
+  category  String
+  parameter String   @default("_")
+  signal    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  node    Node    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, nodeId, category, parameter])
+  @@index([nodeId, category])
+}
+
+model NodeStewardProposal {
+  id                        String    @id @default(cuid())
+  nodeId                    String
+  action                    String    // appointment | no_confidence | resignation
+  origin                    String    // host | group
+  candidateGroupId          String
+  initiatingGroupId         String?
+  initiatedByAccountId      String?
+  baselineStewardGroupId    String?
+  baselineStewardRevision   Int
+  groupInitiationPetitionId String?   @unique
+  candidateConsentPetitionId String?  @unique
+  nodePetitionId            String?   @unique
+  status                    String    @default("open") // open | awaiting_candidate_consent | awaiting_node_vote | succeeded | failed-rejected | failed-withdrawn | failed-stale
+  snapshot                  Json
+  createdAt                 DateTime  @default(now())
+  resolvedAt                DateTime?
+
+  node            Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  candidateGroup  Group    @relation("NodeStewardCandidate", fields: [candidateGroupId], references: [id])
+  initiatingGroup Group?   @relation("NodeStewardInitiatingGroup", fields: [initiatingGroupId], references: [id])
+  initiatedBy     Account? @relation(fields: [initiatedByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([nodeId, status])
+  @@index([candidateGroupId])
+  @@index([initiatingGroupId])
+  @@index([initiatedByAccountId])
+}
+
+model Coalition {
+  id          String    @id @default(cuid())
+  nodeId      String
+  name        String
+  description String?
+  status      String    @default("active") // active | dissolved
+  createdAt   DateTime  @default(now())
+  dissolvedAt DateTime?
+
+  node        Node                  @relation(fields: [nodeId], references: [id])
+  memberships CoalitionMembership[]
+  proposals   CoalitionProposal[]
+
+  @@unique([nodeId, name])
+  @@index([nodeId])
+  @@index([status])
+}
+
+model CoalitionMembership {
+  id          String    @id @default(cuid())
+  coalitionId String
+  groupId     String
+  joinedAt    DateTime  @default(now())
+  endedAt     DateTime?
+  endReason   String?
+
+  coalition Coalition @relation(fields: [coalitionId], references: [id])
+  group     Group     @relation(fields: [groupId], references: [id])
+
+  @@index([coalitionId])
+  @@index([groupId])
+  @@index([endedAt])
+}
+
+model CoalitionProposal {
+  id                  String    @id @default(cuid())
+  coalitionId         String?
+  action              String    // formation | join | departure | removal
+  proposedByGroupId   String
+  targetGroupId       String?
+  name                String?
+  description         String?
+  content             String
+  participantSnapshot Json
+  status              String    @default("open") // open | succeeded | failed-rejected | failed-withdrawn | failed-timeout
+  createdAt           DateTime  @default(now())
+  resolvedAt          DateTime?
+
+  coalition       Coalition?                  @relation(fields: [coalitionId], references: [id])
+  proposedByGroup Group                       @relation("CoalitionProposalSponsor", fields: [proposedByGroupId], references: [id])
+  petitions       CoalitionProposalPetition[]
+
+  @@index([coalitionId])
+  @@index([proposedByGroupId])
+  @@index([targetGroupId])
+  @@index([action])
+  @@index([status])
+}
+
+model CoalitionProposalPetition {
+  id            String   @id @default(cuid())
+  proposalId    String
+  groupId       String
+  petitionId    String   @unique
+  role          String   // participant | applicant | departing | remaining_member
+  groupSnapshot Json
+  createdAt     DateTime @default(now())
+
+  proposal CoalitionProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  group    Group             @relation(fields: [groupId], references: [id])
+
+  @@unique([proposalId, groupId])
+  @@index([proposalId])
+  @@index([groupId])
 }
 
 model GroupMembership {
@@ -488,7 +650,7 @@ model GroupInviteToken {
 
 model Project {
   id                    String        @id @default(cuid())
-  groupId               String        // founding/primary host group (kept for backward compat)
+  foundingGroupId       String        // immutable founding-group provenance; confers no current-hosting authority (see ProjectHosting)
   name                  String
   description           String?
   status                ProjectStatus @default(active)
@@ -496,11 +658,14 @@ model Project {
   governancePreferences Json?
   privacyPreferences    Json?
   archivedAt            DateTime?     // visibility flag: archived ≠ closed/completed
+  pendingClosureAt      DateTime?     // set when the last active ProjectHosting ends; opens the 30-day adoption grace period (RFC-007)
+  pendingClosureElectorate Json?       // immutable ProjectMembership/account snapshot captured with pendingClosureAt
   // Future: archivedBy, archiveProposalId, archiveReason (Governance RFC)
   createdAt             DateTime      @default(now())
 
-  group            Group                  @relation(fields: [groupId], references: [id])
+  foundingGroup    Group                  @relation(fields: [foundingGroupId], references: [id])
   hostings         ProjectHosting[]
+  hostingProposals ProjectHostingProposal[]
   memberships      ProjectMembership[]
   serviceOfferings GroupServiceOffering[]
   supportRequests  SupportRequest[]
@@ -510,24 +675,25 @@ model Project {
   actionLogs       ActionLog[]
   signedEvents     SignedEvent[]
 
-  @@unique([groupId, name])
-  @@index([groupId])
+  @@unique([foundingGroupId, name])
+  @@index([foundingGroupId])
   @@index([status])
   @@index([archivedAt])
 }
 
 model ProjectHosting {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   projectId String
   groupId   String
-  hostedAt  DateTime @default(now())
+  hostedAt  DateTime  @default(now())
+  endedAt   DateTime? // null = active hosting; set on withdrawal. Active uniqueness on [projectId, groupId] is enforced by a partial index in migration SQL (Prisma cannot express WHERE-conditioned @@unique)
 
   project Project @relation(fields: [projectId], references: [id])
   group   Group   @relation(fields: [groupId], references: [id])
 
-  @@unique([projectId, groupId])
   @@index([projectId])
   @@index([groupId])
+  @@index([endedAt])
 }
 
 model ProjectMembership {
@@ -549,6 +715,36 @@ model ProjectMembership {
   @@index([accountId])
   @@index([projectId])
   @@index([projectId, participationStatus])
+}
+
+// RFC-007: links a candidate group's "should we host?" petition with a pending-closure
+// project's "should we accept this host?" petition into one mutual-consent bundle.
+// Same orchestration shape as CoalitionProposal (Phase 2): immutable snapshots + frozen
+// electorate + linked child petitions + resolution state. ProjectHosting is created only
+// when both child petitions succeed; either side rejecting, withdrawing, or timing out
+// fails the whole proposal and supersedes the other still-open petition.
+model ProjectHostingProposal {
+  id                     String    @id @default(cuid())
+  projectId              String
+  candidateGroupId       String
+  projectSnapshot        Json      // immutable { id, name } project identity at proposal creation
+  candidateGroupSnapshot Json      // immutable { id, name } candidate-group identity at proposal creation
+  frozenElectorate       Json      // immutable array of qualifying ProjectMembership ids, captured at Project.pendingClosureAt (RFC-007 pending-closure electorate)
+  content                String    // immutable rationale supplied when the proposal was opened
+  groupPetitionId        String    @unique // candidate group's "should we host?" petition (Petition.id; loose reference, validated at service layer like Petition.subjectId)
+  projectPetitionId      String    @unique // project's "should we accept this host?" petition (Petition.id; loose reference, validated at service layer like Petition.subjectId)
+  status                 String    @default("open") // open | succeeded | failed-rejected | failed-withdrawn | failed-timeout
+  createdAt              DateTime  @default(now())
+  resolvedAt             DateTime?
+
+  project        Project @relation(fields: [projectId], references: [id])
+  candidateGroup Group   @relation(fields: [candidateGroupId], references: [id])
+
+  @@index([projectId])
+  @@index([candidateGroupId])
+  @@index([groupPetitionId])
+  @@index([projectPetitionId])
+  @@index([status])
 }
 
 model ServiceCapability {
@@ -1014,7 +1210,7 @@ model Petition {
   // Scope fields (P1 migration): scopeType/scopeId replace groupId as the governing-entity reference.
   // groupId kept as nullable for backward compat during transition — prefer scopeId.
   groupId                      String?
-  scopeType                    String    @default("group") // "group" | "project" | "responsibility"
+  scopeType                    String    @default("group") // "group" | "project" | "responsibility" | "node"
   scopeId                      String    // governing entity id; backfilled from groupId for existing records
   category                     String    // GovernanceCategory, validated at service layer
   subjectType                  String    // ProposalFamily, validated at service layer
@@ -1030,11 +1226,14 @@ model Petition {
   archivedAt                   DateTime? // set lazily ~30 days after resolvedAt by archiveStalePetitions
   createdByMembershipId        String?   // legacy: GroupMembership FK — kept for compat
   createdByProjectMembershipId String?   // new: ProjectMembership FK for project-scoped petitions
+  createdByAccountId           String?   // account creator for node-host-origin petitions
 
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: Cascade)
   createdBy         GroupMembership?   @relation("PetitionCreator", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
   createdByProject  ProjectMembership? @relation("PetitionProjectCreator", fields: [createdByProjectMembershipId], references: [id], onDelete: SetNull)
+  createdByAccount  Account?           @relation("PetitionAccountCreator", fields: [createdByAccountId], references: [id], onDelete: SetNull)
   support           PetitionSupport[]
+  nodeSupport       NodePetitionSupport[]
 
   @@index([scopeType, scopeId, status])
   @@index([groupId, status])
@@ -1042,6 +1241,22 @@ model Petition {
   @@index([category])
   @@index([competitionKey])
   @@index([subjectType, subjectId])
+}
+
+model NodePetitionSupport {
+  id         String   @id @default(cuid())
+  petitionId String
+  nodeId     String
+  accountId  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  petition Petition @relation(fields: [petitionId], references: [id], onDelete: Cascade)
+  node     Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  account  Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([petitionId, accountId])
+  @@index([nodeId, accountId])
 }
 
 model PetitionSupport {
@@ -1083,6 +1298,7 @@ model ActionLog {
   actorAccountId String?
   groupId        String?
   projectId      String?
+  nodeId         String?
   action         String
   targetType     String
   targetId       String
@@ -1092,10 +1308,12 @@ model ActionLog {
   actor   Account? @relation(fields: [actorAccountId], references: [id])
   group   Group?   @relation(fields: [groupId], references: [id])
   project Project? @relation(fields: [projectId], references: [id])
+  node    Node?    @relation(fields: [nodeId], references: [id])
 
   @@index([actorAccountId])
   @@index([groupId])
   @@index([projectId])
+  @@index([nodeId])
   @@index([action])
   @@index([targetType, targetId])
   @@index([createdAt])

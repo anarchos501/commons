@@ -20,7 +20,10 @@ import {
 import { leaveGroup, requireGroupMembership } from "../../../lib/group-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString } from "../../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
-import { addPetitionSupport, evaluatePetition } from "../../../lib/petitions";
+import { addNodePetitionSupport, addPetitionSupport } from "../../../lib/petitions";
+import { evaluateAndApplyPetition } from "../../../lib/petition-evaluation";
+import { resolveCurrentNode } from "../../../lib/node-context";
+import { getNodeParticipationStatus } from "../../../lib/node-governance";
 import { CollapsibleSection } from "../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../components/shared/EmptyState";
@@ -280,6 +283,8 @@ type PetitionNotif = {
   groupId: string;
   groupName: string;
   membershipId: string;
+  isNode: boolean;
+  href: string;
   supportCount: number;
   closesAt: Date;
   isUnread: boolean;
@@ -307,9 +312,13 @@ async function getDashboardData(
     });
     const memberGroupIds = myGroupMemberships.map((m) => m.groupId);
     const membershipIdByGroup = Object.fromEntries(myGroupMemberships.map((m) => [m.groupId, m.id]));
+    const currentNode = await resolveCurrentNode(prisma);
+    const nodeParticipation = currentNode
+      ? await getNodeParticipationStatus(prisma, currentNode.id, accountId)
+      : null;
 
     // Parallel: services (from contribution categories), routes, petitions, per-group data, my requests
-    const [groupCategories, routes, petitions, trustedProviderGroups, myRequests] = await Promise.all([
+    const [groupCategories, routes, petitions, nodePetitions, trustedProviderGroups, myRequests] = await Promise.all([
       memberGroupIds.length > 0
         ? prisma.contributionCategory.findMany({
             where: { status: "active", groupId: { in: memberGroupIds } },
@@ -340,6 +349,17 @@ async function getDashboardData(
             },
             orderBy: { opensAt: "desc" },
             take: 40,
+          })
+        : Promise.resolve([]),
+      currentNode && nodeParticipation === "active"
+        ? prisma.petition.findMany({
+            where: { scopeType: "node", scopeId: currentNode.id, status: "open" },
+            include: {
+              nodeSupport: { where: { accountId }, select: { id: true }, take: 1 },
+              _count: { select: { nodeSupport: true } },
+            },
+            orderBy: { opensAt: "desc" },
+            take: 20,
           })
         : Promise.resolve([]),
       memberGroupIds.length > 0
@@ -381,16 +401,31 @@ async function getDashboardData(
         groupId: effectiveGroupId,
         groupName: p.group?.name ?? effectiveGroupId,
         membershipId: membershipIdByGroup[effectiveGroupId] ?? "",
+        isNode: false,
+        href: `/groups/${effectiveGroupId}#petitions`,
         supportCount: p._count.support,
         closesAt: p.closesAt,
         isUnread: p.support.length === 0,
         createdAt: p.opensAt,
       };
     });
+    const nodePetitionNotifs: PetitionNotif[] = nodePetitions.map((p) => ({
+      kind: "petition",
+      id: p.id,
+      groupId: currentNode?.id ?? p.scopeId,
+      groupName: currentNode?.name ?? "Node",
+      membershipId: "",
+      isNode: true,
+      href: "/node#petitions",
+      supportCount: p._count.nodeSupport,
+      closesAt: p.closesAt,
+      isUnread: p.nodeSupport.length === 0,
+      createdAt: p.opensAt,
+    }));
 
     const combined: NotifItem[] = [
       ...(notifFilters.type === "all" || notifFilters.type === "route" ? routeNotifs : []),
-      ...(notifFilters.type === "all" || notifFilters.type === "petition" ? petitionNotifs : []),
+      ...(notifFilters.type === "all" || notifFilters.type === "petition" ? [...petitionNotifs, ...nodePetitionNotifs] : []),
     ];
 
     const notifications = combined
@@ -522,11 +557,16 @@ async function supportPetitionFromNotifAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const petitionId = requiredString(formData, "petitionId");
-  const membershipId = requiredString(formData, "membershipId");
+  const membershipId = (formData.get("membershipId") as string | null) ?? "";
+  const scopeType = (formData.get("scopeType") as string | null) ?? "group";
   const prisma = createPrismaClient();
   try {
-    await addPetitionSupport(prisma, { petitionId, membershipId });
-    await evaluatePetition(prisma, petitionId);
+    if (scopeType === "node") {
+      await addNodePetitionSupport(prisma, { petitionId, accountId: session.accountId });
+    } else {
+      await addPetitionSupport(prisma, { petitionId, membershipId });
+    }
+    await evaluateAndApplyPetition(prisma, petitionId);
   } finally {
     await prisma.$disconnect();
   }
@@ -668,20 +708,21 @@ function PetitionNotifCard({ petition }: { petition: PetitionNotif }) {
         </span>
       </div>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        {petition.isUnread && petition.membershipId && (
+        {petition.isUnread && (petition.membershipId || petition.isNode) && (
           <form action={supportPetitionFromNotifAction}>
             <input type="hidden" name="petitionId" value={petition.id} />
             <input type="hidden" name="membershipId" value={petition.membershipId} />
+            <input type="hidden" name="scopeType" value={petition.isNode ? "node" : "group"} />
             <SubmitButton variant="secondary">
               <span className="inline-flex items-center gap-2"><Check className="h-4 w-4" />Support</span>
             </SubmitButton>
           </form>
         )}
         <a
-          href={`/groups/${petition.groupId}#petitions`}
+          href={petition.href}
           className="inline-flex min-h-11 items-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
         >
-          View in group →
+          {petition.isNode ? "View node governance" : "View in group"} <span aria-hidden="true">-&gt;</span>
         </a>
       </div>
       {!petition.isUnread && <p className="mt-3 text-sm text-[var(--muted)]">You have already supported this petition.</p>}

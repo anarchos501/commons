@@ -4,6 +4,7 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import {
   applyProjectParticipationTransitions,
+  syncProjectHostingLifecycle,
   recordProjectPresence,
   leaveProject,
 } from "../../../../lib/project-membership";
@@ -16,7 +17,7 @@ import {
 } from "../../../../lib/living-documents";
 import {
   listDiscussionMessages,
-  listDiscussionThreads,
+  listProjectDiscussionThreads,
   createProjectDiscussionThread,
   postProjectDiscussionMessage,
 } from "../../../../lib/discussions";
@@ -27,6 +28,7 @@ import {
   getAvailableCategoriesForScope,
 } from "../../../../lib/contribution-categories";
 import { requiredString } from "../../../../lib/support-form";
+import { visibleProjectRosterAffiliations } from "../../../../lib/federation-legibility";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
@@ -52,6 +54,8 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
 
   const { project, currentMembership } = data;
   const isActive = currentMembership?.participationStatus === "active";
+  const canWrite = isActive && project.status !== "closed" && project.pendingClosureAt === null;
+  const canParticipateInGovernance = isActive && project.status !== "closed";
   const membershipId = currentMembership?.id ?? "";
 
   return (
@@ -72,13 +76,30 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
             {currentMembership && (
               <span className="capitalize">You: {currentMembership.participationStatus}</span>
             )}
-            {data.hostGroups.map((g) => (
-              <a key={g.id} href={`/groups/${g.id}`} className="text-[var(--accent)] hover:underline">
-                ↑ {g.name}
-              </a>
-            ))}
           </div>
-          {currentMembership && isActive && (
+          {project.status === "closed" ? (
+            <div className="mt-4"><Notice message="This project is closed. Its historical record remains readable, but it is read-only." /></div>
+          ) : project.pendingClosureAt ? (
+            <div className="mt-4"><Notice message="This project has no current host and is pending closure. Only successor-host adoption governance remains open." /></div>
+          ) : null}
+          <div className="mt-4 border-l-2 border-[var(--accent)] pl-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Hosted by</p>
+            {data.hostGroups.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                {data.hostGroups.map((group) => (
+                  <a key={group.id} href={`/groups/${group.id}`} className="text-sm font-medium text-[var(--accent)] hover:underline">
+                    {group.name}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-[var(--soft-text)]">No current host group</p>
+            )}
+            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+              Hosting is endorsement and support, not ownership. Project members govern the project.
+            </p>
+          </div>
+          {currentMembership && canWrite && (
             <form action={leaveProjectAction} className="mt-3">
               <input type="hidden" name="projectId" value={projectId} />
               <button type="submit" className="text-xs text-amber-700 hover:text-amber-600 transition">
@@ -125,7 +146,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                     ) : (
                       <EmptyState text="No active messages in this thread." />
                     )}
-                    {isActive && (
+                    {canWrite && (
                       <form action={postDiscussionMessageAction} className="space-y-2 mt-2">
                         <input type="hidden" name="projectId" value={projectId} />
                         <input type="hidden" name="threadId" value={data.selectedThread.id} />
@@ -142,7 +163,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           ) : (
             <EmptyState text="No active discussion threads yet." />
           )}
-          {isActive && (
+          {canWrite && (
             <form action={createDiscussionThreadAction} className="space-y-3">
               <input type="hidden" name="projectId" value={projectId} />
               <label className="block">
@@ -176,7 +197,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                         <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-3">{b.body}</p>
                         <div className="mt-1 flex items-center justify-between gap-2">
                           <p className="text-xs text-[var(--muted)]">{b.author.displayName}</p>
-                          {isActive && (
+                          {canWrite && (
                             <form action={archiveBulletinAction}>
                               <input type="hidden" name="projectId" value={projectId} />
                               <input type="hidden" name="bulletinId" value={b.id} />
@@ -190,7 +211,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 ) : (
                   <EmptyState text="No bulletins yet." />
                 )}
-                {isActive && (
+                {canWrite && (
                   <form action={createBulletinAction} className="space-y-3">
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="A short title" /></label>
@@ -221,7 +242,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                         </div>
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
-                          {isActive && (
+                          {canWrite && (
                             <form action={archivePublicationAction}>
                               <input type="hidden" name="projectId" value={projectId} />
                               <input type="hidden" name="publicationId" value={p.id} />
@@ -229,7 +250,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                             </form>
                           )}
                         </div>
-                        {isActive && (
+                        {canWrite && (
                           <details className="mt-1">
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
                             <form action={proposePubEntryCreationAction} className="mt-2 space-y-2">
@@ -247,7 +268,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 ) : (
                   <EmptyState text="No publications yet." />
                 )}
-                {isActive && (
+                {canWrite && (
                   <form action={createPublicationAction} className="space-y-3">
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="e.g. Project Resources" /></label>
@@ -273,7 +294,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                       <div key={doc.id} className="border border-[var(--border)] p-3 space-y-2">
                         <p className="text-sm font-semibold text-[var(--text)]">{doc.title}</p>
                         <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
-                        {isActive && (
+                        {canWrite && (
                           <details className="mt-2">
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a revision</summary>
                             <form action={proposeLivingDocumentRevisionAction} className="mt-2 space-y-2">
@@ -290,7 +311,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 ) : (
                   <EmptyState text="No living documents yet." />
                 )}
-                {isActive && (
+                {canWrite && (
                   <form action={createLivingDocumentAction} className="space-y-3">
                     <input type="hidden" name="projectId" value={projectId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" placeholder="e.g. Charter, Guidelines" /></label>
@@ -321,8 +342,20 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
                 <div className="space-y-1">
                   {data.projectMembers.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between text-sm">
-                      <span className="text-[var(--text)]">{m.account.displayName}</span>
+                    <div key={m.id} className="flex items-start justify-between gap-3 py-1 text-sm">
+                      <div className="min-w-0">
+                        <span className="text-[var(--text)]">{m.account.displayName}</span>
+                        {m.affiliations.length > 0 && (
+                          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
+                            <span>Member of</span>
+                            {m.affiliations.map((group) => (
+                              <a key={group.id} href={`/groups/${group.id}`} className="text-[var(--accent)] hover:underline">
+                                {group.name}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <span className="text-xs capitalize text-[var(--muted)]">{m.participationStatus}</span>
                     </div>
                   ))}
@@ -356,7 +389,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                           {petition.status}
                         </span>
                       </div>
-                      {isActive && petition.status === "open" && (
+                      {canParticipateInGovernance && petition.status === "open" && (
                         <div className="mt-3 flex gap-2">
                           {!petition.supportedByCurrentMember ? (
                             <form action={supportPetitionAction}>
@@ -396,7 +429,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
               ) : (
                 <EmptyState text="No contribution categories defined yet." />
               )}
-              {isActive && (
+              {canWrite && (
                 <details>
                   <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new category</summary>
                   <form action={proposeCategoryAction} className="mt-3 space-y-3">
@@ -422,11 +455,15 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
   const prisma = createPrismaClient();
   try {
     await recordProjectPresence(prisma, accountId, projectId);
+    // Hosting lifecycle first: it's the sole authority for pendingClosureAt,
+    // which participation transitions read (read-only) to apply the RFC-007
+    // electorate freeze for hostless projects.
+    await syncProjectHostingLifecycle(prisma, projectId);
     await applyProjectParticipationTransitions(prisma, projectId);
 
     const project = await prisma.project.findUniqueOrThrow({
       where: { id: projectId },
-      select: { id: true, name: true, description: true, status: true, groupId: true },
+      select: { id: true, name: true, description: true, status: true, pendingClosureAt: true, foundingGroupId: true },
     });
 
     // Require active project membership OR active group membership in any host group
@@ -435,11 +472,12 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       select: { id: true, status: true, participationStatus: true },
     });
 
+    // Current hosting only — a group's founding role confers no ongoing standing
+    // once it is no longer an active host (RFC-007).
     const hostings = await prisma.projectHosting.findMany({
-      where: { projectId },
+      where: { projectId, endedAt: null },
       select: { groupId: true, group: { select: { id: true, name: true } } },
     });
-    const hostGroupId = project.groupId; // primary host group for petitions
     const hostGroups = hostings.map((h) => ({ id: h.groupId, name: h.group.name }));
 
     // If not a project member, check if they're a group member of any host group
@@ -473,8 +511,9 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       prisma.projectMembership.count({ where: { projectId, status: "active", participationStatus: "active" } }),
     ]);
 
-    // Discussion (threads are anchored to host group until discussion lib is project-aware)
-    const discussionThreads = await listDiscussionThreads(prisma, { spaceType: "project", spaceId: projectId, groupId: hostGroupId });
+    // Discussion (project-native authorization — readable regardless of current
+    // hosting state, per RFC-007 "the project remains fully readable")
+    const discussionThreads = await listProjectDiscussionThreads(prisma, { projectId });
     const selectedThread = discussionThreads.find((t) => t.id === selectedThreadId) ?? discussionThreads[0] ?? null;
     const discussionMessages = selectedThread ? await listDiscussionMessages(prisma, selectedThread.id) : [];
 
@@ -506,12 +545,30 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     });
 
     // Contribution categories for project scope
-    const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: hostGroupId, projectId });
+    // Project-offered categories are anchored at foundingGroupId (see contribution-categories.ts),
+    // independent of which group(s) currently host the project.
+    const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: project.foundingGroupId, projectId });
 
     // Member roster
     const projectMembers = await prisma.projectMembership.findMany({
       where: { projectId, status: "active" },
-      select: { id: true, participationStatus: true, account: { select: { displayName: true } } },
+      select: {
+        id: true,
+        participationStatus: true,
+        account: {
+          select: {
+            displayName: true,
+            groupMemberships: {
+              where: { status: "active", groupId: { in: hostGroups.map((group) => group.id) } },
+              select: {
+                group: {
+                  select: { id: true, name: true, privacyPreferences: true },
+                },
+              },
+            },
+          },
+        },
+      },
       orderBy: { account: { displayName: "asc" } },
     });
 
@@ -519,7 +576,6 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       project,
       currentMembership,
       hostGroups,
-      hostGroupId,
       bulletins,
       publications,
       livingDocuments,
@@ -529,7 +585,14 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       discussionMessages,
       petitions,
       contributionCategories: rawCategories,
-      projectMembers,
+      projectMembers: projectMembers.map((membership) => ({
+        id: membership.id,
+        participationStatus: membership.participationStatus,
+        account: { displayName: membership.account.displayName },
+        affiliations: visibleProjectRosterAffiliations(
+          membership.account.groupMemberships.map(({ group }) => group),
+        ),
+      })),
     };
   } finally {
     await prisma.$disconnect();
@@ -608,8 +671,8 @@ async function createBulletinAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
-    await proposeBulletinCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
+    await proposeBulletinCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -641,8 +704,8 @@ async function createPublicationAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
-    await proposePublicationCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, createdByProjectMembershipId: projectMembership.id });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
+    await proposePublicationCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -660,8 +723,8 @@ async function proposePubEntryCreationAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
-    await proposePubEntryCreation(prisma, { spaceType: "project", spaceId: projectId, publicationId, groupId: project.groupId, body, title: title || undefined, createdByProjectMembershipId: projectMembership.id });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
+    await proposePubEntryCreation(prisma, { spaceType: "project", spaceId: projectId, publicationId, groupId: project.foundingGroupId, body, title: title || undefined, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -694,8 +757,8 @@ async function createLivingDocumentAction(formData: FormData) {
   const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { groupId: true } });
-    await proposeLivingDocumentCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.groupId, title, body, createdByProjectMembershipId: projectMembership.id });
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { foundingGroupId: true } });
+    await proposeLivingDocumentCreation(prisma, { spaceType: "project", spaceId: projectId, groupId: project.foundingGroupId, title, body, createdByProjectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }

@@ -57,6 +57,7 @@ async function main() {
       privacyPreferences: {
         supportRequests: "private",
         contributionVisibility: "group",
+        memberAffiliationVisibility: "project",
       },
     },
     create: {
@@ -73,6 +74,7 @@ async function main() {
       privacyPreferences: {
         supportRequests: "private",
         contributionVisibility: "group",
+        memberAffiliationVisibility: "project",
       },
     },
   });
@@ -84,7 +86,11 @@ async function main() {
       membershipPolicy: "request_required",
       visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
-      privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
+      privacyPreferences: {
+        supportRequests: "private",
+        contributionVisibility: "group",
+        memberAffiliationVisibility: "project",
+      },
     },
     create: {
       id: "group_eastside_commons",
@@ -94,16 +100,20 @@ async function main() {
       membershipPolicy: "request_required",
       visibility: "public",
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
-      privacyPreferences: { supportRequests: "private", contributionVisibility: "group" },
+      privacyPreferences: {
+        supportRequests: "private",
+        contributionVisibility: "group",
+        memberAffiliationVisibility: "project",
+      },
     },
   });
 
   const ridesProject = await prisma.project.upsert({
-    where: { groupId_name: { groupId: group.id, name: "Rides" } },
+    where: { foundingGroupId_name: { foundingGroupId: group.id, name: "Rides" } },
     update: { description: "Appointment, grocery, and community transport coordination.", status: "active" },
     create: {
       id: "project_rides",
-      groupId: group.id,
+      foundingGroupId: group.id,
       name: "Rides",
       description: "Appointment, grocery, and community transport coordination.",
       status: "active",
@@ -111,11 +121,11 @@ async function main() {
   });
 
   const foodProject = await prisma.project.upsert({
-    where: { groupId_name: { groupId: group.id, name: "Food Distribution" } },
+    where: { foundingGroupId_name: { foundingGroupId: group.id, name: "Food Distribution" } },
     update: { description: "Shared food pickup, packing, and delivery support.", status: "active" },
     create: {
       id: "project_food_distribution",
-      groupId: group.id,
+      foundingGroupId: group.id,
       name: "Food Distribution",
       description: "Shared food pickup, packing, and delivery support.",
       status: "active",
@@ -123,11 +133,11 @@ async function main() {
   });
 
   const translationProject = await prisma.project.upsert({
-    where: { groupId_name: { groupId: group.id, name: "Translation Support" } },
+    where: { foundingGroupId_name: { foundingGroupId: group.id, name: "Translation Support" } },
     update: { description: "Language access for forms, calls, appointments, and meetings.", status: "active" },
     create: {
       id: "project_translation_support",
-      groupId: group.id,
+      foundingGroupId: group.id,
       name: "Translation Support",
       description: "Language access for forms, calls, appointments, and meetings.",
       status: "active",
@@ -232,6 +242,16 @@ async function main() {
       accountType: "member",
       publicKey: "dev-account-key-zora",
       profileVisibility: "group",
+    },
+  });
+
+  await prisma.nodeHost.upsert({
+    where: { id: "node_host_alice_localhost" },
+    update: { nodeId: node.id, accountId: alice.id, revokedAt: null },
+    create: {
+      id: "node_host_alice_localhost",
+      nodeId: node.id,
+      accountId: alice.id,
     },
   });
 
@@ -489,11 +509,12 @@ async function main() {
     ["project_food_distribution", foodProject.id],
     ["project_translation_support", translationProject.id],
   ] as const) {
-    await prisma.projectHosting.upsert({
-      where: { projectId_groupId: { projectId: projectRef, groupId: group.id } },
-      update: {},
-      create: { projectId: projectRef, groupId: group.id },
+    const activeHosting = await prisma.projectHosting.findFirst({
+      where: { projectId: projectRef, groupId: group.id, endedAt: null },
     });
+    if (!activeHosting) {
+      await prisma.projectHosting.create({ data: { projectId: projectRef, groupId: group.id } });
+    }
   }
 
   // Seed Alice as an active member of the Rides project.

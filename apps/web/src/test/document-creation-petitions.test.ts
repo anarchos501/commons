@@ -441,8 +441,11 @@ async function createFixture(prefix: string) {
 async function createProjectFixture(prefix: string) {
   const { groupId, accountId } = await createFixture(prefix);
   const project = await prisma.project.create({
-    data: { id: `${prefix}_proj`, name: `Project ${prefix}`, groupId, status: "active" },
+    data: { id: `${prefix}_proj`, name: `Project ${prefix}`, foundingGroupId: groupId, status: "active" },
   });
+  // Every project needs at least one ProjectHosting row — current hosting (not
+  // foundingGroupId) is what authorizes the project's coordination space (RFC-007).
+  await prisma.projectHosting.create({ data: { projectId: project.id, groupId } });
   const projectMembership = await prisma.projectMembership.create({
     data: { id: `${prefix}_pmem`, accountId, projectId: project.id, status: "active", participationStatus: "active" },
   });
@@ -458,8 +461,9 @@ async function cleanupFixture(prefix: string) {
   await prisma.publication.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.livingDocumentRevision.deleteMany({ where: { livingDocument: { spaceId: { startsWith: prefix } } } });
   await prisma.livingDocument.deleteMany({ where: { spaceId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.projectHosting.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import type { OfferingEntityType } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
+import { assertProjectWritable } from "./project-membership";
 import { hasAbilityNow } from "./responsibility-abilities";
 
 export type { OfferingEntityType };
@@ -145,9 +146,10 @@ export async function proposeProjectContributionCategory(
 
   const project = await prisma.project.findUnique({
     where: { id: input.projectId },
-    select: { groupId: true },
+    select: { foundingGroupId: true },
   });
   if (!project) return { ok: false, reason: "not_eligible" };
+  await assertProjectWritable(prisma, input.projectId);
 
   const existing = await prisma.contributionCategory.findFirst({
     where: {
@@ -161,7 +163,7 @@ export async function proposeProjectContributionCategory(
 
   const draft = await prisma.contributionCategoryDraft.create({
     data: {
-      groupId: project.groupId,
+      groupId: project.foundingGroupId,
       offeringEntityType: "project",
       offeringEntityId: input.projectId,
       name: input.name,
@@ -171,7 +173,7 @@ export async function proposeProjectContributionCategory(
   });
 
   const result = await openPetition(prisma, {
-    groupId: project.groupId,
+    groupId: project.foundingGroupId,
     scopeType: "project",
     scopeId: input.projectId,
     category: "contribution_category",

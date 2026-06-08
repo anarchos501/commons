@@ -2,7 +2,14 @@ import { type PrismaClient, Prisma } from "../generated/prisma/client";
 import { isGovernanceCategory } from "./governance-categories";
 import { isProposalFamily, categoryForFamily, deriveCompetitionKey } from "./governance-proposal-families";
 import { snapshotGovernanceParams } from "./governance-resolver";
+import type { ProjectVoterScope } from "./participation";
 import { getActiveParticipantCount, getActiveVoterCount } from "./participation";
+import {
+  getActiveNodeVoterCount,
+  requireActiveNodeHost,
+  requireActiveNodeUser,
+  resolveNodeGovernanceParams,
+} from "./node-governance";
 
 export type PetitionStatus = "open" | "approved" | "rejected" | "withdrawn" | "superseded" | "blocked";
 
@@ -91,6 +98,7 @@ export async function openPetition(
     voterScope,
     scopeType: requestedScopeType,
     scopeId: requestedScopeId,
+    systemInitiated = false,
   }: {
     groupId: string;                       // governing group (sets both groupId and scopeId for group-scoped petitions)
     category: string;
@@ -98,9 +106,10 @@ export async function openPetition(
     subjectId: string;
     createdByMembershipId?: string | null; // group-member creator (most petitions)
     createdByProjectMembershipId?: string | null; // project-member creator (project-internal petitions)
-    voterScope?: { type: "project"; scopeId: string } | null;
+    voterScope?: ProjectVoterScope | null;
     scopeType?: "group" | "project" | "responsibility";
     scopeId?: string;
+    systemInitiated?: boolean;
   },
 ): Promise<OpenPetitionResult> {
   if (!isProposalFamily(subjectType)) return { ok: false, reason: "invalid_family" };
@@ -138,11 +147,11 @@ export async function openPetition(
     ) {
       return { ok: false, reason: "creator_not_eligible" };
     }
-  } else {
+  } else if (!systemInitiated) {
     return { ok: false, reason: "creator_not_eligible" };
   }
 
-  const scopeType = requestedScopeType ?? (voterScope?.type === "project" ? "project" : "group");
+  const scopeType = requestedScopeType ?? (voterScope?.type === "project" || voterScope?.type === "project_frozen" ? "project" : "group");
   const scopeId = requestedScopeId ?? (scopeType === "project" ? voterScope?.scopeId : groupId);
   if (!scopeId) return { ok: false, reason: "creator_not_eligible" };
 
@@ -178,6 +187,83 @@ export async function openPetition(
       return { ok: false, reason: "petition_already_open" };
     }
     throw err;
+  }
+}
+
+export async function openSystemGroupPetition(
+  prisma: PrismaClient,
+  input: {
+    groupId: string;
+    category: string;
+    subjectType: string;
+    subjectId: string;
+  },
+): Promise<OpenPetitionResult> {
+  return openPetition(prisma, { ...input, systemInitiated: true });
+}
+
+export async function openNodePetition(
+  prisma: PrismaClient,
+  {
+    nodeId,
+    category,
+    subjectType,
+    subjectId,
+    createdByAccountId = null,
+    competitionSubjectId,
+  }: {
+    nodeId: string;
+    category: string;
+    subjectType: string;
+    subjectId: string;
+    createdByAccountId?: string | null;
+    competitionSubjectId?: string;
+  },
+): Promise<OpenPetitionResult> {
+  if (!isProposalFamily(subjectType)) return { ok: false, reason: "invalid_family" };
+  if (categoryForFamily(subjectType) !== category || !isGovernanceCategory(category)) {
+    return { ok: false, reason: "category_mismatch" };
+  }
+  if (createdByAccountId) await requireActiveNodeHost(prisma, nodeId, createdByAccountId);
+  const snapshot = await resolveNodeGovernanceParams(prisma, nodeId, category);
+  const effectiveSnapshot =
+    subjectType === "node_steward_no_confidence"
+      ? {
+          ...snapshot,
+          threshold: Math.max(snapshot.threshold, snapshot.noConfidenceThreshold ?? snapshot.threshold),
+        }
+      : snapshot;
+  const opensAt = new Date();
+  const closesAt = new Date(opensAt.getTime() + effectiveSnapshot.petitionDuration * 24 * 60 * 60 * 1000);
+  const competitionKey = deriveCompetitionKey(
+    subjectType,
+    competitionSubjectId ?? subjectId,
+    nodeId,
+  );
+  try {
+    const petition = await prisma.petition.create({
+      data: {
+        groupId: null,
+        scopeType: "node",
+        scopeId: nodeId,
+        category,
+        subjectType,
+        subjectId,
+        competitionKey,
+        status: "open",
+        governanceSnapshot: effectiveSnapshot as object,
+        voterScope: Prisma.JsonNull,
+        opensAt,
+        closesAt,
+        createdByAccountId,
+      },
+    });
+    return { ok: true, petitionId: petition.id };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { ok: false, reason: "petition_already_open" };
+    }
+    throw error;
   }
 }
 
@@ -232,7 +318,7 @@ export async function addPetitionSupport(
     }
 
     // Additional scope check for project-scoped voter scope
-    const scope = petition.voterScope as { type: string; scopeId: string } | null;
+    const scope = petition.voterScope as ProjectVoterScope | null;
     if (scope?.type === "project") {
       const projectMembership = await prisma.projectMembership.findFirst({
         where: {
@@ -257,14 +343,21 @@ export async function addPetitionSupport(
       select: { projectId: true, status: true, participationStatus: true },
     });
 
-    const scope = petition.voterScope as { type: string; scopeId: string } | null;
-    const projectScopeId = petition.scopeType === "project" ? petition.scopeId : scope?.type === "project" ? scope.scopeId : null;
+    const scope = petition.voterScope as ProjectVoterScope | null;
+    const projectScopeId =
+      petition.scopeType === "project"
+        ? petition.scopeId
+        : scope?.type === "project" || scope?.type === "project_frozen"
+          ? scope.scopeId
+          : null;
     if (
       !pm ||
       !projectScopeId ||
       pm.projectId !== projectScopeId ||
       pm.status !== "active" ||
-      pm.participationStatus !== "active"
+      (scope?.type === "project_frozen"
+        ? !scope.membershipIds.includes(projectMembershipId)
+        : pm.participationStatus !== "active")
     ) {
       return { ok: false, reason: "not_eligible" };
     }
@@ -275,6 +368,36 @@ export async function addPetitionSupport(
     });
   }
 
+  return { ok: true };
+}
+
+export async function addNodePetitionSupport(
+  prisma: PrismaClient,
+  {
+    petitionId,
+    accountId,
+  }: {
+    petitionId: string;
+    accountId: string;
+  },
+): Promise<AddSupportResult> {
+  const petition = await prisma.petition.findUnique({
+    where: { id: petitionId },
+    select: { scopeType: true, scopeId: true, status: true, closesAt: true },
+  });
+  if (!petition || petition.status !== "open" || new Date() >= petition.closesAt) {
+    return { ok: false, reason: "petition_not_open" };
+  }
+  if (petition.scopeType !== "node") return { ok: false, reason: "not_eligible" };
+  try {
+    await requireActiveNodeUser(prisma, petition.scopeId, accountId);
+  } catch {
+    return { ok: false, reason: "not_eligible" };
+  }
+  await prisma.nodePetitionSupport.createMany({
+    data: [{ petitionId, nodeId: petition.scopeId, accountId }],
+    skipDuplicates: true,
+  });
   return { ok: true };
 }
 
@@ -314,6 +437,26 @@ export async function withdrawPetitionSupport(
   return { ok: true };
 }
 
+export async function withdrawNodePetitionSupport(
+  prisma: PrismaClient,
+  { petitionId, accountId }: { petitionId: string; accountId: string },
+): Promise<WithdrawSupportResult> {
+  const petition = await prisma.petition.findUnique({
+    where: { id: petitionId },
+    select: { scopeType: true, status: true, closesAt: true },
+  });
+  if (
+    !petition ||
+    petition.scopeType !== "node" ||
+    petition.status !== "open" ||
+    new Date() >= petition.closesAt
+  ) {
+    return { ok: false, reason: "petition_not_open" };
+  }
+  await prisma.nodePetitionSupport.deleteMany({ where: { petitionId, accountId } });
+  return { ok: true };
+}
+
 // ── evaluatePetition ──────────────────────────────────────────────────────────
 
 export async function evaluatePetition(
@@ -339,7 +482,10 @@ export async function evaluatePetition(
   if (new Date() < petition.closesAt) return { outcome: "pending" };
 
   const snapshot = petition.governanceSnapshot as { threshold: number };
-  const eligible = await getActiveVoterCount(prisma, petition);
+  const eligible =
+    petition.scopeType === "node"
+      ? await getActiveNodeVoterCount(prisma, petition.scopeId)
+      : await getActiveVoterCount(prisma, petition);
 
   if (eligible === 0) {
     await prisma.petition.update({ where: { id: petitionId }, data: { status: "blocked", resolvedAt: new Date() } });
@@ -386,7 +532,7 @@ export async function evaluateEmergencyPetition(
     return { outcome: "blocked" };
   }
 
-  const supportCount = await prisma.petitionSupport.count({ where: { petitionId } });
+  const supportCount = await getPetitionSupportCount(prisma, petitionId);
 
   if (supportCount / eligible >= snapshot.threshold) {
     await prisma.petition.update({ where: { id: petitionId }, data: { status: "approved", resolvedAt: new Date() } });
@@ -462,7 +608,7 @@ async function resolveSinglePetition(
   eligible: number,
   threshold: number,
 ): Promise<EvaluateResult> {
-  const supportCount = await prisma.petitionSupport.count({ where: { petitionId } });
+  const supportCount = await getPetitionSupportCount(prisma, petitionId);
   const outcome: PetitionStatus = supportCount / eligible >= threshold ? "approved" : "rejected";
   await prisma.petition.update({ where: { id: petitionId }, data: { status: outcome, resolvedAt: new Date() } });
   return { outcome };
@@ -487,7 +633,7 @@ async function resolveCompetingPetitions(
 
     const closedPetitions = await tx.petition.findMany({
       where: { competitionKey, scopeId, status: "open", closesAt: { lte: now } },
-      select: { id: true },
+      select: { id: true, scopeType: true },
     });
 
     if (closedPetitions.length === 0) return { outcome: "pending" };
@@ -495,7 +641,10 @@ async function resolveCompetingPetitions(
     const counts = await Promise.all(
       closedPetitions.map(async (p) => ({
         id: p.id,
-        count: await tx.petitionSupport.count({ where: { petitionId: p.id } }),
+        count:
+          p.scopeType === "node"
+            ? await tx.nodePetitionSupport.count({ where: { petitionId: p.id } })
+            : await tx.petitionSupport.count({ where: { petitionId: p.id } }),
       })),
     );
 
@@ -526,4 +675,15 @@ async function resolveCompetingPetitions(
     });
     return { outcome: "rejected" };
   });
+}
+
+async function getPetitionSupportCount(prisma: PrismaClient, petitionId: string): Promise<number> {
+  const petition = await prisma.petition.findUnique({
+    where: { id: petitionId },
+    select: { scopeType: true },
+  });
+  if (!petition) return 0;
+  return petition.scopeType === "node"
+    ? prisma.nodePetitionSupport.count({ where: { petitionId } })
+    : prisma.petitionSupport.count({ where: { petitionId } });
 }

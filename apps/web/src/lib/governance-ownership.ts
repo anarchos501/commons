@@ -5,8 +5,11 @@ import type { Prisma, PrismaClient } from "../generated/prisma/client";
  * the given groupId.
  *
  * - group space: spaceId must equal groupId directly.
- * - project space: project must be hosted by the group (via primary groupId or ProjectHosting).
+ * - project space: the group must be an active host of the project (ProjectHosting with
+ *   endedAt == null). Project.foundingGroupId is immutable provenance only and confers
+ *   no current-hosting authority (RFC-007).
  * - responsibility space: responsibility must belong to the group.
+ * - coalition space: the group must be an active member of the coalition.
  *
  * Throws with a descriptive message if ownership is not established.
  * Used by communication governance wrappers and approval handlers to prevent
@@ -28,15 +31,10 @@ export async function assertSpaceBelongsToGroup(
   }
 
   if (spaceType === "project") {
-    // Accept if the project's primary groupId matches, or if the group hosts the project
-    const project = await prisma.project.findUnique({
-      where: { id: spaceId },
-      select: { groupId: true },
-    });
-    if (project?.groupId === groupId) return;
-
+    // Current hosting is determined solely by active ProjectHosting rows — founding
+    // provenance (Project.foundingGroupId) confers no authorization (RFC-007).
     const hosting = await prisma.projectHosting.findFirst({
-      where: { projectId: spaceId, groupId },
+      where: { projectId: spaceId, groupId, endedAt: null },
     });
     if (hosting) return;
 
@@ -54,6 +52,23 @@ export async function assertSpaceBelongsToGroup(
 
     throw new Error(
       `Responsibility "${spaceId}" does not belong to group "${groupId}".`,
+    );
+  }
+
+  if (spaceType === "coalition") {
+    const membership = await prisma.coalitionMembership.findFirst({
+      where: {
+        coalitionId: spaceId,
+        groupId,
+        endedAt: null,
+        coalition: { status: "active" },
+      },
+      select: { id: true },
+    });
+    if (membership) return;
+
+    throw new Error(
+      `Coalition "${spaceId}" does not include group "${groupId}".`,
     );
   }
 

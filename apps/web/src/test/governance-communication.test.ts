@@ -113,7 +113,7 @@ test("revision petition: approval promotes body and sets provenance", async () =
 
 test("project-only member opens and approves project living document revision petition", async () => {
   const { group } = await createCommsFixture("gc_project_revision", 1);
-  const project = await prisma.project.create({ data: { id: "gc_project_revision_project", groupId: group.id, name: "Project Revision", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "gc_project_revision_project", foundingGroupId: group.id, name: "Project Revision", status: "active" } });
   try {
     const account = await prisma.account.create({
       data: {
@@ -407,8 +407,8 @@ async function cleanupCommsFixture(prefix: string) {
   await prisma.publication.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.bulletin.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

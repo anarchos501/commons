@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import type { OpenPetitionResult } from "./petitions";
 
@@ -36,26 +36,48 @@ export async function createGroup(
 
   const membershipPolicy = sanitizeMembershipPolicy(input.membershipPolicy);
 
-  const result = await prisma.$transaction(async (tx) => {
-    const group = await tx.group.create({
-      data: {
-        nodeId: input.nodeId,
-        name: input.name,
-        description: input.description,
-        membershipPolicy,
-        visibility: "private",
-      },
-    });
-    await tx.groupMembership.create({
-      data: {
-        accountId: input.creatorAccountId,
-        groupId: group.id,
-        status: "active",
-        participationStatus: "active",
-      },
-    });
-    return group.id;
-  });
+  let result: string | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const existingGroupCount = await tx.group.count({ where: { nodeId: input.nodeId } });
+        const group = await tx.group.create({
+          data: {
+            nodeId: input.nodeId,
+            name: input.name,
+            description: input.description,
+            membershipPolicy,
+            visibility: "private",
+          },
+        });
+        await tx.groupMembership.create({
+          data: {
+            accountId: input.creatorAccountId,
+            groupId: group.id,
+            status: "active",
+            participationStatus: "active",
+          },
+        });
+        if (existingGroupCount === 0) {
+          await tx.nodeHost.create({
+            data: { nodeId: input.nodeId, accountId: input.creatorAccountId },
+          });
+        }
+        return group.id;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      break;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034" &&
+        attempt < 2
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (!result) throw new Error("Could not create group after retrying the bootstrap transaction.");
 
   return { ok: true, groupId: result };
 }

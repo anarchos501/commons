@@ -3,6 +3,7 @@ import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { proposeContentCreation } from "./content-creation-drafts";
+import { assertProjectWritable } from "./project-membership";
 
 /**
  * Creates a Bulletin in the given Coordination Space.
@@ -71,14 +72,15 @@ export async function openProjectBulletinArchivalPetition(
   if (bulletin.spaceType !== "project" || bulletin.spaceId !== opts.projectId) {
     throw new Error(`Bulletin "${opts.bulletinId}" does not belong to project "${opts.projectId}".`);
   }
+  await assertProjectWritable(prisma, opts.projectId);
 
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: opts.projectId },
-    select: { groupId: true },
+    select: { foundingGroupId: true },
   });
 
   return openPetition(prisma, {
-    groupId: project.groupId,
+    groupId: project.foundingGroupId,
     scopeType: "project",
     scopeId: opts.projectId,
     category: "archival",

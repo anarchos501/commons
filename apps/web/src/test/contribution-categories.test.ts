@@ -398,7 +398,7 @@ async function createFixture(prefix: string, memberCount = 2) {
 
 async function createFixtureWithProject(prefix: string) {
   const base = await createFixture(prefix, 2);
-  const project = await prisma.project.create({ data: { id: `${prefix}_proj`, groupId: base.group.id, name: `Project ${prefix}`, status: "active" } });
+  const project = await prisma.project.create({ data: { id: `${prefix}_proj`, foundingGroupId: base.group.id, name: `Project ${prefix}`, status: "active" } });
   // memberships[0] is the project member; memberships[1] is not
   const acct0 = await prisma.groupMembership.findUniqueOrThrow({ where: { id: base.memberships[0].id }, select: { accountId: true } });
   await prisma.projectMembership.create({ data: { accountId: acct0.accountId, projectId: project.id, status: "active", participationStatus: "active" } });
@@ -430,8 +430,8 @@ async function cleanupFixture(prefix: string) {
   await prisma.responsibilityAssignment.deleteMany({ where: { membership: { groupId: { startsWith: prefix } } } });
   await prisma.responsibilityAbility.deleteMany({ where: { responsibility: { groupId: { startsWith: prefix } } } });
   await prisma.responsibility.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });

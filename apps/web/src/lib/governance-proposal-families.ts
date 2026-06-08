@@ -3,6 +3,19 @@ import type { GovernanceCategory } from "./governance-categories";
 export type ProposalFamily =
   | "membership_request"
   | "project_proposal"
+  | "project_hosting_withdrawal"
+  | "project_hosting_offer"
+  | "project_hosting_acceptance"
+  | "coalition_formation"
+  | "coalition_join"
+  | "coalition_departure"
+  | "coalition_removal"
+  | "node_steward_group_nomination"
+  | "node_steward_candidate_consent"
+  | "node_steward_appointment"
+  | "node_steward_no_confidence_initiation"
+  | "node_steward_no_confidence"
+  | "node_steward_resignation"
   | "responsibility_proposal"
   | "responsibility_creation_proposal"
   | "accountability_action"
@@ -33,6 +46,19 @@ export type ProposalFamily =
 const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
   project_proposal: "project",
+  project_hosting_withdrawal: "project",
+  project_hosting_offer: "project",
+  project_hosting_acceptance: "project",
+  coalition_formation: "group_settings",
+  coalition_join: "group_settings",
+  coalition_departure: "group_settings",
+  coalition_removal: "group_settings",
+  node_steward_group_nomination: "node_stewardship",
+  node_steward_candidate_consent: "node_stewardship",
+  node_steward_appointment: "node_stewardship",
+  node_steward_no_confidence_initiation: "node_stewardship",
+  node_steward_no_confidence: "node_stewardship",
+  node_steward_resignation: "node_stewardship",
   responsibility_proposal: "responsibility",
   responsibility_creation_proposal: "responsibility",
   accountability_action: "accountability",
@@ -82,13 +108,26 @@ export function deriveCompetitionKey(
     case "contribution_category_archive":
     case "trusted_provider_proposal":
     case "trusted_provider_revocation":
+    case "project_hosting_withdrawal":
+    case "project_hosting_offer":
+    case "project_hosting_acceptance":
+    case "coalition_formation":
+    case "coalition_join":
+    case "coalition_departure":
+    case "coalition_removal":
+    case "node_steward_group_nomination":
+    case "node_steward_candidate_consent":
+    case "node_steward_no_confidence_initiation":
+    case "node_steward_resignation":
     // Non-competing: making a group public is idempotent; multiple concurrent proposals are allowed
     case "group_visibility_proposal":
       return null;
+    case "node_steward_appointment":
+      return `${groupId}:node_steward_appointment`;
+    case "node_steward_no_confidence":
+      return `${groupId}:node_steward_no_confidence:${subjectId}`;
     // All others: groupId:family:subjectId is unique per decision within a group
     default:
       return `${groupId}:${family}:${subjectId}`;
   }
 }
-
-

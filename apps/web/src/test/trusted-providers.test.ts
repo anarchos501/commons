@@ -64,7 +64,7 @@ test("proposeTrustedProviderStatus rejects empty category list", async () => {
 test("proposeTrustedProviderStatus rejects mixed-entity category bundle", async () => {
   const { group, memberships } = await createFixture("tp_mixed", 3);
   try {
-    const project = await prisma.project.create({ data: { id: "tp_mixed_proj", groupId: group.id, name: "Mixed Project", status: "active" } });
+    const project = await prisma.project.create({ data: { id: "tp_mixed_proj", foundingGroupId: group.id, name: "Mixed Project", status: "active" } });
     const [cat1, cat2] = await prisma.$transaction([
       prisma.contributionCategory.create({ data: { groupId: group.id, offeringEntityType: "group", offeringEntityId: group.id, name: "Cat A", description: "x", status: "active" } }),
       prisma.contributionCategory.create({ data: { groupId: group.id, offeringEntityType: "project", offeringEntityId: project.id, name: "Cat B", description: "x", status: "active" } }),
@@ -281,8 +281,8 @@ async function cleanupFixture(prefix: string) {
   await prisma.contributionCategoryDraft.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: { startsWith: prefix } } } });
   await prisma.petition.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });

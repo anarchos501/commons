@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Briefcase, HelpCircle, LayoutDashboard, Shield, UserRound, Users } from "lucide-react";
+import { Bell, Briefcase, CircleDot, HelpCircle, LayoutDashboard, Network, Shield, UserRound, Users } from "lucide-react";
 import type { SidebarData } from "../../lib/sidebar-data";
 
 interface Props {
@@ -13,7 +13,7 @@ export function SidebarNavClient({ data }: Props) {
 }
 
 function GlobalSidebarNav({ data }: { data: SidebarData }) {
-  const { groupMemberships, projectMemberships, responsibilityAssignments, unreadRouteCount } = data;
+  const { groupMemberships, projectMemberships, coalitionMemberships, canAccessNodeGovernance, responsibilityAssignments, unreadRouteCount } = data;
 
   return (
     <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4 gap-1">
@@ -30,6 +30,11 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
       <NavLink href="/dashboard" icon={<LayoutDashboard className="h-4 w-4" />}>
         Dashboard
       </NavLink>
+      {canAccessNodeGovernance && (
+        <NavLink href="/node" icon={<CircleDot className="h-4 w-4" />}>
+          Node Governance
+        </NavLink>
+      )}
 
       {groupMemberships.length > 0 && (
         <>
@@ -54,6 +59,20 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
           {projectMemberships.map((m) => (
             <NavLink key={m.projectId} href={`/projects/${m.projectId}`} icon={null} indent>
               {m.projectName}
+            </NavLink>
+          ))}
+        </>
+      )}
+
+      {coalitionMemberships.length > 0 && (
+        <>
+          <p className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-[var(--soft-text)]">
+            <Network className="h-3.5 w-3.5" />
+            My Coalitions
+          </p>
+          {coalitionMemberships.map((coalition) => (
+            <NavLink key={coalition.coalitionId} href={`/coalitions/${coalition.coalitionId}`} icon={null} indent>
+              {coalition.coalitionName}
             </NavLink>
           ))}
         </>

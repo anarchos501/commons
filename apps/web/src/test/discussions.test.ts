@@ -9,6 +9,7 @@ import {
   GENERAL_DISCUSSION_TITLE,
   listDiscussionMessages,
   listDiscussionThreads,
+  listProjectDiscussionThreads,
   onThreadClosurePetitionApproved,
   openThreadClosurePetition,
   postDiscussionMessage,
@@ -61,7 +62,7 @@ test("active members create threads and post messages without petition", async (
 
 test("project member without host-group membership creates project thread and message", async () => {
   const { group } = await createDiscussionFixture("disc_project_only", 1);
-  const project = await prisma.project.create({ data: { id: "disc_project_only_project", groupId: group.id, name: "Project Only", status: "active" } });
+  const project = await prisma.project.create({ data: { id: "disc_project_only_project", foundingGroupId: group.id, name: "Project Only", status: "active" } });
   try {
     const account = await prisma.account.create({
       data: {
@@ -93,6 +94,38 @@ test("project member without host-group membership creates project thread and me
     assert.equal(message.body, "Project-only members can post.");
   } finally {
     await cleanupDiscussionFixture("disc_project_only");
+  }
+});
+
+test("closed projects reject new discussion threads", async () => {
+  const { group } = await createDiscussionFixture("disc_project_closed", 1);
+  const project = await prisma.project.create({
+    data: { id: "disc_project_closed_project", foundingGroupId: group.id, name: "Closed Project", status: "closed", archivedAt: new Date() },
+  });
+  try {
+    const account = await prisma.account.create({
+      data: {
+        id: "disc_project_closed_account",
+        homeNodeId: "disc_project_closed_node",
+        displayName: "Closed Project Member",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const projectMembership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    await assert.rejects(
+      () => createProjectDiscussionThread(prisma, {
+        projectId: project.id,
+        createdByProjectMembershipId: projectMembership.id,
+        title: "Too late",
+      }),
+      /read-only/,
+    );
+  } finally {
+    await cleanupDiscussionFixture("disc_project_closed");
   }
 });
 
@@ -234,6 +267,51 @@ test("listDiscussionThreads excludes inactive threads", async () => {
   }
 });
 
+test("listProjectDiscussionThreads returns project threads after the last host withdraws", async () => {
+  const { group } = await createDiscussionFixture("disc_project_hostless", 1);
+  const project = await prisma.project.create({
+    data: {
+      id: "disc_project_hostless_project",
+      foundingGroupId: group.id,
+      name: "Hostless Project",
+      status: "active",
+      pendingClosureAt: new Date(),
+    },
+  });
+  try {
+    await prisma.projectHosting.create({
+      data: { projectId: project.id, groupId: group.id, endedAt: new Date() },
+    });
+    const account = await prisma.account.create({
+      data: {
+        id: "disc_project_hostless_account",
+        homeNodeId: "disc_project_hostless_node",
+        displayName: "Hostless Project Member",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const projectMembership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+    const thread = await prisma.discussionThread.create({
+      data: {
+        spaceType: "project",
+        spaceId: project.id,
+        title: "Still readable",
+        createdByAccountId: account.id,
+      },
+    });
+
+    const threads = await listProjectDiscussionThreads(prisma, { projectId: project.id });
+
+    assert.equal(threads.some((candidate) => candidate.id === thread.id), true);
+    assert.equal(projectMembership.projectId, project.id);
+  } finally {
+    await cleanupDiscussionFixture("disc_project_hostless");
+  }
+});
+
 async function createDiscussionFixture(prefix: string, memberCount = 3) {
   await cleanupDiscussionFixture(prefix);
   const node = await prisma.node.create({ data: { id: `${prefix}_node`, name: `Node ${prefix}`, domain: `${prefix}.comm.localhost`, federationPolicy: "disabled", pluginPolicy: "disabled" } });
@@ -255,8 +333,10 @@ async function cleanupDiscussionFixture(prefix: string) {
   await prisma.discussionMessage.deleteMany({ where: { thread: { spaceId: { startsWith: prefix } } } });
   await prisma.discussionThread.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.memberGovernanceSignal.deleteMany({ where: { groupId: { startsWith: prefix } } });
-  await prisma.projectMembership.deleteMany({ where: { project: { groupId: { startsWith: prefix } } } });
-  await prisma.project.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.projectHostingProposal.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.projectMembership.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.projectHosting.deleteMany({ where: { project: { foundingGroupId: { startsWith: prefix } } } });
+  await prisma.project.deleteMany({ where: { foundingGroupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

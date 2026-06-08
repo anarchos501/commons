@@ -2,7 +2,9 @@ import type { PrismaClient } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { openPetition, requireApprovedPetition } from "./petitions";
+import { assertProjectWritable } from "./project-membership";
 import { resolveGovernanceParams } from "./governance-resolver";
+import { requireCoalitionAccess, requireCoalitionParticipant } from "./coalition-authorization";
 
 export const GENERAL_DISCUSSION_TITLE = "General Discussion";
 
@@ -91,6 +93,24 @@ async function getDiscussionRetention(
   };
 }
 
+async function getCoalitionDiscussionRetention(
+  prisma: PrismaClient,
+  coalitionId: string,
+): Promise<{ messageRetentionDays: number; threadInactivityDays: number }> {
+  const memberships = await prisma.coalitionMembership.findMany({
+    where: { coalitionId, endedAt: null },
+    select: { groupId: true },
+  });
+  if (memberships.length === 0) throw new Error("Coalition has no active member groups.");
+  const policies = await Promise.all(
+    memberships.map((membership) => getDiscussionRetention(prisma, membership.groupId)),
+  );
+  return {
+    messageRetentionDays: Math.min(...policies.map((policy) => policy.messageRetentionDays)),
+    threadInactivityDays: Math.min(...policies.map((policy) => policy.threadInactivityDays)),
+  };
+}
+
 export async function ensureGeneralDiscussion(
   prisma: PrismaClient,
   opts: DiscussionSpace & { createdByMembershipId: string },
@@ -142,6 +162,7 @@ export async function createProjectDiscussionThread(
   prisma: PrismaClient,
   opts: { projectId: string; createdByProjectMembershipId: string; title: string },
 ) {
+  await assertProjectWritable(prisma, opts.projectId);
   const membership = await requireActiveProjectMembership(prisma, opts.createdByProjectMembershipId, opts.projectId);
   const title = opts.title.trim();
   if (!title) throw new Error("Discussion thread title is required.");
@@ -152,6 +173,23 @@ export async function createProjectDiscussionThread(
       spaceId: opts.projectId,
       title,
       createdByAccountId: membership.accountId,
+    },
+  });
+}
+
+export async function createCoalitionDiscussionThread(
+  prisma: PrismaClient,
+  opts: { coalitionId: string; accountId: string; title: string },
+) {
+  const participant = await requireCoalitionParticipant(prisma, opts.accountId, opts.coalitionId);
+  const title = opts.title.trim();
+  if (!title) throw new Error("Discussion thread title is required.");
+  return prisma.discussionThread.create({
+    data: {
+      spaceType: "coalition",
+      spaceId: opts.coalitionId,
+      title,
+      createdByAccountId: participant.accountId,
     },
   });
 }
@@ -206,6 +244,7 @@ export async function postProjectDiscussionMessage(
   prisma: PrismaClient,
   opts: { threadId: string; projectId: string; authorProjectMembershipId: string; body: string },
 ) {
+  await assertProjectWritable(prisma, opts.projectId);
   const membership = await requireActiveProjectMembership(prisma, opts.authorProjectMembershipId, opts.projectId);
   const body = opts.body.trim();
   if (!body) throw new Error("Discussion message body is required.");
@@ -222,9 +261,9 @@ export async function postProjectDiscussionMessage(
 
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: opts.projectId },
-    select: { groupId: true },
+    select: { foundingGroupId: true },
   });
-  const retention = await getDiscussionRetention(prisma, project.groupId);
+  const retention = await getDiscussionRetention(prisma, project.foundingGroupId);
   const inactiveBefore = daysBeforeNow(retention.threadInactivityDays);
   if (thread.lastActivityAt < inactiveBefore) {
     throw new Error("Inactive discussion threads do not accept new messages.");
@@ -243,6 +282,43 @@ export async function postProjectDiscussionMessage(
   });
 }
 
+export async function postCoalitionDiscussionMessage(
+  prisma: PrismaClient,
+  opts: { threadId: string; coalitionId: string; accountId: string; body: string },
+) {
+  const participant = await requireCoalitionParticipant(prisma, opts.accountId, opts.coalitionId);
+  const body = opts.body.trim();
+  if (!body) throw new Error("Discussion message body is required.");
+  const thread = await prisma.discussionThread.findUnique({
+    where: { id: opts.threadId },
+    select: { spaceType: true, spaceId: true, closedAt: true, lastActivityAt: true },
+  });
+  if (!thread || thread.spaceType !== "coalition" || thread.spaceId !== opts.coalitionId) {
+    throw new Error("Discussion thread does not belong to this coalition.");
+  }
+  if (thread.closedAt) throw new Error("Closed discussion threads do not accept new messages.");
+  const retention = await getCoalitionDiscussionRetention(prisma, opts.coalitionId);
+  if (thread.lastActivityAt < daysBeforeNow(retention.threadInactivityDays)) {
+    throw new Error("Inactive discussion threads do not accept new messages.");
+  }
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const message = await tx.discussionMessage.create({
+      data: {
+        threadId: opts.threadId,
+        authorId: participant.accountId,
+        body,
+        expiresAt: daysFromNow(retention.messageRetentionDays, now),
+      },
+    });
+    await tx.discussionThread.update({
+      where: { id: opts.threadId },
+      data: { messageCount: { increment: 1 }, lastActivityAt: now },
+    });
+    return message;
+  });
+}
+
 export async function listDiscussionThreads(
   prisma: PrismaClient,
   opts: DiscussionSpace & { includeClosed?: boolean },
@@ -254,6 +330,56 @@ export async function listDiscussionThreads(
     where: {
       spaceType: opts.spaceType,
       spaceId: opts.spaceId,
+      lastActivityAt: { gte: daysBeforeNow(retention.threadInactivityDays) },
+      ...(opts.includeClosed ? {} : { closedAt: null }),
+    },
+    include: { creator: { select: { displayName: true } } },
+    orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
+  });
+}
+
+/**
+ * Project-native counterpart to listDiscussionThreads (mirrors
+ * createProjectDiscussionThread / postProjectDiscussionMessage): authorizes
+ * solely on project membership, not on a current host-group anchor. Required
+ * because a hosted project's discussion space must remain readable even when
+ * RFC-007 leaves it with zero active hosts (pending closure or closed) — the
+ * group-anchored assertSpaceBelongsToGroup path is structurally unsatisfiable
+ * for a hostless project. foundingGroupId is consulted only for the discussion
+ * retention policy, never for authorization (RFC-007: it confers no standing).
+ */
+export async function listProjectDiscussionThreads(
+  prisma: PrismaClient,
+  opts: { projectId: string; includeClosed?: boolean },
+) {
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: opts.projectId },
+    select: { foundingGroupId: true },
+  });
+  const retention = await getDiscussionRetention(prisma, project.foundingGroupId);
+
+  return prisma.discussionThread.findMany({
+    where: {
+      spaceType: "project",
+      spaceId: opts.projectId,
+      lastActivityAt: { gte: daysBeforeNow(retention.threadInactivityDays) },
+      ...(opts.includeClosed ? {} : { closedAt: null }),
+    },
+    include: { creator: { select: { displayName: true } } },
+    orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
+  });
+}
+
+export async function listCoalitionDiscussionThreads(
+  prisma: PrismaClient,
+  opts: { coalitionId: string; accountId: string; includeClosed?: boolean },
+) {
+  await requireCoalitionAccess(prisma, opts.accountId, opts.coalitionId);
+  const retention = await getCoalitionDiscussionRetention(prisma, opts.coalitionId);
+  return prisma.discussionThread.findMany({
+    where: {
+      spaceType: "coalition",
+      spaceId: opts.coalitionId,
       lastActivityAt: { gte: daysBeforeNow(retention.threadInactivityDays) },
       ...(opts.includeClosed ? {} : { closedAt: null }),
     },
@@ -330,13 +456,12 @@ export async function deleteExpiredDiscussionContent(
   const now = opts.now ?? new Date();
   const retention = await getDiscussionRetention(prisma, opts.groupId);
 
-  const [projects, responsibilities] = await Promise.all([
+  const [projects, responsibilities, coalitionMemberships] = await Promise.all([
     prisma.project.findMany({
       where: {
-        OR: [
-          { groupId: opts.groupId },
-          { hostings: { some: { groupId: opts.groupId } } },
-        ],
+        // Retention reach follows current hosting only — founding provenance confers
+        // no ongoing authority over a project's content once a group stops hosting it (RFC-007).
+        hostings: { some: { groupId: opts.groupId, endedAt: null } },
       },
       select: { id: true },
     }),
@@ -344,11 +469,20 @@ export async function deleteExpiredDiscussionContent(
       where: { groupId: opts.groupId },
       select: { id: true },
     }),
+    prisma.coalitionMembership.findMany({
+      where: {
+        groupId: opts.groupId,
+        endedAt: null,
+        coalition: { status: "active" },
+      },
+      select: { coalitionId: true },
+    }),
   ]);
   const ownedSpaceFilter = [
     { spaceType: "group" as const, spaceId: opts.groupId },
     { spaceType: "project" as const, spaceId: { in: projects.map((project) => project.id) } },
     { spaceType: "responsibility" as const, spaceId: { in: responsibilities.map((responsibility) => responsibility.id) } },
+    { spaceType: "coalition" as const, spaceId: { in: coalitionMemberships.map((membership) => membership.coalitionId) } },
   ];
 
   const expiringMessages = await prisma.discussionMessage.findMany({

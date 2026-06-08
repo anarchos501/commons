@@ -421,7 +421,7 @@ test("createContributionFromAcceptedRoute inherits projectId from the support re
   const project = await prisma.project.create({
     data: {
       id: "caproute_project_inherit_rides",
-      groupId: fixture.group.id,
+      foundingGroupId: fixture.group.id,
       name: "Test Rides project_inherit",
       status: "active",
     },
@@ -569,7 +569,7 @@ async function createFixture(suffix: string) {
   const project = await prisma.project.create({
     data: {
       id: `${prefix}_project`,
-      groupId: group.id,
+      foundingGroupId: group.id,
       name: `Routing Project ${suffix}`,
       status: "active",
     },

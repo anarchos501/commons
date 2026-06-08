@@ -6,6 +6,7 @@ import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { proposeContentCreation } from "./content-creation-drafts";
+import { assertProjectWritable } from "./project-membership";
 
 /**
  * Creates a LivingDocument and seeds its first revision in a single transaction.
@@ -113,10 +114,13 @@ export async function draftLivingDocumentRevision(
 ) {
   const document = await prisma.livingDocument.findUniqueOrThrow({
     where: { id: opts.livingDocumentId },
-    select: { archivedAt: true },
+    select: { archivedAt: true, spaceType: true, spaceId: true },
   });
   if (document.archivedAt !== null) {
     throw new Error("Cannot draft a revision for an archived living document.");
+  }
+  if (document.spaceType === "project") {
+    await assertProjectWritable(prisma, document.spaceId);
   }
   return prisma.livingDocumentRevision.create({
     data: { livingDocumentId: opts.livingDocumentId, authorId: opts.authorId, body: opts.body },
@@ -181,14 +185,15 @@ export async function openProjectRevisionPetition(
   if (document.spaceType !== "project" || document.spaceId !== opts.projectId) {
     throw new Error(`Living document "${opts.livingDocumentId}" does not belong to project "${opts.projectId}".`);
   }
+  await assertProjectWritable(prisma, opts.projectId);
 
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: opts.projectId },
-    select: { groupId: true },
+    select: { foundingGroupId: true },
   });
 
   return openPetition(prisma, {
-    groupId: project.groupId,
+    groupId: project.foundingGroupId,
     scopeType: "project",
     scopeId: opts.projectId,
     category: "living_document",

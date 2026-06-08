@@ -32,6 +32,14 @@ import {
 } from "../../../../lib/petitions";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { proposeProject } from "../../../../lib/projects";
+import { openProjectHostingWithdrawalPetition } from "../../../../lib/project-hosting";
+import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
+import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
+import {
+  openGroupNoConfidence,
+  openGroupStewardNomination,
+  openStewardResignation,
+} from "../../../../lib/node-stewardship";
 import { proposeResponsibility, PROPOSABLE_RESPONSIBILITY_ABILITIES } from "../../../../lib/responsibility-proposals";
 import {
   CATEGORY_REGISTRY,
@@ -505,19 +513,40 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         </CollapsibleSection>
 
         {/* ── Projects ──────────────────────────────────────────────── */}
-        <CollapsibleSection id="projects" title="Projects" eyebrow="Active coordination spaces" storageKey={`group:${groupId}:section:projects`} className="bg-[var(--surface)] p-5 sm:p-6">
+        <CollapsibleSection id="projects" title="Hosted Projects" eyebrow="Federated coordination" storageKey={`group:${groupId}:section:projects`} className="bg-[var(--surface)] p-5 sm:p-6">
+          <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
+            Hosting is this group&apos;s endorsement and support. It does not give the group ownership of a project.
+          </p>
           {data.projects.length > 0 ? (
             <div className="space-y-3">
               {data.projects.map((project) => (
-                <a key={project.id} href={`/projects/${project.id}`} className="block border border-[var(--border)] bg-[var(--subtle)] p-3 hover:bg-[var(--hover)] transition">
-                  <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
-                  {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
-                  <p className="mt-1 text-xs text-[var(--muted)] capitalize">{project.status}</p>
-                </a>
+                <div key={project.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                  <a href={`/projects/${project.id}`} className="block hover:bg-[var(--hover)] transition">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
+                      <span className="shrink-0 border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--muted)]">
+                        Hosted here
+                      </span>
+                    </div>
+                    {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
+                    <p className="mt-2 text-xs text-[var(--muted)]">
+                      <span className="capitalize">{project.status}</span>
+                      <span aria-hidden="true"> &middot; </span>
+                      {project._count.hostings} {project._count.hostings === 1 ? "host group" : "host groups"}
+                    </p>
+                  </a>
+                  {isActive && (
+                    <form action={openProjectHostingWithdrawalAction} className="mt-3">
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="projectId" value={project.id} />
+                      <SubmitButton variant="secondary">Open host-withdrawal petition</SubmitButton>
+                    </form>
+                  )}
+                </div>
               ))}
             </div>
           ) : (
-            <EmptyState text="No active projects." />
+            <EmptyState text="This group does not currently host any projects." />
           )}
           {isActive && (
             <details className="mt-4">
@@ -538,6 +567,69 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
+        <CollapsibleSection id="coalitions" title="Coalitions" eyebrow="Group-to-group coordination" storageKey={`group:${groupId}:section:coalitions`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {data.coalitions.length > 0 ? (
+            <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
+              {data.coalitions.map((coalition) => (
+                <a
+                  key={coalition.id}
+                  href={`/coalitions/${coalition.id}`}
+                  className="block px-3 py-3 transition hover:bg-[var(--hover)]"
+                >
+                  <p className="text-sm font-medium text-[var(--text)]">{coalition.name}</p>
+                  {coalition.description && (
+                    <p className="mt-1 line-clamp-2 text-xs text-[var(--soft-text)]">{coalition.description}</p>
+                  )}
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {coalition._count.memberships} member {coalition._count.memberships === 1 ? "group" : "groups"}
+                  </p>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="This group does not currently belong to a coalition." />
+          )}
+        </CollapsibleSection>
+
+        <CollapsibleSection id="node-stewardship" title="Node Stewardship" eyebrow="Group consent" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
+          <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
+            This group may open stewardship questions. Node users decide appointments and no confidence.
+          </p>
+          {isActive && !data.nodeState.stewardGroupId && (
+            <form action={openGroupStewardNominationAction} className="space-y-3">
+              <input type="hidden" name="groupId" value={groupId} />
+              <input type="hidden" name="nodeId" value={group.nodeId} />
+              <label className="block">
+                <span className="field-label">Candidate group</span>
+                <select name="candidateGroupId" className="field-input" required>
+                  {data.nodeGroupOptions.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
+                  ))}
+                </select>
+              </label>
+              <SubmitButton variant="secondary">Open nomination petition</SubmitButton>
+            </form>
+          )}
+          {isActive && data.nodeState.stewardGroupId && (
+            <form action={openGroupNoConfidenceAction} className="space-y-3">
+              <input type="hidden" name="groupId" value={groupId} />
+              <input type="hidden" name="nodeId" value={group.nodeId} />
+              <p className="text-sm text-[var(--soft-text)]">Ask this group whether to initiate a node-wide no-confidence vote.</p>
+              <SubmitButton variant="secondary">Open initiation petition</SubmitButton>
+            </form>
+          )}
+          {isActive && data.nodeState.stewardGroupId === groupId && (
+            <form action={openStewardResignationAction} className="mt-3">
+              <input type="hidden" name="groupId" value={groupId} />
+              <input type="hidden" name="nodeId" value={group.nodeId} />
+              <SubmitButton variant="secondary">Open steward resignation petition</SubmitButton>
+            </form>
+          )}
+          <a href="/node" className="mt-4 inline-block text-xs font-medium text-[var(--accent)] hover:underline">
+            Open node governance
+          </a>
+        </CollapsibleSection>
+
         {/* ── Members ───────────────────────────────────────────────── */}
         <CollapsibleSection id="members" title="Members" eyebrow="Participation" storageKey={`group:${groupId}:section:members`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-2 text-sm text-[var(--soft-text)]">
@@ -553,8 +645,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
               <div className="space-y-1">
                 {data.groupMembers.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--text)]">{m.account.displayName}</span>
+                  <div key={m.id} className="flex items-start justify-between gap-3 py-1 text-sm">
+                    <div className="min-w-0">
+                      <span className="text-[var(--text)]">{m.account.displayName}</span>
+                      {m.affiliations.length > 0 && (
+                        <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
+                          <span>Also a member of</span>
+                          {m.affiliations.map((group) => (
+                            <a key={group.id} href={`/groups/${group.id}`} className="text-[var(--accent)] hover:underline">
+                              {group.name}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <span className="text-xs capitalize text-[var(--muted)]">{m.participationStatus}</span>
                   </div>
                 ))}
@@ -975,8 +1079,17 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       redirect("/dashboard");
     }
 
+    const [nodeState, nodeGroupOptions] = await Promise.all([
+      prisma.node.findUniqueOrThrow({
+        where: { id: group.nodeId },
+        select: { stewardGroupId: true },
+      }),
+      listNodeGroupLabelsForAccount(prisma, group.nodeId, accountId),
+    ]);
+
     const [
       projects,
+      coalitions,
       bulletins,
       publications,
       livingDocuments,
@@ -987,9 +1100,32 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       pendingApplications,
     ] = await Promise.all([
       prisma.project.findMany({
-        where: { groupId, status: "active", archivedAt: null },
+        where: {
+          hostings: { some: { groupId, endedAt: null } },
+          status: { not: "closed" },
+          archivedAt: null,
+        },
         orderBy: { createdAt: "asc" },
-        select: { id: true, name: true, description: true, status: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          status: true,
+          _count: { select: { hostings: { where: { endedAt: null } } } },
+        },
+      }),
+      prisma.coalition.findMany({
+        where: {
+          status: "active",
+          memberships: { some: { groupId, endedAt: null } },
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          _count: { select: { memberships: { where: { endedAt: null } } } },
+        },
+        orderBy: { createdAt: "asc" },
       }),
       prisma.bulletin.findMany({
         where: { spaceType: "group", spaceId: groupId, archivedAt: null },
@@ -1137,17 +1273,39 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
 
     // Projects for entity selector in category proposal form
     const allProjects = await prisma.project.findMany({
-      where: { groupId, status: "active", archivedAt: null },
+      where: { hostings: { some: { groupId, endedAt: null } }, status: "active", archivedAt: null },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     });
 
     // Members for trusted provider petition form and member roster
-    const groupMembers = await prisma.groupMembership.findMany({
+    const rawGroupMembers = await prisma.groupMembership.findMany({
       where: { groupId, status: "active" },
-      select: { id: true, participationStatus: true, account: { select: { displayName: true } } },
+      select: {
+        id: true,
+        participationStatus: true,
+        account: {
+          select: {
+            displayName: true,
+            groupMemberships: {
+              where: { status: "active", groupId: { not: groupId } },
+              select: {
+                group: { select: { id: true, name: true, privacyPreferences: true } },
+              },
+            },
+          },
+        },
+      },
       orderBy: { account: { displayName: "asc" } },
     });
+    const groupMembers = rawGroupMembers.map((membership) => ({
+      id: membership.id,
+      participationStatus: membership.participationStatus,
+      account: { displayName: membership.account.displayName },
+      affiliations: visibleGroupRosterAffiliations(
+        membership.account.groupMemberships.map(({ group }) => group),
+      ),
+    }));
 
     // All responsibility types for the group
     const responsibilityTypes = await prisma.responsibility.findMany({
@@ -1194,6 +1352,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       group,
       currentMembership,
       projects,
+      coalitions,
       bulletins,
       publications,
       livingDocuments,
@@ -1217,10 +1376,73 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       myResponsibilityTypes,
       hasNoActiveCategories: activeCategoryCount === 0,
       invitePreview,
+      nodeState,
+      nodeGroupOptions,
     };
   } finally {
     await prisma.$disconnect();
   }
+}
+
+async function openGroupStewardNominationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const nodeId = requiredString(formData, "nodeId");
+  const candidateGroupId = requiredString(formData, "candidateGroupId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await openGroupStewardNomination(prisma, {
+      nodeId,
+      initiatingGroupId: groupId,
+      candidateGroupId,
+      createdByMembershipId: membership.id,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function openGroupNoConfidenceAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const nodeId = requiredString(formData, "nodeId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await openGroupNoConfidence(prisma, {
+      nodeId,
+      initiatingGroupId: groupId,
+      createdByMembershipId: membership.id,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function openStewardResignationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const nodeId = requiredString(formData, "nodeId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await openStewardResignation(prisma, {
+      nodeId,
+      createdByMembershipId: membership.id,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
 }
 
 // ── Server Actions ────────────────────────────────────────────────────────────
@@ -1321,6 +1543,29 @@ async function proposeProjectAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
+}
+
+async function openProjectHostingWithdrawalAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const projectId = requiredString(formData, "projectId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  let notice = "Could not open host-withdrawal petition.";
+  try {
+    const result = await openProjectHostingWithdrawalPetition(prisma, {
+      projectId,
+      groupId,
+      createdByMembershipId: membership.id,
+    });
+    if (result.ok) notice = "Host-withdrawal petition opened.";
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#projects`);
 }
 
 async function sponsorApplicationAction(formData: FormData) {

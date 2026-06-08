@@ -89,7 +89,7 @@ export async function createProjectFromPetition(
 
   const project = await prisma.project.create({
     data: {
-      groupId: proposal.groupId,
+      foundingGroupId: proposal.groupId,
       name: proposal.title,
       description: proposal.body || null,
       status: "active",
