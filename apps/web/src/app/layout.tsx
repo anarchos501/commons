@@ -60,12 +60,14 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const theme = cookieStore.get("commons_theme")?.value;
   const themeClass = theme === "dark" ? "dark" : "";
+  const textSize = cookieStore.get("commons_text_size")?.value;
+  const textSizeClass = textSize === "large" ? "large-text" : "";
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased ${themeClass}`.trim()}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased ${themeClass} ${textSizeClass}`.trim()}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="h-full flex flex-col">
         <Script id="strip-form-fill-hydration-attributes" strategy="beforeInteractive">
           {stripFormFillHydrationAttributes}
         </Script>

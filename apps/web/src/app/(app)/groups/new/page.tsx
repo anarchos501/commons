@@ -25,12 +25,12 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
         <header className="mb-6">
           <Link href="/groups" className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
             <ArrowLeft className="h-3 w-3" aria-hidden="true" />
-            Find Groups
+            Find Collectives
           </Link>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">Create Group</h1>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight">Create Collective</h1>
           <p className="mt-1 text-sm text-[var(--soft-text)]">
-            New groups start private — they won&apos;t appear on Find Groups until a public visibility petition is approved.
-            Membership policy controls how people join; visibility controls who can discover the group.
+            New collectives start private — they won&apos;t appear on Find Collectives until a public visibility petition is approved.
+            Membership policy controls how people join; visibility controls who can discover the collective.
           </p>
         </header>
 
@@ -39,7 +39,7 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
         <form action={createGroupAction} className="space-y-5 border border-[var(--border)] bg-[var(--surface)] p-5">
           <div>
             <label className="block text-sm font-medium text-[var(--text)] mb-1" htmlFor="name">
-              Group Name
+              Collective Name
             </label>
             <input
               id="name"
@@ -57,7 +57,7 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
               id="description"
               name="description"
               rows={3}
-              placeholder="What does this group do, and who is it for?"
+              placeholder="What does this collective do, and who is it for?"
               className="w-full border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)]"
             />
           </div>
@@ -74,7 +74,7 @@ export default async function CreateGroupPage({ searchParams }: { searchParams: 
               <option value="open">Open — anyone can join directly</option>
             </select>
           </div>
-          <SubmitButton>Create Group</SubmitButton>
+          <SubmitButton>Create Collective</SubmitButton>
         </form>
       </div>
     </main>
@@ -89,7 +89,7 @@ async function createGroupAction(formData: FormData) {
   const name = (formData.get("name") as string | null)?.trim() ?? "";
   const description = (formData.get("description") as string | null)?.trim() || undefined;
   const membershipPolicy = formData.get("membershipPolicy") as string | null;
-  if (!name) redirect("/groups/new?notice=Group+name+is+required.");
+  if (!name) redirect("/groups/new?notice=Collective+name+is+required.");
 
   const prisma = createPrismaClient();
   let groupId: string;
@@ -106,7 +106,7 @@ async function createGroupAction(formData: FormData) {
     });
 
     if (!result.ok) {
-      redirect(`/groups/new?notice=${encodeURIComponent("A group with that name already exists.")}`);
+      redirect(`/groups/new?notice=${encodeURIComponent("A collective with that name already exists.")}`);
     }
     groupId = result.groupId;
     session.activeGroupId = groupId;

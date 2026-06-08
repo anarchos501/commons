@@ -12,14 +12,18 @@ Commons currently lets communities:
 
 - Accept public support requests from neighbors, with or without accounts.
 - Route requests to contributors based on service capability, availability, contribution categories, and trusted provider status.
-- Coordinate inside group, project, and responsibility workspaces.
+- Coordinate inside collective, project, and responsibility workspaces.
 - Use discussions, bulletins, publications, and living documents as shared coordination material.
-- Apply for group membership, sponsor pending applicants, and decide membership requests through petitions.
-- Propose projects through host-group governance, then let active project members govern project-internal decisions.
-- Volunteer for group responsibilities and confirm responsibility assignments through petitions.
-- Use governance temperature signals across 12 categories to affect displayed thresholds and petition durations.
+- Apply for collective membership, sponsor pending applicants, and decide membership requests through petitions.
+- Propose projects through host-collective governance, then let active project members govern project-internal decisions. Project join requests are approved by existing members.
+- Volunteer for collective responsibilities and confirm responsibility assignments through petitions.
+- Form coalitions — multi-collective spaces where each collective keeps its own members and governance. Coalition proposals run as bundled petitions requiring separate approval from each member collective.
+- Use governance temperature signals across 16 categories to affect displayed thresholds and petition durations.
 - Declare emergency periods through petitions and show active emergency periods in the governance surface.
 - File and review accountability concerns where appropriate responsibilities are assigned.
+- View node feedback and routing activity in the node host inbox.
+
+**Terminology:** The user-facing label for what the codebase calls a "Group" is "Collective."
 
 The goal is not production readiness. The goal is to test whether Commons makes cooperation easier without hiding power, permanence, or surveillance behind the interface.
 
@@ -30,25 +34,33 @@ The goal is not production readiness. The goal is to test whether Commons makes 
 **Core coordination**
 
 - Submit a support request as a guest.
-- Create an account and join or apply to join a group.
+- Create an account and join or apply to join a collective.
 - Route a request to eligible contributors.
 - Accept or decline routed requests.
 - Complete a request and observe the privacy-safe contribution record.
 
-**Group governance**
+**Collective governance**
 
 - Sponsor a pending membership application.
 - Support, withdraw support from, and explicitly evaluate petitions.
-- Propose a project and approve it through group governance.
-- Adjust governance temperature signals across the 12 categories.
+- Propose a project and approve it through collective governance.
+- Adjust governance temperature signals across the 16 categories.
 - Declare an emergency and observe the active emergency period.
+
+**Coalitions**
+
+- Create a coalition and invite another collective.
+- Follow the bundled petition flow — both collectives must approve separately.
+- Propose a host-adoption federation proposal and trace the multi-collective approval process.
+- Depart a coalition and observe how the departure petition works.
 
 **Project spaces**
 
 - Open a project from the sidebar.
 - Use project discussion, bulletins, publications, and living documents.
+- Request to join a project from a second account and approve or dismiss the request.
 - Propose project-scoped library revisions or contribution categories.
-- Confirm that project-internal petitions use project membership, not host-group membership.
+- Confirm that project-internal petitions use project membership, not host-collective membership.
 
 **Responsibilities**
 
@@ -56,7 +68,7 @@ The goal is not production readiness. The goal is to test whether Commons makes 
 - Confirm a responsibility assignment through petition approval.
 - Visit a responsibility workspace.
 - Resign from a responsibility.
-- Observe coverage status in the group responsibility section.
+- Observe coverage status in the collective responsibility section.
 
 **Accountability**
 
@@ -115,12 +127,14 @@ Governance UX is now surfaced in group, project, and responsibility contexts, bu
 ## Suggested Demo Scenarios
 
 1. **Guest support request:** submit a fictional request, route it, accept it, and complete it.
-2. **Membership sponsorship:** apply to a non-open group, sponsor the pending application, support the petition, and approve membership.
-3. **Project creation:** propose a project, approve it through the host group, then use the resulting project workspace.
-4. **Project-internal governance:** as an active project member, propose a living document revision and approve it through a project-scoped petition.
-5. **Responsibility volunteering:** volunteer for Reviewer, approve the responsibility petition, then visit the responsibility workspace.
-6. **Emergency declaration:** open an emergency petition, approve it, and confirm the emergency period appears in governance settings.
-7. **Governance temperature:** adjust category signals and observe threshold/duration changes.
+2. **Membership sponsorship:** apply to a non-open collective, sponsor the pending application, support the petition, and approve membership.
+3. **Project creation:** propose a project, approve it through the host collective, then use the resulting project workspace.
+4. **Project join request:** from a second account, request to join a project; approve or dismiss the request as an existing member.
+5. **Project-internal governance:** as an active project member, propose a living document revision and approve it through a project-scoped petition.
+6. **Responsibility volunteering:** volunteer for Reviewer, approve the responsibility petition, then visit the responsibility workspace.
+7. **Coalition formation:** create a coalition, invite a second collective, and follow the bundled petition approval flow.
+8. **Emergency declaration:** open an emergency petition, approve it, and confirm the emergency period appears in governance settings.
+9. **Governance temperature:** adjust category signals and observe threshold/duration changes.
 
 ---
 

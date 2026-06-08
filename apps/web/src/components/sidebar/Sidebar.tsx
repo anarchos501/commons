@@ -2,6 +2,7 @@ import { LogOut } from "lucide-react";
 import type { SidebarData } from "../../lib/sidebar-data";
 import { SidebarShell } from "./SidebarShell";
 import { ThemeToggle } from "../theme/ThemeToggle";
+import { TextSizeToggle } from "../theme/TextSizeToggle";
 import { SidebarNavClient } from "./SidebarNavClient";
 import { logoutAction } from "../../lib/logout-action";
 
@@ -20,11 +21,12 @@ export function Sidebar({ data, open, onClose }: Props) {
       <div className="border-t border-[var(--border)] px-3 py-3 flex items-center justify-between">
         <span className="text-xs text-[var(--muted)] truncate">{data.displayName}</span>
         <div className="flex items-center gap-1 shrink-0">
+          <TextSizeToggle />
           <ThemeToggle />
           <form action={logoutAction}>
             <button
               type="submit"
-              className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+              className="btn-icon flex items-center gap-1.5 px-2 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
             >
               <LogOut className="h-3.5 w-3.5" />
               Logout

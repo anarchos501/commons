@@ -37,6 +37,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl">
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
@@ -104,10 +105,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
           </div>
         </div>
 
+        {isHolder && (
         <CollapsibleSection id="discussion" title="Discussion" eyebrow="Coordination" storageKey={`responsibility:${responsibilityId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {!isHolder ? (
-            <EmptyState text="Volunteer for this responsibility to see its coordination space." />
-          ) : data.discussionThreads.length > 0 ? (
+          {data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
               <div className="space-y-2">
                 {data.discussionThreads.map((thread) => (
@@ -171,36 +171,31 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
             </form>
           )}
         </CollapsibleSection>
+        )}
 
-        {responsibility.type === "reviewer" && isHolder && (
+        {responsibility.type === "reviewer" && isHolder && data.activeConcerns.length > 0 && (
           <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`responsibility:${responsibilityId}:section:concerns`} className="bg-[var(--surface)] p-5 sm:p-6">
-            {data.activeConcerns.length > 0 ? (
-              <div className="space-y-3">
-                {data.activeConcerns.map((concern) => (
-                  <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-medium">{concern.subject}</p>
-                      <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
-                    </div>
-                    {concern.findings.length > 0 && (
-                      <p className="text-xs text-[var(--muted)]">
-                        {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
-                      </p>
-                    )}
+            <div className="space-y-3">
+              {data.activeConcerns.map((concern) => (
+                <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium">{concern.subject}</p>
+                    <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState text="No active concerns right now." />
-            )}
+                  {concern.findings.length > 0 && (
+                    <p className="text-xs text-[var(--muted)]">
+                      {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </CollapsibleSection>
         )}
 
         {/* ── Library ──────────────────────────────────────────────── */}
+        {isHolder && (
         <CollapsibleSection id="library" title="Library" eyebrow="Resources" storageKey={`responsibility:${responsibilityId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {!isHolder ? (
-            <EmptyState text="Volunteer for this responsibility to see its coordination space." />
-          ) : (
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
             <details id="bulletins" className="group/lib">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
@@ -321,8 +316,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
               </div>
             </details>
           </div>
-          )}
         </CollapsibleSection>
+        )}
+      </div>
       </div>
     </main>
   );

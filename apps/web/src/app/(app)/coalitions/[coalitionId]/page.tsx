@@ -56,7 +56,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
               <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">{data.coalition.description}</p>
             )}
             <p className="mt-3 text-xs text-[var(--muted)]">
-              {data.coalition.memberships.length} member {data.coalition.memberships.length === 1 ? "group" : "groups"}
+              {data.coalition.memberships.length} member {data.coalition.memberships.length === 1 ? "collective" : "collectives"}
             </p>
           </div>
 
@@ -146,7 +146,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
 
           <CollapsibleSection
             id="members"
-            title="Member Groups"
+            title="Member Collectives"
             eyebrow="Independent governance"
             storageKey={`coalition:${coalitionId}:section:members`}
             className="bg-[var(--surface)] p-5 sm:p-6"
@@ -163,33 +163,32 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
               ))}
             </div>
             <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-              Coalition decisions are ratified separately by the participating groups. This space does not create a pooled electorate.
+              Coalition decisions are made separately by each participating collective. This space does not create a pooled electorate.
             </p>
           </CollapsibleSection>
 
           <CollapsibleSection
             id="coalition-actions"
             title="Coalition Actions"
-            eyebrow="Federated petition bundles"
+            eyebrow="Actions requiring joint agreement"
             storageKey={`coalition:${coalitionId}:section:actions`}
             className="bg-[var(--surface)] p-5 sm:p-6"
           >
             <div className="space-y-6">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--text)]">Invite a group to join</h3>
+                <h3 className="text-sm font-semibold text-[var(--text)]">Invite a collective to join</h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                  Joining requires unanimous consent — every current member group, plus the applicant, decides
-                  through its own internal petition. An active participant in any current member group can initiate
-                  the bundle.
+                  To join, every current member collective — and the applicant — must agree through their own
+                  internal petition. Any active participant in a member collective can start the process.
                 </p>
                 {data.canSponsorCurrentMember ? (
                   data.joinApplicantOptions.length > 0 ? (
                     <FormWithNotice action={joinCoalitionAction} className="mt-3 space-y-3">
                       <input type="hidden" name="coalitionId" value={coalitionId} />
                       <label className="block">
-                        <span className="field-label">Group to invite</span>
+                        <span className="field-label">Collective to invite</span>
                         <select name="applicantGroupId" required className="field-input">
-                          <option value="">Select a group&hellip;</option>
+                          <option value="">Select a collective&hellip;</option>
                           {data.joinApplicantOptions.map((option) => (
                             <option key={option.groupId} value={option.groupId}>{option.group.name}</option>
                           ))}
@@ -197,18 +196,18 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                       </label>
                       <label className="block">
                         <span className="field-label">Rationale</span>
-                        <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group join?" />
+                        <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective join?" />
                       </label>
                       <SubmitButton variant="secondary">Open join proposal</SubmitButton>
                     </FormWithNotice>
                   ) : (
                     <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                      There are no other groups on this node to invite.
+                      There are no other collectives on this node to invite.
                     </p>
                   )
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    You need active participation in a current member group to initiate an invitation.
+                    You need active participation in a member collective to initiate an invitation.
                   </p>
                 )}
               </div>
@@ -216,16 +215,16 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
               <div>
                 <h3 className="text-sm font-semibold text-[var(--text)]">Propose departure</h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                  Voluntary departure is decided solely by the departing group&apos;s own governance — the coalition
+                  Voluntary departure is decided solely by the departing collective&apos;s own governance — the coalition
                   cannot prevent or delay it.
                 </p>
                 {data.departureOptions.length > 0 ? (
                   <FormWithNotice action={departCoalitionAction} className="mt-3 space-y-3">
                     <input type="hidden" name="coalitionId" value={coalitionId} />
                     <label className="block">
-                      <span className="field-label">Departing group</span>
+                      <span className="field-label">Departing collective</span>
                       <select name="departingGroupId" required className="field-input">
-                        <option value="">Select a group&hellip;</option>
+                        <option value="">Select a collective&hellip;</option>
                         {data.departureOptions.map((option) => (
                           <option key={option.groupId} value={option.groupId}>{option.groupName}</option>
                         ))}
@@ -233,30 +232,30 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                     </label>
                     <label className="block">
                       <span className="field-label">Rationale</span>
-                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why is this group departing?" />
+                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why is this collective departing?" />
                     </label>
                     <SubmitButton variant="secondary">Open departure proposal</SubmitButton>
                   </FormWithNotice>
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    You don&apos;t hold active participation in any current member group.
+                    You don&apos;t hold active participation in any member collective.
                   </p>
                 )}
               </div>
 
               <div>
-                <h3 className="text-sm font-semibold text-[var(--text)]">Propose removal of a member group</h3>
+                <h3 className="text-sm font-semibold text-[var(--text)]">Propose removal of a member collective</h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                  Removal acts on another group rather than expressing one&apos;s own will — the targeted group does not
-                  participate; every remaining member group must consent.
+                  Removal acts on another collective rather than expressing one&apos;s own will — the targeted collective does not
+                  participate; every remaining member collective must consent.
                 </p>
                 {data.removalOptions.length > 0 ? (
                   <FormWithNotice action={removeCoalitionMemberAction} className="mt-3 space-y-3">
                     <input type="hidden" name="coalitionId" value={coalitionId} />
                     <label className="block">
-                      <span className="field-label">Group to remove</span>
+                      <span className="field-label">Collective to remove</span>
                       <select name="targetGroupId" required className="field-input">
-                        <option value="">Select a group&hellip;</option>
+                        <option value="">Select a collective&hellip;</option>
                         {data.removalOptions.map((option) => (
                           <option key={option.groupId} value={option.groupId}>{option.groupName}</option>
                         ))}
@@ -264,13 +263,13 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                     </label>
                     <label className="block">
                       <span className="field-label">Rationale</span>
-                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group be removed?" />
+                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective be removed?" />
                     </label>
                     <SubmitButton variant="secondary">Open removal proposal</SubmitButton>
                   </FormWithNotice>
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    You need active participation in a remaining member group to initiate removal.
+                    You need active participation in a remaining member collective to initiate removal.
                   </p>
                 )}
               </div>
@@ -280,7 +279,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
           <CollapsibleSection
             id="proposals"
             title="Coalition Proposals"
-            eyebrow="Federated petition bundles"
+            eyebrow="Active joint proposals"
             storageKey={`coalition:${coalitionId}:section:proposals`}
             className="bg-[var(--surface)] p-5 sm:p-6"
           >
@@ -293,7 +292,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                       <span className="text-xs capitalize text-[var(--muted)]">{proposal.status.replaceAll("-", " ")}</span>
                     </div>
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      {proposal.petitions.length} participating group {proposal.petitions.length === 1 ? "petition" : "petitions"}
+                      {proposal.petitions.length} participating collective {proposal.petitions.length === 1 ? "petition" : "petitions"}
                     </p>
                   </div>
                 ))}
@@ -455,7 +454,7 @@ async function joinCoalitionAction(_prev: FormState, formData: FormData): Promis
     });
     const myMembershipByGroupId = new Map(myMemberships.map((m) => [m.groupId, m]));
     if (myMemberships.length === 0) {
-      return { kind: "error", message: "You must hold active participation in a current member group." };
+      return { kind: "error", message: "You must hold active participation in a current member collective." };
     }
 
     const result = await openCoalitionJoinProposal(prisma, {
@@ -472,7 +471,7 @@ async function joinCoalitionAction(_prev: FormState, formData: FormData): Promis
     await prisma.$disconnect();
   }
   revalidatePath(`/coalitions/${coalitionId}`);
-  return { kind: "success", message: "Join proposal opened — the applicant and every current member group will decide through their own petition." };
+  return { kind: "success", message: "Join proposal opened — the applicant and every current member collective will decide through their own petition." };
 }
 
 async function departCoalitionAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -490,7 +489,7 @@ async function departCoalitionAction(_prev: FormState, formData: FormData): Prom
       select: { id: true, status: true, participationStatus: true },
     });
     if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
-      return { kind: "error", message: "You must hold active participation in the departing group to sponsor this proposal." };
+      return { kind: "error", message: "You must hold active participation in the departing collective to sponsor this proposal." };
     }
 
     const result = await openCoalitionDepartureProposal(prisma, {
@@ -503,7 +502,7 @@ async function departCoalitionAction(_prev: FormState, formData: FormData): Prom
     await prisma.$disconnect();
   }
   revalidatePath(`/coalitions/${coalitionId}`);
-  return { kind: "success", message: "Departure proposal opened — the departing group will decide through its own petition." };
+  return { kind: "success", message: "Departure proposal opened — the departing collective will decide through its own petition." };
 }
 
 async function removeCoalitionMemberAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -537,7 +536,7 @@ async function removeCoalitionMemberAction(_prev: FormState, formData: FormData)
       select: { id: true, groupId: true },
     });
     if (remainingMemberships.length === 0) {
-      return { kind: "error", message: "You must hold active participation in a remaining member group to sponsor this proposal." };
+      return { kind: "error", message: "You must hold active participation in a remaining member collective to sponsor this proposal." };
     }
     const membershipByGroupId = new Map(remainingMemberships.map((membership) => [membership.groupId, membership.id]));
 
@@ -555,7 +554,7 @@ async function removeCoalitionMemberAction(_prev: FormState, formData: FormData)
     await prisma.$disconnect();
   }
   revalidatePath(`/coalitions/${coalitionId}`);
-  return { kind: "success", message: "Removal proposal opened — every remaining member group will decide through its own petition." };
+  return { kind: "success", message: "Removal proposal opened — every remaining member collective will decide through its own petition." };
 }
 
 function coalitionProposalFailureMessage(reason: string) {
@@ -563,8 +562,8 @@ function coalitionProposalFailureMessage(reason: string) {
     case "invalid_participants": return "Select at least two distinct, eligible groups on the same node.";
     case "not_eligible": return "Every sponsoring group requires an active, active-participation member to consent.";
     case "not_found": return "This coalition could not be found.";
-    case "already_member": return "That group already belongs to this coalition.";
-    case "not_member": return "That group is not currently a member of this coalition.";
+    case "already_member": return "That collective already belongs to this coalition.";
+    case "not_member": return "That collective is not currently a member of this coalition.";
     case "duplicate_name": return "A coalition with that name already exists on this node.";
     case "petition_error": return "This proposal could not be submitted.";
     default: return "This proposal could not be submitted.";

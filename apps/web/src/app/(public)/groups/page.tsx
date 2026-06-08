@@ -10,17 +10,17 @@ export const dynamic = "force-dynamic";
 const PLANNED_INTERACTIONS = [
   {
     label: "Offer Contribution",
-    description: "Signal that you have something to offer this group.",
+    description: "Signal that you have something to offer this collective.",
     icon: HandHeart,
   },
   {
     label: "Propose Endorsement",
-    description: "Formally recognize this group's work.",
+    description: "Formally recognize this collective's work.",
     icon: Star,
   },
   {
     label: "Propose Sanction",
-    description: "Raise a concern about this group's conduct.",
+    description: "Raise a concern about this collective's conduct.",
     icon: Flag,
   },
 ] as const;
@@ -84,10 +84,10 @@ export default async function FindGroupsPage() {
             </Link>
           )}
           <div className="flex items-baseline justify-between gap-4">
-            <h1 className={`${accountId ? "" : "mt-4 "}text-2xl font-bold tracking-tight`}>Find Groups</h1>
+            <h1 className={`${accountId ? "" : "mt-4 "}text-2xl font-bold tracking-tight`}>Find Collectives</h1>
             {accountId && (
               <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
-                Create Group
+                Create Collective
               </Link>
             )}
           </div>
@@ -125,7 +125,7 @@ export default async function FindGroupsPage() {
                           href={`/groups/${group.id}`}
                           className="inline-flex items-center border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
                         >
-                          Open Group
+                          Open Collective
                         </Link>
                       </div>
                     )}
@@ -153,7 +153,7 @@ export default async function FindGroupsPage() {
                                 <HelpCircle className="h-4 w-4" aria-hidden="true" />
                                 Request Support
                               </div>
-                              <p className="mt-1 text-xs leading-4 text-[var(--muted)]">No active services are currently available from this group.</p>
+                              <p className="mt-1 text-xs leading-4 text-[var(--muted)]">No active services are currently available from this collective.</p>
                             </div>
                           )}
 

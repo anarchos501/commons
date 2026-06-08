@@ -1,7 +1,10 @@
 "use client";
 
+// UI terminology note: "Collective" is the user-facing label for what the codebase calls a "Group".
+// Code variables (groupId, GroupMembership, etc.), URLs (/groups/...), and DB fields are unchanged.
+
 import Link from "next/link";
-import { Bell, Briefcase, CircleDot, HelpCircle, LayoutDashboard, MessageSquareWarning, Network, Shield, UserRound, Users } from "lucide-react";
+import { Briefcase, CircleDot, LayoutDashboard, MessageSquareWarning, Network, Shield, UserRound, Users } from "lucide-react";
 import type { SidebarData } from "../../lib/sidebar-data";
 
 interface Props {
@@ -17,24 +20,9 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
 
   return (
     <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4 gap-1">
-      <Link
-        href="/dashboard"
-        className="mb-4 px-2 text-sm font-semibold text-[var(--text)] hover:text-[var(--accent)] hidden lg:block"
-      >
-        Commons
-      </Link>
-
-      <NavLink href="/dashboard#request" icon={<HelpCircle className="h-4 w-4" />}>
-        Request Support
-      </NavLink>
-      <NavLink href="/dashboard" icon={<LayoutDashboard className="h-4 w-4" />}>
+      <NavLink href="/dashboard" icon={<LayoutDashboard className="h-4 w-4" />} badge={unreadRouteCount}>
         Dashboard
       </NavLink>
-      {canAccessNodeGovernance && (
-        <NavLink href="/node" icon={<CircleDot className="h-4 w-4" />}>
-          Node Governance
-        </NavLink>
-      )}
       {canManageFeedback && (
         <NavLink href="/node/feedback" icon={<MessageSquareWarning className="h-4 w-4" />}>
           Feedback Inbox
@@ -45,7 +33,7 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
         <>
           <p className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-[var(--soft-text)]">
             <Users className="h-3.5 w-3.5" />
-            My Groups
+            My Collectives
           </p>
           {groupMemberships.map((m) => (
             <NavLink key={m.groupId} href={`/groups/${m.groupId}`} icon={null} indent>
@@ -97,12 +85,12 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
         </>
       )}
 
-      <div className="border-t border-[var(--border)] mt-1 pt-1">
-        <NavLink href="/groups" icon={<UserRound className="h-4 w-4" />}>Find Groups</NavLink>
-        <NavLink href="/dashboard#routes" icon={<Bell className="h-4 w-4" />} badge={unreadRouteCount}>
-          Notifications
+      <NavLink href="/groups" icon={<UserRound className="h-4 w-4" />}>Find Collectives</NavLink>
+      {canAccessNodeGovernance && (
+        <NavLink href="/node" icon={<CircleDot className="h-4 w-4" />}>
+          Node Governance
         </NavLink>
-      </div>
+      )}
     </nav>
   );
 }

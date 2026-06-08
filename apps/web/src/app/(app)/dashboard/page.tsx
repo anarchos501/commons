@@ -121,8 +121,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           {/* Groups + Notifications + My Requests */}
           <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
-            {/* My Groups */}
-            <CollapsibleSection id="groups" title="My Groups" eyebrow="Your coordination spaces" storageKey="dashboard:groups" className="bg-[var(--surface)] p-5 sm:p-6">
+            {/* My Collectives */}
+            <CollapsibleSection id="groups" title="My Collectives" eyebrow="Your coordination spaces" storageKey="dashboard:groups" className="bg-[var(--surface)] p-5 sm:p-6">
               {data.myGroups.length > 0 ? (
                 <div className="space-y-3">
                   {data.myGroups.map((g) => (
@@ -141,7 +141,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                       </div>
                       <details className="mt-2">
                         <summary className="cursor-pointer list-none text-xs text-amber-700 hover:text-amber-600 transition select-none">
-                          Leave group
+                          Leave collective
                         </summary>
                         <div className="mt-2 border border-[var(--border)] bg-[var(--subtle)] p-3">
                           <p className="text-xs leading-5 text-[var(--soft-text)]">
@@ -159,14 +159,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                   ))}
                 </div>
               ) : (
-                <EmptyState text="You are not yet a member of any group." />
+                <EmptyState text="You are not yet a member of any collective." />
               )}
               <div className="mt-4 border-t border-[var(--border)] pt-4 flex items-center gap-4">
                 <Link href="/groups" className="text-xs font-medium text-[var(--accent)] hover:underline">
-                  Find Groups →
+                  Find Collectives →
                 </Link>
                 <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
-                  Create Group →
+                  Create Collective →
                 </Link>
               </div>
             </CollapsibleSection>

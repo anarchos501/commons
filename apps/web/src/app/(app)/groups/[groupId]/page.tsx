@@ -138,7 +138,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
       {/* ── Overview + Discussion (connected) ─────────────────────── */}
       <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
         <div id="overview" className="bg-[var(--surface)] p-5 sm:p-6">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Group coordination space</span>
+          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Collective workspace</span>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)]">{group.name}</h1>
           {group.description && <p className="mt-2 text-sm leading-6 text-[var(--soft-text)]">{group.description}</p>}
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--muted)]">
@@ -242,14 +242,14 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
         {/* ══ Library ═══════════════════════════════════════════════════ */}
-        <CollapsibleSection id="library" title="Library" eyebrow="Group resources" storageKey={`group:${groupId}:section:library`} className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <CollapsibleSection id="library" title="Library" eyebrow="Resources" storageKey={`group:${groupId}:section:library`} className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
 
             {/* Bulletins nested */}
             <details id="bulletins" className="group/lib">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
                 <span>
-                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Group updates</span>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Updates</span>
                   <span className="mt-1 block text-xl font-bold tracking-tight">Bulletins</span>
                 </span>
                 <span className="text-sm text-[var(--muted)] select-none group-open/lib:hidden">Expand</span>
@@ -516,7 +516,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Projects ──────────────────────────────────────────────── */}
         <CollapsibleSection id="projects" title="Hosted Projects" eyebrow="Federated coordination" storageKey={`group:${groupId}:section:projects`} className="bg-[var(--surface)] p-5 sm:p-6">
           <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
-            Hosting is this group&apos;s endorsement and support. It does not give the group ownership of a project.
+            Hosting is this collective&apos;s endorsement and support. It does not give the collective ownership of a project.
           </p>
           {data.projects.length > 0 ? (
             <div className="space-y-3">
@@ -533,7 +533,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     <p className="mt-2 text-xs text-[var(--muted)]">
                       <span className="capitalize">{project.status}</span>
                       <span aria-hidden="true"> &middot; </span>
-                      {project._count.hostings} {project._count.hostings === 1 ? "host group" : "host groups"}
+                      {project._count.hostings} {project._count.hostings === 1 ? "host collective" : "host collectives"}
                     </p>
                   </a>
                   {isActive && (
@@ -547,7 +547,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               ))}
             </div>
           ) : (
-            <EmptyState text="This group does not currently host any projects." />
+            <EmptyState text="This collective does not currently host any projects." />
           )}
           {isActive && (
             <details className="mt-4">
@@ -568,7 +568,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection id="coalitions" title="Coalitions" eyebrow="Group-to-group coordination" storageKey={`group:${groupId}:section:coalitions`} className="bg-[var(--surface)] p-5 sm:p-6">
+        <CollapsibleSection id="coalitions" title="Coalitions" eyebrow="Collective-to-collective coordination" storageKey={`group:${groupId}:section:coalitions`} className="bg-[var(--surface)] p-5 sm:p-6">
           {data.coalitions.length > 0 ? (
             <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
               {data.coalitions.map((coalition) => (
@@ -582,13 +582,13 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     <p className="mt-1 line-clamp-2 text-xs text-[var(--soft-text)]">{coalition.description}</p>
                   )}
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    {coalition._count.memberships} member {coalition._count.memberships === 1 ? "group" : "groups"}
+                    {coalition._count.memberships} member {coalition._count.memberships === 1 ? "collective" : "collectives"}
                   </p>
                 </a>
               ))}
             </div>
           ) : (
-            <EmptyState text="This group does not currently belong to a coalition." />
+            <EmptyState text="This collective does not currently belong to a coalition." />
           )}
           {isActive && (
             <details className="mt-4">
@@ -606,12 +606,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   </label>
                   <label className="block">
                     <span className="field-label">Rationale</span>
-                    <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should these groups federate?" />
+                    <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should these collectives federate?" />
                   </label>
                   <fieldset className="space-y-1.5">
-                    <legend className="field-label">Partner groups (select at least one)</legend>
+                    <legend className="field-label">Partner collectives (select at least one)</legend>
                     <p className="text-xs leading-5 text-[var(--muted)]">
-                      Each selected group receives its own internal petition, decided independently by its members.
+                      Each selected collective receives its own internal petition, decided independently by its members.
                     </p>
                     {data.eligibleCoalitionPartners.map((partner) => (
                       <label key={partner.id} className="flex items-center gap-2 text-sm text-[var(--text)]">
@@ -624,7 +624,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 </FormWithNotice>
               ) : (
                 <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                  There are no other groups on this node to invite into a coalition.
+                  There are no other collectives on this node to invite into a coalition.
                 </p>
               )}
             </details>
@@ -645,7 +645,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 </label>
                 <label className="block">
                   <span className="field-label">Rationale</span>
-                  <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group join?" />
+                  <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective join?" />
                 </label>
                 <SubmitButton variant="secondary">Open join proposal</SubmitButton>
               </FormWithNotice>
@@ -653,16 +653,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection id="node-stewardship" title="Node Stewardship" eyebrow="Group consent" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
+        <CollapsibleSection id="node-stewardship" title="Node Stewardship" eyebrow="Collective consent" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
           <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
-            This group may open stewardship questions. Node users decide appointments and no confidence.
+            This collective may open stewardship questions. Node users decide appointments and no-confidence votes.
           </p>
           {isActive && !data.nodeState.stewardGroupId && (
             <form action={openGroupStewardNominationAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <input type="hidden" name="nodeId" value={group.nodeId} />
               <label className="block">
-                <span className="field-label">Candidate group</span>
+                <span className="field-label">Candidate collective</span>
                 <select name="candidateGroupId" className="field-input" required>
                   {data.nodeGroupOptions.map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
@@ -676,7 +676,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <form action={openGroupNoConfidenceAction} className="space-y-3">
               <input type="hidden" name="groupId" value={groupId} />
               <input type="hidden" name="nodeId" value={group.nodeId} />
-              <p className="text-sm text-[var(--soft-text)]">Ask this group whether to initiate a node-wide no-confidence vote.</p>
+              <p className="text-sm text-[var(--soft-text)]">Ask this collective whether to initiate a node-wide no-confidence vote.</p>
               <SubmitButton variant="secondary">Open initiation petition</SubmitButton>
             </form>
           )}
@@ -958,7 +958,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <div>
                     <label className="block text-xs font-medium text-[var(--soft-text)] mb-1">Offered by</label>
                     <select name="offeringEntityType" required className="w-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]">
-                      <option value="group">This group</option>
+                      <option value="group">This collective</option>
                       {data.allProjects.map((p) => (
                         <option key={p.id} value={`project:${p.id}`}>Project: {p.name}</option>
                       ))}
@@ -966,7 +966,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   </div>
                   {data.group.visibility === "private" && data.hasNoActiveCategories && (
                     <p className="text-xs border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800">
-                      Approving this contribution category will make this group publicly visible on the Find Groups page.
+                      Approving this contribution category will make this collective publicly visible on the Find Collectives page.
                     </p>
                   )}
                   <SubmitButton>Open petition</SubmitButton>
@@ -1015,12 +1015,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
 
-            {/* Group visibility */}
+            {/* Collective visibility */}
             {data.group.visibility === "private" ? (
               <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
-                <p className="text-sm font-medium text-[var(--text)]">Group Visibility</p>
+                <p className="text-sm font-medium text-[var(--text)]">Visibility</p>
                 <p className="mt-1 text-xs text-[var(--soft-text)]">
-                  This group is private and will not appear on the Find Groups page.
+                  This collective is private and will not appear on the Find Collectives page.
                   {isActive && " Active members can petition to make it publicly discoverable."}
                 </p>
                 {isActive && (
@@ -1031,7 +1031,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 )}
               </div>
             ) : (
-              <p className="text-xs text-[var(--muted)]">This group is publicly visible on the Find Groups page.</p>
+              <p className="text-xs text-[var(--muted)]">This collective is publicly visible on the Find Collectives page.</p>
             )}
 
             {/* Emergency period status + declaration */}
@@ -1285,7 +1285,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     );
 
-    // Governance — all 12 categories
+    // Governance — all 16 categories
     const currentSignals = await prisma.memberGovernanceSignal.findMany({
       where: { membershipId: currentMembership.id },
       select: { category: true, parameter: true, signal: true },
@@ -1664,7 +1664,7 @@ async function proposeCoalitionFormationAction(
   const content = requiredString(formData, "content");
   const partnerGroupIds = formData.getAll("partnerGroupId").filter((value): value is string => typeof value === "string" && value.length > 0);
   if (partnerGroupIds.length === 0) {
-    return { kind: "error", message: "Select at least one partner group to invite into the coalition." };
+    return { kind: "error", message: "Select at least one partner collective to invite into the coalition." };
   }
 
   const membership = await requireMembership(session.accountId, groupId);
@@ -1684,7 +1684,7 @@ async function proposeCoalitionFormationAction(
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  return { kind: "success", message: "Coalition formation proposal opened — each group's members will decide through their own petition." };
+  return { kind: "success", message: "Coalition formation proposal opened — each collective's members will decide through their own petition." };
 }
 
 async function proposeCoalitionJoinAction(
@@ -1716,7 +1716,7 @@ async function proposeCoalitionJoinAction(
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-  return { kind: "success", message: "Join proposal opened. Every participating group will decide independently." };
+  return { kind: "success", message: "Join proposal opened. Every participating collective will decide independently." };
 }
 
 function coalitionProposalFailureMessage(reason: string) {
@@ -1724,8 +1724,8 @@ function coalitionProposalFailureMessage(reason: string) {
     case "invalid_participants": return "Select at least two distinct, eligible groups on the same node.";
     case "not_eligible": return "Every sponsoring group requires an active, active-participation member to consent.";
     case "not_found": return "This coalition could not be found.";
-    case "already_member": return "That group already belongs to this coalition.";
-    case "not_member": return "That group is not currently a member of this coalition.";
+    case "already_member": return "That collective already belongs to this coalition.";
+    case "not_member": return "That collective is not currently a member of this coalition.";
     case "duplicate_name": return "A coalition with that name already exists on this node.";
     case "petition_error": return "This proposal could not be submitted.";
     default: return "This proposal could not be submitted.";
@@ -2452,7 +2452,7 @@ function governanceSignalFailureNotice(reason: string) {
     case "invalid_signal": return "That governance signal value is not valid.";
     case "invalid_category": return "That governance category is not valid.";
     case "invalid_parameter": return "That governance characteristic is not valid.";
-    case "membership_group_mismatch": return "That membership does not belong to this group.";
+    case "membership_group_mismatch": return "That membership does not belong to this collective.";
     default: return "That governance signal could not be saved.";
   }
 }

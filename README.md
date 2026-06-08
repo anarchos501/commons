@@ -32,13 +32,18 @@ The project charter is the main product compass: [docs/charter.md](docs/charter.
 
 Commons currently includes:
 
-- Account registration, login, groups, public support request intake, and request status links.
-- Group workspaces with discussion, bulletins, publications, living documents, members, petitions, governance settings, contribution categories, trusted providers, responsibilities, and concerns.
-- Project workspaces with their own discussion, library, members, petitions, and contribution categories. Project-internal governance is scoped to active project members rather than host-group membership.
+- Account registration, login, collectives (groups), public support request intake, and request status links. The first person to register on a new node automatically founds the node.
+- Collective workspaces with discussion, bulletins, publications, living documents, members, petitions, governance settings, contribution categories, trusted providers, responsibilities, and concerns.
+- Project workspaces with their own discussion, library, members (with join requests), petitions, and contribution categories. Project-internal governance is scoped to active project members rather than host-collective membership.
 - Responsibility workspaces for group-accountable roles, including holders, volunteering, resignation, discussion, and library material.
-- Petition-backed governance flows for membership sponsorship, project proposals, responsibility volunteering, living document revisions, archival decisions, emergency declarations, contribution categories, and trusted provider status.
-- Governance temperature signals across the 12 current categories, with resolved thresholds and petition durations visible in the UI.
+- Petition-backed governance flows for membership sponsorship, project proposals, project join requests, responsibility volunteering, living document revisions, archival decisions, emergency declarations, contribution categories, and trusted provider status.
+- Coalitions: multi-collective federation spaces where each collective retains its own membership and governance. Coalition proposals (joining, departing, removal, host-adoption) run as bundled petitions requiring separate approval by each member collective.
+- Governance temperature signals across 16 categories, with resolved thresholds and petition durations visible in the UI.
+- Node feedback inbox for surfacing routing activity and coordination signals to node hosts.
+- A public plain-language guide page explaining core concepts, governance, and how to get started.
 - PostgreSQL persistence through Prisma, action logging, privacy envelope primitives, and federation/plugin-ready schema foundations.
+
+**Terminology note:** The user-facing label for what the codebase calls a "Group" is "Collective." Code variable names (`groupId`, `GroupMembership`, etc.), URL paths (`/groups/...`), and database fields are unchanged.
 
 Commons is still Open Alpha software. It does not yet provide password reset, email notifications, end-to-end encryption, production moderation/admin tooling, federation, plugins, or mobile/PWA offline support.
 
@@ -89,11 +94,16 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5433/commons_local_dev"
 
 See [docs/local-environment.md](docs/local-environment.md) for Docker and project separation checks.
 
-Generate the Prisma client, apply migrations, and seed local development data:
+Generate the Prisma client and apply migrations:
 
 ```bash
 corepack pnpm db:generate
 corepack pnpm db:migrate
+```
+
+Seeding is no longer required for basic use. The first account registered automatically creates the node. If you want a richer starting state for development, you can still run:
+
+```bash
 corepack pnpm db:seed
 ```
 

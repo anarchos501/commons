@@ -17,7 +17,7 @@ export function AppShell({ sidebarData, children }: Props) {
   const openSidebar = () => setOpen(true);
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-5xl items-center">
           {/* Left: hamburger on mobile, empty spacer on desktop */}
@@ -44,9 +44,9 @@ export function AppShell({ sidebarData, children }: Props) {
         </div>
       </header>
 
-      <div className="flex flex-1">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar data={sidebarData} open={open} onClose={() => setOpen(false)} />
-        <div className="flex flex-1 flex-col min-w-0">
+        <div className="flex flex-1 flex-col min-w-0 overflow-y-auto">
           {children}
         </div>
       </div>

@@ -103,10 +103,10 @@ export function RequestHelpForm({ groupOptions, allServices, action, submitLabel
         </select>
       </div>
 
-      {/* Which group */}
+      {/* Which collective */}
       <div className="block">
         <span className="field-label inline-flex items-center gap-1.5">
-          Which group should provide support?
+          Which collective should provide support?
           <InfoIcon description="" />
         </span>
         <select
@@ -117,7 +117,7 @@ export function RequestHelpForm({ groupOptions, allServices, action, submitLabel
           disabled={hasNoGroups}
           required
         >
-          <option value="">— Select a group —</option>
+          <option value="">— Select a collective —</option>
           {availableGroups.map((g) => (
             <option key={g.groupId} value={g.groupId}>
               {g.groupName}
@@ -125,9 +125,9 @@ export function RequestHelpForm({ groupOptions, allServices, action, submitLabel
           ))}
         </select>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          Not sure which group?{" "}
+          Not sure which collective?{" "}
           <Link href="/groups" className="text-[var(--accent)] hover:underline">
-            Browse available groups
+            Browse available collectives
           </Link>
           .
         </p>

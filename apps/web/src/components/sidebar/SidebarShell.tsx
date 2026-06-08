@@ -19,7 +19,7 @@ export function SidebarShell({ open, onClose, children }: Props) {
           sidebar-panel
           fixed top-0 bottom-0 left-0 z-50 w-[min(20rem,100vw)] h-[100dvh] max-h-[100dvh] flex flex-col bg-[var(--surface)] border-r border-[var(--border)]
           transition-transform duration-200
-          lg:static lg:h-auto lg:max-h-none lg:flex lg:pointer-events-auto
+          lg:static lg:h-full lg:max-h-none lg:overflow-y-auto lg:flex lg:pointer-events-auto
         `}
         data-open={open ? "true" : "false"}
       >

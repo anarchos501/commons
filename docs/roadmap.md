@@ -9,14 +9,14 @@ Commons development stays anchored to the minimum social loop:
 5. Vulnerability is not archived.
 6. Trust in the commons grows.
 
-The current alpha has enough of that loop implemented to test on one local node: support requests, routing, contribution records, group workspaces, project workspaces, responsibility workspaces, petitions, governance temperature signals, and accountability concern flows.
+The current alpha has enough of that loop implemented to test on one local node: support requests, routing, contribution records, collective workspaces, project workspaces (with join requests), responsibility workspaces, coalitions with multi-collective federation governance, petitions, governance temperature signals, and accountability concern flows.
 
 ## Current Alpha Focus
 
 - Make the implemented workflows clearer and less brittle.
-- Keep project-internal governance autonomous from host-group membership.
-- Keep responsibilities accountable to their group.
-- Tighten tests around petition side effects, membership sponsorship, emergency periods, project workspaces, and responsibility coverage.
+- Keep project-internal governance autonomous from host-collective membership.
+- Keep responsibilities accountable to their collective.
+- Tighten tests around petition side effects, membership sponsorship, emergency periods, project workspaces, responsibility coverage, and coalition governance flows.
 - Keep documentation aligned with what testers can actually do in the UI.
 
 ## Next Product Work

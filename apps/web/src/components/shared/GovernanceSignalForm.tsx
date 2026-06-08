@@ -58,6 +58,9 @@ export function GovernanceSignalForm({
       <div className="flex flex-wrap gap-1.5">
         <SignalButtons currentSignal={currentSignal} size={size} />
       </div>
+      <p className="mt-2 text-xs text-[var(--muted)]">
+        Temperature affects how decisions are made in this area. More Careful requires broader agreement before things change. Easier To Act allows decisions to happen faster with less support needed.
+      </p>
       {error && (
         <p role="alert" aria-live="polite" className="mt-1 text-xs text-red-600">
           {error}

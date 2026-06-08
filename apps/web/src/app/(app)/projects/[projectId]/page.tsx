@@ -65,6 +65,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl">
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
@@ -100,7 +101,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 ))}
               </div>
             ) : (
-              <p className="mt-1 text-sm text-[var(--soft-text)]">No current host group</p>
+              <p className="mt-1 text-sm text-[var(--soft-text)]">No current host collective</p>
             )}
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
               Hosting is endorsement and support, not ownership. Project members govern the project.
@@ -133,7 +134,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
             <div className="mt-4 border-l-2 border-amber-500 pl-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Propose a successor host</p>
               <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                Adoption requires mutual consent — the candidate group&apos;s own governance must agree to host, and
+                Adoption requires mutual consent — the candidate collective&apos;s own governance must agree to host, and
                 the project&apos;s frozen pre-closure membership must agree to accept. Either side declining, withdrawing,
                 or timing out fails the whole proposal.
               </p>
@@ -143,9 +144,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                     <input type="hidden" name="projectId" value={projectId} />
                     <input type="hidden" name="projectMembershipId" value={currentMembership?.id ?? ""} />
                     <label className="block">
-                      <span className="field-label">Candidate group</span>
+                      <span className="field-label">Candidate collective</span>
                       <select name="candidateMembershipId" required className="field-input">
-                        <option value="">Select a group&hellip;</option>
+                        <option value="">Select a collective&hellip;</option>
                         {data.candidateHostGroups.map((option) => (
                           <option key={option.groupId} value={option.id}>{option.name}</option>
                         ))}
@@ -153,19 +154,19 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                     </label>
                     <label className="block">
                       <span className="field-label">Rationale</span>
-                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group host the project?" />
+                      <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective host the project?" />
                     </label>
                     <SubmitButton variant="secondary">Open hosting proposal</SubmitButton>
                   </FormWithNotice>
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    You don&apos;t hold active participation in any group that could be proposed as a successor host.
+                    You don&apos;t hold active participation in any collective that could be proposed as a successor host.
                   </p>
                 )
               ) : (
                 <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
                   Sponsoring the project&apos;s side of an adoption requires being part of the membership that was
-                  active when the closure clock started — that frozen group is what decides whether to accept a
+                  active when the closure clock started — that frozen collective is what decides whether to accept a
                   successor host.
                 </p>
               )}
@@ -181,10 +182,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           )}
         </div>
 
-        <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`project:${projectId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {!isActive ? (
-            <EmptyState text="Join this project to see its coordination space." />
-          ) : data.discussionThreads.length > 0 ? (
+        {isActive && (
+        <CollapsibleSection id="discussion" title="Discussion" eyebrow="Coordination" storageKey={`project:${projectId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
               <div className="space-y-2">
                 {data.discussionThreads.map((thread) => (
@@ -248,12 +248,11 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
             </form>
           )}
         </CollapsibleSection>
+        )}
 
         {/* ── Library ─────────────────────────────────────────────── */}
+        {isActive && (
         <CollapsibleSection id="library" title="Library" eyebrow="Project resources" storageKey={`project:${projectId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {!isActive ? (
-            <EmptyState text="Join this project to see its coordination space." />
-          ) : (
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
 
             <details id="bulletins" className="group/lib">
@@ -400,8 +399,8 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
             </details>
 
           </div>
-          )}
         </CollapsibleSection>
+        )}
       </div>
 
       <div className="mt-4 flex flex-col gap-6">
@@ -415,11 +414,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
               )}
             </div>
-            {!isActive && (
-              <div className="mt-4 border-t border-[var(--border)] pt-4">
-                <EmptyState text="Join this project to see its member roster." />
-              </div>
-            )}
             {isActive && data.projectMembers.length > 0 && (
               <div className="mt-4 border-t border-[var(--border)] pt-4">
                 <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
@@ -483,10 +477,8 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
         {/* ── Governance ────────────────────────────────────────────── */}
         <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
+          {isActive && (
           <CollapsibleSection id="petitions" title="Petitions" eyebrow="Project decisions" storageKey={`project:${projectId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
-            {!isActive ? (
-              <EmptyState text="Join this project to see its coordination space." />
-            ) : (
             <div className="space-y-4">
               <form action={evaluateClosedPetitionsAction}>
                 <input type="hidden" name="projectId" value={projectId} />
@@ -531,13 +523,11 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <EmptyState text="No petitions yet." />
               )}
             </div>
-            )}
           </CollapsibleSection>
+          )}
 
+          {isActive && (
           <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this project offers" storageKey={`project:${projectId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
-            {!isActive ? (
-              <EmptyState text="Join this project to see its coordination space." />
-            ) : (
             <div className="space-y-4">
               {data.contributionCategories.length > 0 ? (
                 <div className="space-y-3">
@@ -563,10 +553,11 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 </details>
               )}
             </div>
-            )}
           </CollapsibleSection>
+          )}
 
         </div>
+      </div>
       </div>
     </main>
   );
@@ -913,7 +904,7 @@ async function proposeProjectHostingAction(_prev: FormState, formData: FormData)
       return { kind: "error", message: "Your project membership could not be confirmed." };
     }
     if (!candidateMembership || candidateMembership.accountId !== session.accountId || candidateMembership.status !== "active" || candidateMembership.participationStatus !== "active") {
-      return { kind: "error", message: "You must hold active participation in the candidate group to sponsor its offer to host." };
+      return { kind: "error", message: "You must hold active participation in the candidate collective to sponsor its offer to host." };
     }
 
     const result = await openProjectHostingProposal(prisma, {
@@ -928,15 +919,15 @@ async function proposeProjectHostingAction(_prev: FormState, formData: FormData)
     await prisma.$disconnect();
   }
   revalidatePath(`/projects/${projectId}`);
-  return { kind: "success", message: "Hosting proposal opened — both the candidate group and the project's frozen membership will decide through their own petitions." };
+  return { kind: "success", message: "Hosting proposal opened — both the candidate collective and the project's frozen membership will decide through their own petitions." };
 }
 
 function projectHostingProposalFailureMessage(reason: string) {
   switch (reason) {
-    case "not_eligible": return "Both the candidate group and the project sponsor must hold active, active-participation membership.";
+    case "not_eligible": return "Both the candidate collective and the project sponsor must hold active, active-participation membership.";
     case "project_not_adoptable": return "This project is not currently open to successor-host adoption.";
-    case "already_hosted": return "That group is already an active host of this project.";
-    case "empty_electorate": return "This project's frozen pre-closure membership is empty, so adoption cannot proceed — its remaining participants may found a new group instead.";
+    case "already_hosted": return "That collective is already an active host of this project.";
+    case "empty_electorate": return "This project's frozen pre-closure membership is empty, so adoption cannot proceed — its remaining participants may found a new collective instead.";
     case "petition_error": return "This proposal could not be submitted.";
     default: return "This proposal could not be submitted.";
   }
@@ -946,7 +937,7 @@ function projectJoinRequestFailureMessage(reason: string) {
   switch (reason) {
     case "project_not_found": return "That project could not be found.";
     case "project_unavailable": return "This project is not currently accepting join requests.";
-    case "not_eligible": return "You must hold active participation in a current host group to request project membership.";
+    case "not_eligible": return "You must hold active participation in a current host collective to request project membership.";
     case "already_member": return "You are already a project member.";
     case "already_requested": return "Your request to join is already pending.";
     case "revoked": return "This account cannot request membership for this project.";

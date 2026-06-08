@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { SidebarData } from "../lib/sidebar-data";
 import { Sidebar } from "./sidebar/Sidebar";
+import { GuestSidebar } from "./sidebar/GuestSidebar";
 import { SidebarTriggerButton } from "./sidebar/SidebarTriggerButton";
 import { FeedbackLink } from "./FeedbackLink";
 
@@ -21,11 +22,9 @@ export function PublicShell({ sidebarData, isAuthenticated, children }: Props) {
     <div className="flex flex-col min-h-full">
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-5xl items-center">
-          {/* Left: hamburger on mobile when authenticated, empty spacer otherwise */}
+          {/* Left: mobile navigation and guide */}
           <div className="flex flex-1 items-center gap-1">
-            {sidebarData && (
-              <SidebarTriggerButton onOpen={openSidebar} />
-            )}
+            <SidebarTriggerButton onOpen={openSidebar} />
             <Link
               href="/guide"
               className="text-xs font-medium text-[var(--muted)] hover:text-[var(--accent)] sm:text-sm"
@@ -48,8 +47,10 @@ export function PublicShell({ sidebarData, isAuthenticated, children }: Props) {
       </header>
 
       <div className="flex flex-1">
-        {sidebarData && (
+        {sidebarData ? (
           <Sidebar data={sidebarData} open={open} onClose={() => setOpen(false)} />
+        ) : (
+          <GuestSidebar open={open} onClose={() => setOpen(false)} />
         )}
         <div className="flex flex-1 flex-col min-w-0">
           {children}
