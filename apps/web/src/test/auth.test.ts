@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PrismaClient } from "../generated/prisma/client";
 import { registerAccount } from "../lib/auth";
+import { normalizeRequestHost } from "../lib/node-context";
 import { createPrismaClient } from "../lib/prisma";
 
 const prisma = createPrismaClient();
@@ -35,6 +36,7 @@ test("registerAccount creates an account on the earliest configured node", async
       email: `${prefix}@test.local`,
       displayName: "New member",
       password: "testpass123",
+      requestHost: `${prefix}-arrival.localhost`,
     });
 
     assert.equal(session.nodeId, earlierNode.id);
@@ -50,25 +52,69 @@ test("registerAccount creates an account on the earliest configured node", async
   }
 });
 
-test("registerAccount reports a clear initialization error when no node exists", async () => {
+test("registerAccount founds the first Node from the request host when none exists yet, without granting NodeHost", async () => {
+  const createdNodes: Array<{ name: string; domain: string }> = [];
+  let nodeHostTouched = false;
+  const founderHost = "founders-commons.example";
+
   const fakePrisma = {
     account: {
       findUnique: async () => null,
+      create: async ({ data }: { data: { homeNodeId: string; displayName: string; email: string } }) => ({
+        id: "acct_founding",
+        homeNodeId: data.homeNodeId,
+        displayName: data.displayName,
+        email: data.email,
+      }),
     },
     node: {
       findFirst: async () => null,
+      create: async ({ data }: { data: { name: string; domain: string } }) => {
+        createdNodes.push({ name: data.name, domain: data.domain });
+        return { id: "node_founding", name: data.name, domain: data.domain, createdAt: new Date() };
+      },
+    },
+    $transaction: async (callback: (tx: PrismaClient) => unknown) =>
+      callback({
+        node: {
+          findFirst: async () => null,
+          create: async ({ data }: { data: { name: string; domain: string } }) => {
+            createdNodes.push({ name: data.name, domain: data.domain });
+            return { id: "node_founding", name: data.name, domain: data.domain, createdAt: new Date() };
+          },
+        },
+        $executeRaw: async () => 0,
+      } as unknown as PrismaClient),
+    nodeHost: {
+      create: async () => {
+        nodeHostTouched = true;
+        throw new Error("registerAccount must never create a NodeHost — that is earned by founding the first group.");
+      },
+      count: async () => {
+        nodeHostTouched = true;
+        return 0;
+      },
     },
   } as unknown as PrismaClient;
 
-  await assert.rejects(
-    () =>
-      registerAccount(fakePrisma, {
-        email: "new@test.local",
-        displayName: "New member",
-        password: "testpass123",
-      }),
-    /Commons is not initialized.*pnpm db:seed/,
-  );
+  const session = await registerAccount(fakePrisma, {
+    email: "founder@test.local",
+    displayName: "Founding member",
+    password: "testpass123",
+    requestHost: founderHost,
+  });
+
+  assert.deepEqual(createdNodes, [{ name: founderHost, domain: founderHost }]);
+  assert.equal(session.nodeId, "node_founding");
+  assert.equal(session.activeGroupId, null);
+  assert.equal(nodeHostTouched, false);
+});
+
+test("normalizeRequestHost strips ports and handles local IPv6 hosts", () => {
+  assert.equal(normalizeRequestHost("Example.COM:3000"), "example.com");
+  assert.equal(normalizeRequestHost("[::1]:3000"), "::1");
+  assert.equal(normalizeRequestHost("  localhost  "), "localhost");
+  assert.equal(normalizeRequestHost("bad host/name:3000"), "");
 });
 
 async function cleanup(prefix: string) {

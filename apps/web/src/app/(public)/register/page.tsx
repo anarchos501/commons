@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { HandHeart, Shield, Users } from "lucide-react";
 import { createPrismaClient } from "../../../lib/prisma";
+import { currentRequestHost } from "../../../lib/node-context";
 import { getSession } from "../../../lib/session";
 import { registerAccount } from "../../../lib/auth";
 import { AlphaNotice } from "../../../components/shared/Notice";
@@ -122,10 +123,12 @@ async function registerAction(formData: FormData) {
 
   const prisma = createPrismaClient();
   try {
+    const requestHost = await currentRequestHost();
     const sessionData = await registerAccount(prisma, {
       email: email.trim(),
       displayName: displayName.trim(),
       password,
+      requestHost,
     });
     const session = await getSession();
     Object.assign(session, sessionData);
