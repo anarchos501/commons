@@ -101,6 +101,67 @@ export async function hasActiveEligibleAssignment(
   return assignment !== null;
 }
 
+export type ResponsibilityHolderMembership = {
+  membership: { id: string; accountId: string; groupId: string };
+  responsibility: { id: string; groupId: string; type: string; descriptionDocumentId: string | null };
+};
+
+/**
+ * Derives the caller's group membership and active-holder status for a
+ * responsibility from the authenticated accountId — never from
+ * client-supplied membershipId/groupId. Throws if the caller is not an
+ * active, eligible holder of this responsibility.
+ */
+export async function requireResponsibilityHolderMembership(
+  prisma: PrismaClient,
+  accountId: string,
+  responsibilityId: string,
+): Promise<ResponsibilityHolderMembership> {
+  const responsibility = await prisma.responsibility.findUniqueOrThrow({
+    where: { id: responsibilityId },
+    select: { id: true, groupId: true, type: true, descriptionDocumentId: true },
+  });
+
+  const membership = await prisma.groupMembership.findUnique({
+    where: { accountId_groupId: { accountId, groupId: responsibility.groupId } },
+    select: { id: true, accountId: true, groupId: true, status: true, participationStatus: true },
+  });
+
+  if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
+    throw new Error("Active group membership required.");
+  }
+
+  const isHolder = await hasActiveEligibleAssignment(prisma, membership.id, responsibility.type);
+  if (!isHolder) {
+    throw new Error("Active responsibility holder status required.");
+  }
+
+  return {
+    membership: { id: membership.id, accountId: membership.accountId, groupId: membership.groupId },
+    responsibility,
+  };
+}
+
+export async function getResponsibilityPurposeDocument(
+  prisma: PrismaClient,
+  responsibilityId: string,
+  descriptionDocumentId: string | null,
+) {
+  const descriptionDocument = descriptionDocumentId
+    ? await prisma.livingDocument.findFirst({
+        where: { id: descriptionDocumentId, spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
+      })
+    : null;
+
+  return (
+    descriptionDocument ??
+    await prisma.livingDocument.findFirst({
+      where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null, title: "Purpose" },
+      orderBy: { lastRevisedAt: "desc" },
+    })
+  );
+}
+
 /**
  * Returns the membershipIds of all active holders of a responsibility type
  * in a group. Multi-holder by design — no single-seat logic.

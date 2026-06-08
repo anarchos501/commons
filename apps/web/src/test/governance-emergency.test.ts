@@ -36,7 +36,7 @@ test("emergency petition activates immediately on threshold", async () => {
 
     // Default threshold = 0.50, so 3 of 5 active members crosses it.
     for (let i = 0; i < 3; i++) {
-      const { eval: evalResult } = await signalAndEvaluateEmergency(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      const { eval: evalResult } = await signalAndEvaluateEmergency(prisma, { petitionId: result.petitionId, accountId: memberships[i].accountId, membershipId: memberships[i].id });
       if (i < 2) {
         // Not yet at threshold
         assert.ok(evalResult === null || evalResult.outcome !== "approved");
@@ -60,7 +60,7 @@ test("isEmergencyActive returns false after expiresAt", async () => {
     const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
     await evaluateEmergencyPetition(prisma, result.petitionId);
     await onEmergencyPetitionApproved(prisma, result.petitionId);
@@ -87,7 +87,7 @@ test("emergency duration uses governanceSnapshot (not live resolver)", async () 
     const snapshotDuration = ((await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } })).governanceSnapshot as { duration: number }).duration;
 
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
     await evaluateEmergencyPetition(prisma, result.petitionId);
     await onEmergencyPetitionApproved(prisma, result.petitionId);
@@ -108,7 +108,7 @@ test("emergency duration at default temperature is 14 days", async () => {
     const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
     await evaluateEmergencyPetition(prisma, result.petitionId);
     await onEmergencyPetitionApproved(prisma, result.petitionId);
@@ -168,7 +168,7 @@ test("available_during_emergency ability becomes active when emergency is declar
     const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
     await evaluateEmergencyPetition(prisma, result.petitionId);
     await onEmergencyPetitionApproved(prisma, result.petitionId);
@@ -191,7 +191,7 @@ test("available_during_emergency ability becomes inactive after emergency expire
     const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
     await evaluateEmergencyPetition(prisma, result.petitionId);
     await onEmergencyPetitionApproved(prisma, result.petitionId);

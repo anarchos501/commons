@@ -62,7 +62,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
   const isActive = currentMembership?.status === "active" && currentMembership.participationStatus === "active";
   const canWrite = isActive && project.status !== "closed" && project.pendingClosureAt === null;
   const canParticipateInGovernance = isActive && project.status !== "closed";
-  const membershipId = currentMembership?.id ?? "";
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -183,7 +182,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
         </div>
 
         <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`project:${projectId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {data.discussionThreads.length > 0 ? (
+          {!isActive ? (
+            <EmptyState text="Join this project to see its coordination space." />
+          ) : data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
               <div className="space-y-2">
                 {data.discussionThreads.map((thread) => (
@@ -250,6 +251,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
 
         {/* ── Library ─────────────────────────────────────────────── */}
         <CollapsibleSection id="library" title="Library" eyebrow="Project resources" storageKey={`project:${projectId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {!isActive ? (
+            <EmptyState text="Join this project to see its coordination space." />
+          ) : (
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
 
             <details id="bulletins" className="group/lib">
@@ -396,6 +400,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
             </details>
 
           </div>
+          )}
         </CollapsibleSection>
       </div>
 
@@ -410,6 +415,11 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <p className="text-xs text-[var(--muted)]">Your status: <span className="capitalize">{currentMembership.participationStatus}</span></p>
               )}
             </div>
+            {!isActive && (
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                <EmptyState text="Join this project to see its member roster." />
+              </div>
+            )}
             {isActive && data.projectMembers.length > 0 && (
               <div className="mt-4 border-t border-[var(--border)] pt-4">
                 <p className="text-xs font-medium text-[var(--muted)] mb-2">All members</p>
@@ -474,6 +484,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
         <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
           <CollapsibleSection id="petitions" title="Petitions" eyebrow="Project decisions" storageKey={`project:${projectId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
+            {!isActive ? (
+              <EmptyState text="Join this project to see its coordination space." />
+            ) : (
             <div className="space-y-4">
               <form action={evaluateClosedPetitionsAction}>
                 <input type="hidden" name="projectId" value={projectId} />
@@ -498,14 +511,14 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                         <div className="mt-3 flex gap-2">
                           {!petition.supportedByCurrentMember ? (
                             <form action={supportPetitionAction}>
+                              <input type="hidden" name="projectId" value={projectId} />
                               <input type="hidden" name="petitionId" value={petition.id} />
-                              <input type="hidden" name="projectMembershipId" value={membershipId} />
                               <SubmitButton variant="secondary">Support</SubmitButton>
                             </form>
                           ) : (
                             <form action={withdrawPetitionSupportAction}>
+                              <input type="hidden" name="projectId" value={projectId} />
                               <input type="hidden" name="petitionId" value={petition.id} />
-                              <input type="hidden" name="projectMembershipId" value={membershipId} />
                               <SubmitButton variant="secondary">Withdraw support</SubmitButton>
                             </form>
                           )}
@@ -518,9 +531,13 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 <EmptyState text="No petitions yet." />
               )}
             </div>
+            )}
           </CollapsibleSection>
 
           <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this project offers" storageKey={`project:${projectId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
+            {!isActive ? (
+              <EmptyState text="Join this project to see its coordination space." />
+            ) : (
             <div className="space-y-4">
               {data.contributionCategories.length > 0 ? (
                 <div className="space-y-3">
@@ -546,6 +563,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 </details>
               )}
             </div>
+            )}
           </CollapsibleSection>
 
         </div>
@@ -579,6 +597,8 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       where: { accountId_projectId: { accountId, projectId } },
       select: { id: true, status: true, participationStatus: true },
     });
+    const activeProjectMember =
+      currentMembership?.status === "active" && currentMembership.participationStatus === "active";
 
     // Current hosting only — a group's founding role confers no ongoing standing
     // once it is no longer an active host (RFC-007).
@@ -636,8 +656,6 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     const canRequestMembership =
       projectAcceptsJoinRequests &&
       (hasActiveHostGroupParticipation || currentMembership?.status === "pending");
-    const activeProjectMember =
-      currentMembership?.status === "active" && currentMembership.participationStatus === "active";
     const pendingJoinRequests = activeProjectMember
       ? await prisma.projectMembership.findMany({
           where: { projectId, status: "pending" },
@@ -651,45 +669,60 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
         })
       : [];
 
-    const [bulletins, publications, livingDocuments, activeParticipantCount] = await Promise.all([
-      prisma.bulletin.findMany({
-        where: { spaceType: "project", spaceId: projectId, archivedAt: null },
-        include: { author: { select: { displayName: true } } },
-        orderBy: { publishedAt: "desc" },
-      }),
-      prisma.publication.findMany({
-        where: { spaceType: "project", spaceId: projectId, archivedAt: null },
-        include: {
-          creator: { select: { displayName: true } },
-          _count: { select: { entries: { where: { archivedAt: null } } } },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.livingDocument.findMany({
-        where: { spaceType: "project", spaceId: projectId, archivedAt: null },
-        orderBy: { lastRevisedAt: "desc" },
-      }),
-      prisma.projectMembership.count({ where: { projectId, status: "active", participationStatus: "active" } }),
-    ]);
+    const activeParticipantCount = await prisma.projectMembership.count({
+      where: { projectId, status: "active", participationStatus: "active" },
+    });
+
+    // Coordination-space content below is restricted to active project members —
+    // non-members (including eligible host-group participants deciding whether
+    // to join) must never receive these records from the server. Each query is
+    // skipped entirely (replaced with an empty result) when the viewer isn't an
+    // active member, so the data is never fetched, let alone rendered.
+    const [bulletins, publications, livingDocuments] = activeProjectMember
+      ? await Promise.all([
+          prisma.bulletin.findMany({
+            where: { spaceType: "project", spaceId: projectId, archivedAt: null },
+            include: { author: { select: { displayName: true } } },
+            orderBy: { publishedAt: "desc" },
+          }),
+          prisma.publication.findMany({
+            where: { spaceType: "project", spaceId: projectId, archivedAt: null },
+            include: {
+              creator: { select: { displayName: true } },
+              _count: { select: { entries: { where: { archivedAt: null } } } },
+            },
+            orderBy: { createdAt: "desc" },
+          }),
+          prisma.livingDocument.findMany({
+            where: { spaceType: "project", spaceId: projectId, archivedAt: null },
+            orderBy: { lastRevisedAt: "desc" },
+          }),
+        ])
+      : [[], [], []] as const;
 
     // Discussion (project-native authorization — readable regardless of current
-    // hosting state, per RFC-007 "the project remains fully readable")
-    const discussionThreads = await listProjectDiscussionThreads(prisma, { projectId });
+    // hosting state, per RFC-007 "the project remains fully readable") — but
+    // still gated to active members, who alone have standing in this space.
+    const discussionThreads = activeProjectMember
+      ? await listProjectDiscussionThreads(prisma, { projectId })
+      : [];
     const selectedThread = discussionThreads.find((t) => t.id === selectedThreadId) ?? discussionThreads[0] ?? null;
     const discussionMessages = selectedThread ? await listDiscussionMessages(prisma, selectedThread.id) : [];
 
     // Petitions for this project
-    const petitionRows = await prisma.petition.findMany({
-      where: { scopeType: "project", scopeId: projectId },
-      orderBy: [{ status: "asc" }, { closesAt: "asc" }],
-      include: {
-        _count: { select: { support: true } },
-        support: currentMembership
-          ? { where: { projectMembershipId: currentMembership.id }, select: { id: true }, take: 1 }
-          : { where: { id: "never" }, select: { id: true }, take: 0 },
-      },
-      take: 12,
-    });
+    const petitionRows = activeProjectMember
+      ? await prisma.petition.findMany({
+          where: { scopeType: "project", scopeId: projectId },
+          orderBy: [{ status: "asc" }, { closesAt: "asc" }],
+          include: {
+            _count: { select: { support: true } },
+            support: currentMembership
+              ? { where: { projectMembershipId: currentMembership.id }, select: { id: true }, take: 1 }
+              : { where: { id: "never" }, select: { id: true }, take: 0 },
+          },
+          take: 12,
+        })
+      : [];
 
     const petitions = petitionRows.map((p) => {
       const snapshot = p.governanceSnapshot as { threshold: number } | null;
@@ -708,30 +741,42 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     // Contribution categories for project scope
     // Project-offered categories are anchored at foundingGroupId (see contribution-categories.ts),
     // independent of which group(s) currently host the project.
-    const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: project.foundingGroupId, projectId });
+    const rawCategories = activeProjectMember
+      ? await getAvailableCategoriesForScope(prisma, { groupId: project.foundingGroupId, projectId })
+      : [];
 
     // Member roster
-    const projectMembers = await prisma.projectMembership.findMany({
-      where: { projectId, status: "active" },
-      select: {
-        id: true,
-        participationStatus: true,
-        account: {
+    const projectMembershipRows = activeProjectMember
+      ? await prisma.projectMembership.findMany({
+          where: { projectId, status: "active" },
           select: {
-            displayName: true,
-            groupMemberships: {
-              where: { status: "active", groupId: { in: hostGroups.map((group) => group.id) } },
+            id: true,
+            participationStatus: true,
+            account: {
               select: {
-                group: {
-                  select: { id: true, name: true, privacyPreferences: true },
+                displayName: true,
+                groupMemberships: {
+                  where: { status: "active", groupId: { in: hostGroups.map((group) => group.id) } },
+                  select: {
+                    group: {
+                      select: { id: true, name: true, privacyPreferences: true },
+                    },
+                  },
                 },
               },
             },
           },
-        },
-      },
-      orderBy: { account: { displayName: "asc" } },
-    });
+          orderBy: { account: { displayName: "asc" } },
+        })
+      : [];
+    const projectMembers = projectMembershipRows.map((membership) => ({
+      id: membership.id,
+      participationStatus: membership.participationStatus,
+      account: { displayName: membership.account.displayName },
+      affiliations: visibleProjectRosterAffiliations(
+        membership.account.groupMemberships.map(({ group }) => group),
+      ),
+    }));
 
     return {
       project,
@@ -750,14 +795,8 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       discussionMessages,
       petitions,
       contributionCategories: rawCategories,
-      projectMembers: projectMembers.map((membership) => ({
-        id: membership.id,
-        participationStatus: membership.participationStatus,
-        account: { displayName: membership.account.displayName },
-        affiliations: visibleProjectRosterAffiliations(
-          membership.account.groupMemberships.map(({ group }) => group),
-        ),
-      })),
+      projectMembers,
+      activeProjectMember,
     };
   } finally {
     await prisma.$disconnect();
@@ -1106,14 +1145,14 @@ async function supportPetitionAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const petitionId = requiredString(formData, "petitionId");
-  const projectMembershipId = requiredString(formData, "projectMembershipId");
+  const projectId = formData.get("projectId") as string;
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    await addPetitionSupport(prisma, { petitionId, projectMembershipId });
+    await addPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, projectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
-  const projectId = formData.get("projectId") as string;
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -1122,14 +1161,14 @@ async function withdrawPetitionSupportAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const petitionId = requiredString(formData, "petitionId");
-  const projectMembershipId = requiredString(formData, "projectMembershipId");
+  const projectId = formData.get("projectId") as string;
+  const projectMembership = await requireProjectMembership(session.accountId, projectId);
   const prisma = createPrismaClient();
   try {
-    await withdrawPetitionSupport(prisma, { petitionId, projectMembershipId });
+    await withdrawPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, projectMembershipId: projectMembership.id });
   } finally {
     await prisma.$disconnect();
   }
-  const projectId = formData.get("projectId") as string;
   revalidatePath(`/projects/${projectId}`);
 }
 

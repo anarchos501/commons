@@ -70,10 +70,10 @@ export async function onEmergencyPetitionApproved(
  */
 export async function signalAndEvaluateEmergency(
   prisma: PrismaClient,
-  { petitionId, membershipId }: { petitionId: string; membershipId: string },
+  { petitionId, accountId, membershipId }: { petitionId: string; accountId: string; membershipId: string },
 ) {
   const { addPetitionSupport } = await import("./petitions");
-  const supportResult = await addPetitionSupport(prisma, { petitionId, membershipId });
+  const supportResult = await addPetitionSupport(prisma, { petitionId, actorAccountId: accountId, membershipId });
   if (!supportResult.ok) return { support: supportResult, eval: null };
   const evalResult = await evaluateEmergencyPetition(prisma, petitionId);
   return { support: supportResult, eval: evalResult };

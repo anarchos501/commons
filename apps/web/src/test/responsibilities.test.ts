@@ -7,9 +7,11 @@ import {
   endAssignmentsForMember,
   expireStaleAssignments,
   getActiveAssignees,
+  getResponsibilityPurposeDocument,
   getResponsibilityCoverage,
   hasActiveEligibleAssignment,
   hasUnendedAssignment,
+  requireResponsibilityHolderMembership,
   resignAssignment,
 } from "../lib/responsibilities";
 import { applyParticipationTransitions, recordGroupPresence } from "../lib/participation";
@@ -29,6 +31,85 @@ test("hasActiveEligibleAssignment returns true for active assignment on active m
     assert.equal(await hasActiveEligibleAssignment(prisma, membershipA.id, "reviewer"), true);
   } finally {
     await cleanupFixture("haa_true");
+  }
+});
+
+test("requireResponsibilityHolderMembership authorizes only the active holder", async () => {
+  const { accountA, accountB, membershipA } = await createFixture("holder_auth");
+  try {
+    await createAssignment(prisma, membershipA.id, "reviewer");
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({
+      where: { groupId_type: { groupId: "holder_auth_groupA", type: "reviewer" } },
+    });
+
+    const result = await requireResponsibilityHolderMembership(
+      prisma,
+      accountA.id,
+      responsibility.id,
+    );
+    assert.equal(result.membership.id, membershipA.id);
+    assert.equal(result.responsibility.id, responsibility.id);
+
+    await assert.rejects(
+      () => requireResponsibilityHolderMembership(prisma, accountB.id, responsibility.id),
+      /holder status required/i,
+    );
+  } finally {
+    await cleanupFixture("holder_auth");
+  }
+});
+
+test("requireResponsibilityHolderMembership rejects inactive participation", async () => {
+  const { accountA, membershipA } = await createFixture("holder_inactive");
+  try {
+    await createAssignment(prisma, membershipA.id, "reviewer");
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({
+      where: { groupId_type: { groupId: "holder_inactive_groupA", type: "reviewer" } },
+    });
+    await prisma.groupMembership.update({
+      where: { id: membershipA.id },
+      data: { participationStatus: "quiet" },
+    });
+
+    await assert.rejects(
+      () => requireResponsibilityHolderMembership(prisma, accountA.id, responsibility.id),
+      /active group membership required/i,
+    );
+  } finally {
+    await cleanupFixture("holder_inactive");
+  }
+});
+
+test("responsibility Purpose falls back when descriptionDocumentId is archived", async () => {
+  const { groupA } = await createFixture("purpose_fallback");
+  try {
+    const responsibility = await prisma.responsibility.create({
+      data: { id: "purpose_fallback_responsibility", groupId: groupA.id, type: "coordinator" },
+    });
+    const archived = await prisma.livingDocument.create({
+      data: {
+        id: "purpose_fallback_archived",
+        spaceType: "responsibility",
+        spaceId: responsibility.id,
+        title: "Old purpose",
+        currentBody: "Archived",
+        archivedAt: new Date(),
+      },
+    });
+    const fallback = await prisma.livingDocument.create({
+      data: {
+        id: "purpose_fallback_active",
+        spaceType: "responsibility",
+        spaceId: responsibility.id,
+        title: "Purpose",
+        currentBody: "Current purpose",
+      },
+    });
+
+    const result = await getResponsibilityPurposeDocument(prisma, responsibility.id, archived.id);
+    assert.equal(result?.id, fallback.id);
+  } finally {
+    await cleanupFixture("purpose_fallback");
   }
 });
 
@@ -356,6 +437,10 @@ async function createFixture(prefix: string) {
 async function cleanupFixture(prefix: string) {
   await prisma.actionLog.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.actionLog.deleteMany({ where: { actorAccountId: { startsWith: prefix } } });
+  await prisma.livingDocumentRevision.deleteMany({
+    where: { livingDocument: { spaceId: { startsWith: prefix } } },
+  });
+  await prisma.livingDocument.deleteMany({ where: { spaceId: { startsWith: prefix } } });
   await prisma.responsibilityAssignment.deleteMany({
     where: { membership: { groupId: { startsWith: prefix } } },
   });

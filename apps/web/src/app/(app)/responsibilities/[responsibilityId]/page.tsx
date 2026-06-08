@@ -6,7 +6,7 @@ import { proposeBulletinCreation } from "../../../../lib/bulletins";
 import { proposePublicationCreation, proposePubEntryCreation } from "../../../../lib/publications";
 import { proposeLivingDocumentCreation, draftLivingDocumentRevision, openRevisionPetition } from "../../../../lib/living-documents";
 import { createDiscussionThread, listDiscussionMessages, listDiscussionThreads, postDiscussionMessage } from "../../../../lib/discussions";
-import { resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
+import { getResponsibilityPurposeDocument, requireResponsibilityHolderMembership, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
@@ -90,7 +90,6 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
             {isActive && !isHolder && (
               <form action={volunteerAction}>
                 <input type="hidden" name="responsibilityId" value={responsibilityId} />
-                <input type="hidden" name="groupId" value={responsibility.groupId} />
                 <SubmitButton variant="secondary">Volunteer</SubmitButton>
               </form>
             )}
@@ -106,7 +105,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
         </div>
 
         <CollapsibleSection id="discussion" title="Discussion" eyebrow="Coordination" storageKey={`responsibility:${responsibilityId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {data.discussionThreads.length > 0 ? (
+          {!isHolder ? (
+            <EmptyState text="Volunteer for this responsibility to see its coordination space." />
+          ) : data.discussionThreads.length > 0 ? (
             <div className="mb-4 grid gap-4 md:grid-cols-[minmax(180px,0.42fr)_minmax(0,1fr)]">
               <div className="space-y-2">
                 {data.discussionThreads.map((thread) => (
@@ -142,11 +143,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ) : (
                       <EmptyState text="No messages yet." />
                     )}
-                    {isActive && currentMembership && (
+                    {isHolder && currentMembership && (
                       <form action={postMessageAction} className="space-y-2 mt-2">
                         <input type="hidden" name="responsibilityId" value={responsibilityId} />
-                        <input type="hidden" name="groupId" value={responsibility.groupId} />
-                        <input type="hidden" name="membershipId" value={currentMembership.id} />
                         <input type="hidden" name="threadId" value={data.selectedThread.id} />
                         <textarea name="body" required rows={3} className="field-input resize-none" placeholder="Add a note." />
                         <SubmitButton variant="secondary">Post message</SubmitButton>
@@ -161,11 +160,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
           ) : (
             <EmptyState text="No discussion threads yet." />
           )}
-          {isActive && currentMembership && (
+          {isHolder && currentMembership && (
             <form action={createThreadAction} className="space-y-3">
               <input type="hidden" name="responsibilityId" value={responsibilityId} />
-              <input type="hidden" name="groupId" value={responsibility.groupId} />
-              <input type="hidden" name="membershipId" value={currentMembership.id} />
               <label className="block">
                 <span className="field-label">New thread</span>
                 <input name="title" type="text" required className="field-input" placeholder="Coordination topic" />
@@ -175,8 +172,35 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
           )}
         </CollapsibleSection>
 
+        {responsibility.type === "reviewer" && isHolder && (
+          <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`responsibility:${responsibilityId}:section:concerns`} className="bg-[var(--surface)] p-5 sm:p-6">
+            {data.activeConcerns.length > 0 ? (
+              <div className="space-y-3">
+                {data.activeConcerns.map((concern) => (
+                  <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium">{concern.subject}</p>
+                      <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
+                    </div>
+                    {concern.findings.length > 0 && (
+                      <p className="text-xs text-[var(--muted)]">
+                        {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState text="No active concerns right now." />
+            )}
+          </CollapsibleSection>
+        )}
+
         {/* ── Library ──────────────────────────────────────────────── */}
         <CollapsibleSection id="library" title="Library" eyebrow="Resources" storageKey={`responsibility:${responsibilityId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {!isHolder ? (
+            <EmptyState text="Volunteer for this responsibility to see its coordination space." />
+          ) : (
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
             <details id="bulletins" className="group/lib">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-6 py-4">
@@ -199,7 +223,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ))}
                   </div>
                 ) : <EmptyState text="No bulletins yet." />}
-                {isActive && (
+                {isHolder && (
                   <form action={createBulletinAction} className="space-y-3">
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
@@ -229,7 +253,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                           <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
                         </div>
                         <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
-                        {isActive && (
+                        {isHolder && (
                           <details className="mt-1">
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
                             <form action={proposePubEntryAction} className="mt-2 space-y-2">
@@ -245,7 +269,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ))}
                   </div>
                 ) : <EmptyState text="No publications yet." />}
-                {isActive && (
+                {isHolder && (
                   <form action={createPublicationAction} className="space-y-3">
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
@@ -271,13 +295,11 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                       <div key={doc.id} className="border border-[var(--border)] p-3 space-y-2">
                         <p className="text-sm font-semibold text-[var(--text)]">{doc.title}</p>
                         <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
-                        {isActive && currentMembership && (
+                        {isHolder && currentMembership && (
                           <details className="mt-2">
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a revision</summary>
                             <form action={proposeRevisionAction} className="mt-2 space-y-2">
                               <input type="hidden" name="responsibilityId" value={responsibilityId} />
-                              <input type="hidden" name="groupId" value={responsibility.groupId} />
-                              <input type="hidden" name="membershipId" value={currentMembership.id} />
                               <input type="hidden" name="livingDocumentId" value={doc.id} />
                               <textarea name="body" required rows={4} defaultValue={doc.currentBody} className="field-input resize-none text-sm" />
                               <SubmitButton variant="secondary">Open revision petition</SubmitButton>
@@ -288,7 +310,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ))}
                   </div>
                 ) : <EmptyState text="No living documents yet." />}
-                {isActive && (
+                {isHolder && (
                   <form action={createDocumentAction} className="space-y-3">
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
@@ -299,6 +321,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
               </div>
             </details>
           </div>
+          )}
         </CollapsibleSection>
       </div>
     </main>
@@ -322,29 +345,10 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
     });
     if (!currentMembership || currentMembership.status !== "active") redirect("/dashboard");
 
-    const [bulletins, publications, livingDocuments, assignments] = await Promise.all([
-      prisma.bulletin.findMany({
-        where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
-        include: { author: { select: { displayName: true } } },
-        orderBy: { publishedAt: "desc" },
-      }),
-      prisma.publication.findMany({
-        where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
-        include: {
-          creator: { select: { displayName: true } },
-          _count: { select: { entries: { where: { archivedAt: null } } } },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.livingDocument.findMany({
-        where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
-        orderBy: { lastRevisedAt: "desc" },
-      }),
-      prisma.responsibilityAssignment.findMany({
-        where: { responsibility: { id: responsibilityId }, endedAt: null, expiresAt: { gt: new Date() } },
-        include: { membership: { select: { accountId: true, participationStatus: true, account: { select: { displayName: true } } } } },
-      }),
-    ]);
+    const assignments = await prisma.responsibilityAssignment.findMany({
+      where: { responsibility: { id: responsibilityId }, endedAt: null, expiresAt: { gt: new Date() } },
+      include: { membership: { select: { accountId: true, status: true, participationStatus: true, account: { select: { displayName: true } } } } },
+    });
 
     const holders = assignments.map((a) => ({
       membershipId: a.membershipId,
@@ -353,22 +357,74 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
       expiresAt: a.expiresAt,
     }));
 
-    const isHolder = assignments.some((a) => a.membership.accountId === accountId);
+    // Active holder = unexpired, unended assignment tied to active membership
+    // and active participation (mirrors hasActiveEligibleAssignment).
+    const isHolder = assignments.some(
+      (a) =>
+        a.membership.accountId === accountId &&
+        a.membership.status === "active" &&
+        a.membership.participationStatus === "active",
+    );
 
-    const purposeDocument =
-      (responsibility.descriptionDocumentId
-        ? livingDocuments.find((d) => d.id === responsibility.descriptionDocumentId)
-        : undefined) ??
-      livingDocuments.find((d) => d.title === "Purpose") ??
-      null;
+    // Purpose stays visible to every active group member (prospective
+    // volunteers included) — fetched on its own, not via the full Library
+    // listing, which is restricted to holders below.
+    const purposeDocument = await getResponsibilityPurposeDocument(prisma, responsibilityId, responsibility.descriptionDocumentId);
 
-    const discussionThreads = await listDiscussionThreads(prisma, {
-      spaceType: "responsibility",
-      spaceId: responsibilityId,
-      groupId: responsibility.groupId,
-    });
+    // Coordination-space content below is restricted to active holders —
+    // other active group members may see the overview and Purpose, but not
+    // the responsibility's internal workspace.
+    const [bulletins, publications, livingDocuments] = isHolder
+      ? await Promise.all([
+          prisma.bulletin.findMany({
+            where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
+            include: { author: { select: { displayName: true } } },
+            orderBy: { publishedAt: "desc" },
+          }),
+          prisma.publication.findMany({
+            where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
+            include: {
+              creator: { select: { displayName: true } },
+              _count: { select: { entries: { where: { archivedAt: null } } } },
+            },
+            orderBy: { createdAt: "desc" },
+          }),
+          prisma.livingDocument.findMany({
+            where: { spaceType: "responsibility", spaceId: responsibilityId, archivedAt: null },
+            orderBy: { lastRevisedAt: "desc" },
+          }),
+        ])
+      : [[], [], []] as const;
+
+    const discussionThreads = isHolder
+      ? await listDiscussionThreads(prisma, {
+          spaceType: "responsibility",
+          spaceId: responsibilityId,
+          groupId: responsibility.groupId,
+        })
+      : [];
     const selectedThread = discussionThreads.find((t) => t.id === selectedThreadId) ?? discussionThreads[0] ?? null;
     const discussionMessages = selectedThread ? await listDiscussionMessages(prisma, selectedThread.id) : [];
+
+    // Active concerns: read-only view for active reviewer holders, mirroring
+    // the group page's reviewer-queue pattern.
+    const activeConcerns =
+      responsibility.type === "reviewer" && isHolder
+        ? await prisma.report.findMany({
+            where: {
+              groupId: responsibility.groupId,
+              status: { in: ["open", "under_review", "findings_issued", "action_proposed"] },
+              reportedByAccountId: { not: accountId },
+            },
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              subject: true,
+              status: true,
+              findings: { select: { outcome: true } },
+            },
+          })
+        : [];
 
     return {
       responsibility: { ...responsibility, termDays: responsibility.termDays },
@@ -383,6 +439,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
       discussionThreads,
       selectedThread,
       discussionMessages,
+      activeConcerns,
     };
   } finally {
     await prisma.$disconnect();
@@ -396,12 +453,11 @@ async function volunteerAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const responsibilityId = formData.get("responsibilityId") as string;
-  const groupId = formData.get("groupId") as string;
   const prisma = createPrismaClient();
   try {
-    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { type: true } });
+    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { type: true, groupId: true } });
     const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
+      where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } },
       select: { id: true },
     });
     if (membership) await volunteerForResponsibility(prisma, { membershipId: membership.id, type: responsibility.type });
@@ -435,12 +491,11 @@ async function createThreadAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const responsibilityId = formData.get("responsibilityId") as string;
-  const groupId = requiredString(formData, "groupId");
-  const membershipId = requiredString(formData, "membershipId");
   const title = requiredString(formData, "title");
   const prisma = createPrismaClient();
   try {
-    await createDiscussionThread(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId, title, createdByMembershipId: membershipId });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
+    await createDiscussionThread(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -452,13 +507,12 @@ async function postMessageAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const responsibilityId = formData.get("responsibilityId") as string;
-  const groupId = requiredString(formData, "groupId");
-  const membershipId = requiredString(formData, "membershipId");
   const threadId = requiredString(formData, "threadId");
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    await postDiscussionMessage(prisma, { threadId, groupId, authorMembershipId: membershipId, body });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
+    await postDiscussionMessage(prisma, { threadId, groupId: responsibility.groupId, authorMembershipId: membership.id, body });
   } finally {
     await prisma.$disconnect();
   }
@@ -474,8 +528,7 @@ async function createBulletinAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
-    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
     await proposeBulletinCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -491,8 +544,7 @@ async function createPublicationAction(formData: FormData) {
   const title = requiredString(formData, "title");
   const prisma = createPrismaClient();
   try {
-    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
-    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
     await proposePublicationCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -510,8 +562,7 @@ async function proposePubEntryAction(formData: FormData) {
   const title = formData.get("title") as string | null;
   const prisma = createPrismaClient();
   try {
-    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
-    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
     await proposePubEntryCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, publicationId, groupId: responsibility.groupId, body, title: title || undefined, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -528,8 +579,7 @@ async function createDocumentAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    const responsibility = await prisma.responsibility.findUniqueOrThrow({ where: { id: responsibilityId }, select: { groupId: true } });
-    const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { accountId_groupId: { accountId: session.accountId, groupId: responsibility.groupId } }, select: { id: true } });
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
     await proposeLivingDocumentCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
@@ -542,14 +592,20 @@ async function proposeRevisionAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const responsibilityId = formData.get("responsibilityId") as string;
-  const groupId = requiredString(formData, "groupId");
-  const membershipId = requiredString(formData, "membershipId");
   const livingDocumentId = requiredString(formData, "livingDocumentId");
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
+    const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
+    const document = await prisma.livingDocument.findUniqueOrThrow({
+      where: { id: livingDocumentId },
+      select: { spaceType: true, spaceId: true },
+    });
+    if (document.spaceType !== "responsibility" || document.spaceId !== responsibilityId) {
+      throw new Error("This document does not belong to this responsibility's coordination space.");
+    }
     const draft = await draftLivingDocumentRevision(prisma, { livingDocumentId, body, authorId: session.accountId });
-    await openRevisionPetition(prisma, { livingDocumentId, revisionId: draft.id, createdByMembershipId: membershipId, groupId });
+    await openRevisionPetition(prisma, { livingDocumentId, revisionId: draft.id, createdByMembershipId: membership.id, groupId: responsibility.groupId });
   } finally {
     await prisma.$disconnect();
   }

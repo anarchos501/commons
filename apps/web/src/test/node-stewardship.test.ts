@@ -347,7 +347,8 @@ async function makeHost(
 }
 
 async function approveGroupPetition(petitionId: string, membershipId: string) {
-  assert.equal((await addPetitionSupport(prisma, { petitionId, membershipId })).ok, true);
+  const membership = await prisma.groupMembership.findUniqueOrThrow({ where: { id: membershipId }, select: { accountId: true } });
+  assert.equal((await addPetitionSupport(prisma, { petitionId, actorAccountId: membership.accountId, membershipId })).ok, true);
   await prisma.petition.update({
     where: { id: petitionId },
     data: { closesAt: new Date(Date.now() - 1000) },

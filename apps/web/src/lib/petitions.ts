@@ -277,10 +277,12 @@ export async function addPetitionSupport(
   prisma: PrismaClient,
   {
     petitionId,
+    actorAccountId,
     membershipId,          // group membership (group-scoped petitions)
     projectMembershipId,   // project membership (project-scoped petitions — Phase 5)
   }: {
     petitionId: string;
+    actorAccountId: string;
     membershipId?: string | null;
     projectMembershipId?: string | null;
   },
@@ -310,6 +312,7 @@ export async function addPetitionSupport(
     const governingGroupId = petition.groupId ?? petition.scopeId;
     if (
       !membership ||
+      membership.accountId !== actorAccountId ||
       membership.groupId !== governingGroupId ||
       membership.status !== "active" ||
       membership.participationStatus !== "active"
@@ -340,7 +343,7 @@ export async function addPetitionSupport(
     // Project-scoped support: validate ProjectMembership
     const pm = await prisma.projectMembership.findUnique({
       where: { id: projectMembershipId },
-      select: { projectId: true, status: true, participationStatus: true },
+      select: { projectId: true, status: true, participationStatus: true, accountId: true },
     });
 
     const scope = petition.voterScope as ProjectVoterScope | null;
@@ -352,6 +355,7 @@ export async function addPetitionSupport(
           : null;
     if (
       !pm ||
+      pm.accountId !== actorAccountId ||
       !projectScopeId ||
       pm.projectId !== projectScopeId ||
       pm.status !== "active" ||
@@ -405,20 +409,27 @@ export async function addNodePetitionSupport(
 
 export type WithdrawSupportResult =
   | { ok: true }
-  | { ok: false; reason: "petition_not_open" };
+  | { ok: false; reason: "petition_not_open" | "not_eligible" | "invalid_membership" };
 
 export async function withdrawPetitionSupport(
   prisma: PrismaClient,
   {
     petitionId,
+    actorAccountId,
     membershipId,
     projectMembershipId,
   }: {
     petitionId: string;
+    actorAccountId: string;
     membershipId?: string | null;
     projectMembershipId?: string | null;
   },
 ): Promise<WithdrawSupportResult> {
+  // Exactly one membership type must be provided
+  if ((!membershipId && !projectMembershipId) || (membershipId && projectMembershipId)) {
+    return { ok: false, reason: "invalid_membership" };
+  }
+
   const petition = await prisma.petition.findUnique({
     where: { id: petitionId },
     select: { status: true, closesAt: true },
@@ -429,8 +440,22 @@ export async function withdrawPetitionSupport(
   }
 
   if (membershipId) {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: membershipId },
+      select: { accountId: true },
+    });
+    if (!membership || membership.accountId !== actorAccountId) {
+      return { ok: false, reason: "not_eligible" };
+    }
     await prisma.petitionSupport.deleteMany({ where: { petitionId, membershipId } });
   } else if (projectMembershipId) {
+    const pm = await prisma.projectMembership.findUnique({
+      where: { id: projectMembershipId },
+      select: { accountId: true },
+    });
+    if (!pm || pm.accountId !== actorAccountId) {
+      return { ok: false, reason: "not_eligible" };
+    }
     await prisma.petitionSupport.deleteMany({ where: { petitionId, projectMembershipId } });
   }
 

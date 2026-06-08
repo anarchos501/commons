@@ -157,8 +157,8 @@ test("thread closure petition approval closes the thread and blocks new messages
     assert.equal(result.ok, true);
     if (!result.ok) return;
 
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
     const evaluated = await evaluatePetition(prisma, result.petitionId);
     assert.equal(evaluated.outcome, "approved");
@@ -191,7 +191,7 @@ test("quiet members cannot open or support discussion closure petitions", async 
     const openByActive = await openThreadClosurePetition(prisma, { threadId: thread.id, groupId: group.id, createdByMembershipId: memberships[0].id });
     assert.equal(openByActive.ok, true);
     if (!openByActive.ok) return;
-    const support = await addPetitionSupport(prisma, { petitionId: openByActive.petitionId, membershipId: memberships[1].id });
+    const support = await addPetitionSupport(prisma, { petitionId: openByActive.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     assert.equal(support.ok, false);
     if (!support.ok) assert.equal(support.reason, "not_eligible");
   } finally {

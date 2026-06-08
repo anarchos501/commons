@@ -27,7 +27,7 @@ test("approved host withdrawal ends the active hosting and opens pending closure
     if (!result.ok) return;
 
     for (const membership of groupMemberships) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: membership.id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: membership.accountId, membershipId: membership.id });
     }
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
     await evaluateAndApplyPetition(prisma, result.petitionId);
@@ -57,10 +57,10 @@ test("project hosting proposal succeeds atomically after both child petitions ap
     if (!result.ok) return;
 
     for (const membership of candidateMemberships) {
-      await addPetitionSupport(prisma, { petitionId: result.groupPetitionId, membershipId: membership.id });
+      await addPetitionSupport(prisma, { petitionId: result.groupPetitionId, actorAccountId: membership.accountId, membershipId: membership.id });
     }
     for (const membership of projectMemberships) {
-      await addPetitionSupport(prisma, { petitionId: result.projectPetitionId, projectMembershipId: membership.id });
+      await addPetitionSupport(prisma, { petitionId: result.projectPetitionId, actorAccountId: membership.accountId, projectMembershipId: membership.id });
     }
     await prisma.petition.updateMany({
       where: { id: { in: [result.groupPetitionId, result.projectPetitionId] } },
@@ -131,6 +131,7 @@ test("project hosting proposal uses frozen electorate membership ids", async () 
     });
     const quietSupport = await addPetitionSupport(prisma, {
       petitionId: result.projectPetitionId,
+      actorAccountId: projectMemberships[0].accountId,
       projectMembershipId: projectMemberships[0].id,
     });
     assert.equal(quietSupport.ok, true);
@@ -141,6 +142,7 @@ test("project hosting proposal uses frozen electorate membership ids", async () 
     });
     const inactiveSupport = await addPetitionSupport(prisma, {
       petitionId: result.projectPetitionId,
+      actorAccountId: projectMemberships[1].accountId,
       projectMembershipId: projectMemberships[1].id,
     });
     assert.equal(inactiveSupport.ok, false);

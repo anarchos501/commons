@@ -2098,7 +2098,7 @@ async function supportPetitionAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await addPetitionSupport(prisma, { petitionId, membershipId: membership.id });
+    await addPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, membershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
@@ -2114,7 +2114,7 @@ async function withdrawPetitionSupportAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await withdrawPetitionSupport(prisma, { petitionId, membershipId: membership.id });
+    await withdrawPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, membershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }

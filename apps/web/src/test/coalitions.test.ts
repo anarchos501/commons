@@ -527,7 +527,7 @@ async function approveBundle(
   for (const child of children) {
     const membership = fixture.memberships.find((candidate) => candidate.groupId === child.groupId);
     assert.ok(membership);
-    await addPetitionSupport(prisma, { petitionId: child.petitionId, membershipId: membership.id });
+    await addPetitionSupport(prisma, { petitionId: child.petitionId, actorAccountId: membership.accountId, membershipId: membership.id });
   }
   await prisma.petition.updateMany({
     where: { id: { in: petitionIds } },

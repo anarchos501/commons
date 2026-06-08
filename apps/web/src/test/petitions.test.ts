@@ -129,12 +129,12 @@ test("addPetitionSupport requires active+active membership", async () => {
     if (!result.ok) return;
 
     // Quiet member cannot support
-    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.reason, "not_eligible");
 
     // Active member can support
-    const r2 = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
+    const r2 = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
     assert.equal(r2.ok, true);
   } finally {
     await cleanupFixture("pet_eligibility");
@@ -148,11 +148,53 @@ test("addPetitionSupport rejects member from wrong group", async () => {
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: otherMemberships[0].id });
+    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: otherMemberships[0].accountId, membershipId: otherMemberships[0].id });
     assert.equal(r.ok, false);
   } finally {
     await cleanupFixture("pet_wrong_group");
     await cleanupFixture("pet_other_group");
+  }
+});
+
+test("petition support cannot use another account's group membership", async () => {
+  const { group, memberships } = await createFixture("pet_actor_group", 2);
+  try {
+    const result = await openPetition(prisma, {
+      groupId: group.id,
+      category: "membership",
+      subjectType: "membership_request",
+      subjectId: "x",
+      createdByMembershipId: memberships[0].id,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const addResult = await addPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[1].accountId,
+      membershipId: memberships[0].id,
+    });
+    assert.deepEqual(addResult, { ok: false, reason: "not_eligible" });
+
+    await addPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[0].accountId,
+      membershipId: memberships[0].id,
+    });
+    const withdrawResult = await withdrawPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[1].accountId,
+      membershipId: memberships[0].id,
+    });
+    assert.deepEqual(withdrawResult, { ok: false, reason: "not_eligible" });
+    assert.equal(
+      await prisma.petitionSupport.count({
+        where: { petitionId: result.petitionId, membershipId: memberships[0].id },
+      }),
+      1,
+    );
+  } finally {
+    await cleanupFixture("pet_actor_group");
   }
 });
 
@@ -161,8 +203,8 @@ test("withdrawPetitionSupport removes support record", async () => {
   try {
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
-    await withdrawPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+    await withdrawPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
     const count = await prisma.petitionSupport.count({ where: { petitionId: result.petitionId } });
     assert.equal(count, 0);
   } finally {
@@ -204,8 +246,8 @@ test("evaluatePetition: threshold met → approved", async () => {
     // Default threshold at temp=0 is 0.50, so 2 of 3 active members crosses it.
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     // Backdate closesAt
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
     const evalResult = await evaluatePetition(prisma, result.petitionId);
@@ -223,8 +265,8 @@ test("evaluatePetition: threshold not met → rejected", async () => {
     // Need 3/5 at the default 50% threshold; only 2 support.
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
     const evalResult = await evaluatePetition(prisma, result.petitionId);
     assert.equal(evalResult.outcome, "rejected");
@@ -247,9 +289,9 @@ test("competing petitions: highest support wins; others rejected", async () => {
 
     // r1 gets 4/5 support above the default threshold; r2 gets 1/5.
     for (let i = 0; i < 4; i++) {
-      await addPetitionSupport(prisma, { petitionId: r1.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: r1.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
-    await addPetitionSupport(prisma, { petitionId: r2.petitionId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: r2.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
 
     // Expire both
     await prisma.petition.updateMany({ where: { id: { in: [r1.petitionId, r2.petitionId] } }, data: { closesAt: new Date(Date.now() - 1000) } });
@@ -275,10 +317,10 @@ test("competing petitions: tie → all rejected", async () => {
     if (!r1.ok || !r2.ok) return;
 
     // Both get 2/4 support (50% < 60% threshold — also a tie)
-    await addPetitionSupport(prisma, { petitionId: r1.petitionId, membershipId: memberships[0].id });
-    await addPetitionSupport(prisma, { petitionId: r1.petitionId, membershipId: memberships[1].id });
-    await addPetitionSupport(prisma, { petitionId: r2.petitionId, membershipId: memberships[2].id });
-    await addPetitionSupport(prisma, { petitionId: r2.petitionId, membershipId: memberships[3].id });
+    await addPetitionSupport(prisma, { petitionId: r1.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: r1.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
+    await addPetitionSupport(prisma, { petitionId: r2.petitionId, actorAccountId: memberships[2].accountId, membershipId: memberships[2].id });
+    await addPetitionSupport(prisma, { petitionId: r2.petitionId, actorAccountId: memberships[3].accountId, membershipId: memberships[3].id });
 
     await prisma.petition.updateMany({ where: { id: { in: [r1.petitionId, r2.petitionId] } }, data: { closesAt: new Date(Date.now() - 1000) } });
 
@@ -334,7 +376,7 @@ test("emergency petition evaluates immediately on threshold", async () => {
 
     // Default emergency threshold = 0.50, so 3 of 5 active members crosses it.
     for (let i = 0; i < 3; i++) {
-      await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[i].id });
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
     }
 
     // evaluateEmergencyPetition can be called before closesAt
@@ -352,7 +394,7 @@ test("standard evaluatePetition does not evaluate emergency petition before clos
   try {
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[0].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
     // Do NOT backdate closesAt — petition still open
     const evalResult = await evaluatePetition(prisma, result.petitionId);
     assert.equal(evalResult.outcome, "pending"); // not early-activated
@@ -370,7 +412,7 @@ test("Fix 1: addPetitionSupport rejected after closesAt even when status is open
     if (!result.ok) return;
     // Backdate closesAt to make petition window appear elapsed (status still "open")
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
-    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    const r = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.reason, "petition_not_open");
   } finally {
@@ -384,11 +426,11 @@ test("Fix 1: withdrawPetitionSupport rejected after closesAt", async () => {
     const result = await openPetition(prisma, { groupId: group.id, category: "membership", subjectType: "membership_request", subjectId: "x", createdByMembershipId: memberships[0].id });
     if (!result.ok) return;
     // Add support while window is open
-    await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     // Elapse window
     await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
     // Withdrawal after closesAt must be rejected
-    const r = await withdrawPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    const r = await withdrawPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.reason, "petition_not_open");
     // Support record must still exist (not silently deleted)
@@ -527,7 +569,7 @@ test("addPetitionSupport rejects group-member support on project-scoped petition
     });
     assert.ok(result.ok);
     if (!result.ok) return;
-    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, membershipId: memberships[1].id });
+    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[1].accountId, membershipId: memberships[1].id });
     assert.equal(supportResult.ok, false);
     if (!supportResult.ok) assert.equal(supportResult.reason, "not_eligible");
   } finally {
@@ -553,7 +595,7 @@ test("addPetitionSupport succeeds for project member on project-scoped petition"
     });
     assert.ok(result.ok);
     if (!result.ok) return;
-    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, projectMembershipId: projectMembership.id });
+    const supportResult = await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: projectMembership.accountId, projectMembershipId: projectMembership.id });
     assert.equal(supportResult.ok, true);
   } finally {
     await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: group.id } } });
@@ -561,6 +603,65 @@ test("addPetitionSupport succeeds for project member on project-scoped petition"
     await prisma.projectMembership.deleteMany({ where: { projectId: "pet_vs_ok_proj" } });
     await prisma.project.deleteMany({ where: { id: "pet_vs_ok_proj" } });
     await cleanupFixture("pet_vs_ok");
+  }
+});
+
+test("petition support cannot use another account's project membership", async () => {
+  const { group, memberships } = await createFixture("pet_actor_project", 2);
+  const project = await prisma.project.create({
+    data: {
+      id: "pet_actor_project_proj",
+      foundingGroupId: group.id,
+      name: "Actor ownership project",
+      status: "active",
+    },
+  });
+  try {
+    const projectMembership = await prisma.projectMembership.create({
+      data: {
+        accountId: memberships[0].accountId,
+        projectId: project.id,
+        status: "active",
+        participationStatus: "active",
+      },
+    });
+    const result = await openPetition(prisma, {
+      groupId: group.id,
+      category: "contribution_category",
+      subjectType: "contribution_category_proposal",
+      subjectId: "pet_actor_project_draft",
+      createdByMembershipId: memberships[0].id,
+      voterScope: { type: "project", scopeId: project.id },
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const addResult = await addPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[1].accountId,
+      projectMembershipId: projectMembership.id,
+    });
+    assert.deepEqual(addResult, { ok: false, reason: "not_eligible" });
+
+    await addPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[0].accountId,
+      projectMembershipId: projectMembership.id,
+    });
+    const withdrawResult = await withdrawPetitionSupport(prisma, {
+      petitionId: result.petitionId,
+      actorAccountId: memberships[1].accountId,
+      projectMembershipId: projectMembership.id,
+    });
+    assert.deepEqual(withdrawResult, { ok: false, reason: "not_eligible" });
+    assert.equal(
+      await prisma.petitionSupport.count({
+        where: { petitionId: result.petitionId, projectMembershipId: projectMembership.id },
+      }),
+      1,
+    );
+  } finally {
+    await cleanupFixture("pet_actor_project");
   }
 });
 

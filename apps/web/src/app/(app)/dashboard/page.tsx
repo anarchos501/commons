@@ -564,7 +564,7 @@ async function supportPetitionFromNotifAction(formData: FormData) {
     if (scopeType === "node") {
       await addNodePetitionSupport(prisma, { petitionId, accountId: session.accountId });
     } else {
-      await addPetitionSupport(prisma, { petitionId, membershipId });
+      await addPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, membershipId });
     }
     await evaluateAndApplyPetition(prisma, petitionId);
   } finally {
