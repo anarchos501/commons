@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { SidebarData } from "../lib/sidebar-data";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SidebarTriggerButton } from "./sidebar/SidebarTriggerButton";
+import { FeedbackLink } from "./FeedbackLink";
 
 interface Props {
   sidebarData: SidebarData;
@@ -31,7 +32,9 @@ export function AppShell({ sidebarData, children }: Props) {
             Commons
           </Link>
 
-          <div className="flex-1" />
+          <div className="flex flex-1 justify-end">
+            <FeedbackLink className="text-xs text-[var(--muted)] hover:text-[var(--accent)]" />
+          </div>
         </div>
       </header>
 

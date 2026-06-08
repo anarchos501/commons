@@ -4,9 +4,12 @@ import { createPrismaClient } from "../lib/prisma";
 import {
   applyGroupDormancyToProjectMemberships,
   applyProjectParticipationTransitions,
+  approveProjectJoinRequest,
+  dismissProjectJoinRequest,
   leaveProject,
   recordProjectPresence,
   requireProjectMembership,
+  requestToJoinProject,
   syncProjectHostingLifecycle,
 } from "../lib/project-membership";
 import { applyParticipationTransitions } from "../lib/participation";
@@ -94,6 +97,226 @@ test("leaveProject is blocked while a project is pending closure", async () => {
     );
   } finally {
     await cleanupFixture("lp_pending");
+  }
+});
+
+// --- project join requests ---
+
+test("eligible host-group participant can request project membership with a note", async () => {
+  const { account, group, project } = await createFixture("pjr_request");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+    });
+    const result = await requestToJoinProject(prisma, account.id, project.id, "  I can help coordinate rides.  ");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const membership = await prisma.projectMembership.findUniqueOrThrow({ where: { id: result.membershipId } });
+    assert.equal(membership.status, "pending");
+    assert.equal(membership.applicationNote, "I can help coordinate rides.");
+  } finally {
+    await cleanupFixture("pjr_request");
+  }
+});
+
+test("project join request requires active participation in a current host group", async () => {
+  const { account, group, group2, project } = await createFixture("pjr_eligibility");
+  try {
+    let result = await requestToJoinProject(prisma, account.id, project.id);
+    assert.deepEqual(result, { ok: false, reason: "not_eligible" });
+
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "quiet" },
+    });
+    result = await requestToJoinProject(prisma, account.id, project.id);
+    assert.deepEqual(result, { ok: false, reason: "not_eligible" });
+
+    await prisma.groupMembership.update({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      data: { status: "inactive", participationStatus: "active" },
+    });
+    result = await requestToJoinProject(prisma, account.id, project.id);
+    assert.deepEqual(result, { ok: false, reason: "not_eligible" });
+
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group2.id, status: "active", participationStatus: "active" },
+    });
+    result = await requestToJoinProject(prisma, account.id, project.id);
+    assert.deepEqual(result, { ok: false, reason: "not_eligible" });
+  } finally {
+    await cleanupFixture("pjr_eligibility");
+  }
+});
+
+test("project join request reports existing active, pending, revoked, and reused inactive memberships", async () => {
+  const { account, group, project } = await createFixture("pjr_existing");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+    });
+    const membership = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "active" },
+    });
+    assert.deepEqual(await requestToJoinProject(prisma, account.id, project.id), { ok: false, reason: "already_member" });
+
+    await prisma.projectMembership.update({ where: { id: membership.id }, data: { status: "pending" } });
+    assert.deepEqual(await requestToJoinProject(prisma, account.id, project.id), { ok: false, reason: "already_requested" });
+
+    await prisma.projectMembership.update({ where: { id: membership.id }, data: { status: "revoked" } });
+    assert.deepEqual(await requestToJoinProject(prisma, account.id, project.id), { ok: false, reason: "revoked" });
+
+    await prisma.projectMembership.update({
+      where: { id: membership.id },
+      data: { status: "inactive", participationStatus: "dormant", applicationNote: "old" },
+    });
+    const result = await requestToJoinProject(prisma, account.id, project.id, "renewed");
+    assert.deepEqual(result, { ok: true, membershipId: membership.id });
+    const reused = await prisma.projectMembership.findUniqueOrThrow({ where: { id: membership.id } });
+    assert.equal(reused.status, "pending");
+    assert.equal(reused.participationStatus, "active");
+    assert.equal(reused.applicationNote, "renewed");
+  } finally {
+    await cleanupFixture("pjr_existing");
+  }
+});
+
+test("active project participant can approve a join request and action log is recorded", async () => {
+  const { account, group, project } = await createFixture("pjr_approve");
+  try {
+    const approver = await createAccount("pjr_approve", "approver");
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+    });
+    const pending = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "pending", applicationNote: "please" },
+    });
+    await prisma.projectMembership.create({
+      data: { accountId: approver.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    const result = await approveProjectJoinRequest(prisma, pending.id, approver.id);
+    assert.deepEqual(result, { ok: true });
+    const approved = await prisma.projectMembership.findUniqueOrThrow({ where: { id: pending.id } });
+    assert.equal(approved.status, "active");
+    assert.equal(approved.applicationNote, null);
+    const log = await prisma.actionLog.findFirstOrThrow({
+      where: { action: "project_membership.joined", targetId: pending.id },
+    });
+    assert.equal(log.actorAccountId, approver.id);
+    assert.equal(log.projectId, project.id);
+  } finally {
+    await cleanupFixture("pjr_approve");
+  }
+});
+
+test("only an active project participant can moderate join requests", async () => {
+  const { account, project } = await createFixture("pjr_moderator");
+  try {
+    const moderator = await createAccount("pjr_moderator", "moderator");
+    const pending = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "pending" },
+    });
+
+    assert.deepEqual(
+      await approveProjectJoinRequest(prisma, pending.id, moderator.id),
+      { ok: false, reason: "moderator_not_eligible" },
+    );
+
+    await prisma.projectMembership.create({
+      data: { accountId: moderator.id, projectId: project.id, status: "active", participationStatus: "quiet" },
+    });
+    assert.deepEqual(
+      await dismissProjectJoinRequest(prisma, pending.id, moderator.id),
+      { ok: false, reason: "moderator_not_eligible" },
+    );
+
+    await prisma.projectMembership.update({
+      where: { accountId_projectId: { accountId: moderator.id, projectId: project.id } },
+      data: { status: "inactive", participationStatus: "active" },
+    });
+    assert.deepEqual(
+      await approveProjectJoinRequest(prisma, pending.id, moderator.id),
+      { ok: false, reason: "moderator_not_eligible" },
+    );
+  } finally {
+    await cleanupFixture("pjr_moderator");
+  }
+});
+
+test("dismissal makes a pending project join request inactive", async () => {
+  const { account, project } = await createFixture("pjr_dismiss");
+  try {
+    const moderator = await createAccount("pjr_dismiss", "moderator");
+    const pending = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "pending", applicationNote: "no rush" },
+    });
+    await prisma.projectMembership.create({
+      data: { accountId: moderator.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+    assert.deepEqual(await dismissProjectJoinRequest(prisma, pending.id, moderator.id), { ok: true });
+    const dismissed = await prisma.projectMembership.findUniqueOrThrow({ where: { id: pending.id } });
+    assert.equal(dismissed.status, "inactive");
+    assert.equal(dismissed.applicationNote, null);
+  } finally {
+    await cleanupFixture("pjr_dismiss");
+  }
+});
+
+test("competing project join moderation only transitions a pending request once", async () => {
+  const { account, project } = await createFixture("pjr_race");
+  try {
+    const moderator = await createAccount("pjr_race", "moderator");
+    const pending = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "pending" },
+    });
+    await prisma.projectMembership.create({
+      data: { accountId: moderator.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    const results = await Promise.all([
+      approveProjectJoinRequest(prisma, pending.id, moderator.id),
+      dismissProjectJoinRequest(prisma, pending.id, moderator.id),
+    ]);
+    assert.equal(results.filter((result) => result.ok).length, 1);
+    assert.equal(results.filter((result) => !result.ok && result.reason === "request_not_found").length, 1);
+  } finally {
+    await cleanupFixture("pjr_race");
+  }
+});
+
+test("terminal, archived, and hostless projects reject join requests and moderation", async () => {
+  const { account, group, project } = await createFixture("pjr_unavailable");
+  try {
+    const moderator = await createAccount("pjr_unavailable", "moderator");
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+    });
+    const pending = await prisma.projectMembership.create({
+      data: { accountId: account.id, projectId: project.id, status: "pending" },
+    });
+    await prisma.projectMembership.create({
+      data: { accountId: moderator.id, projectId: project.id, status: "active", participationStatus: "active" },
+    });
+
+    await prisma.project.update({ where: { id: project.id }, data: { status: "completed" } });
+    assert.deepEqual(await requestToJoinProject(prisma, account.id, project.id), { ok: false, reason: "project_unavailable" });
+    assert.deepEqual(await approveProjectJoinRequest(prisma, pending.id, moderator.id), { ok: false, reason: "project_unavailable" });
+
+    await prisma.project.update({ where: { id: project.id }, data: { status: "closed" } });
+    assert.deepEqual(await dismissProjectJoinRequest(prisma, pending.id, moderator.id), { ok: false, reason: "project_unavailable" });
+
+    await prisma.project.update({ where: { id: project.id }, data: { status: "active", archivedAt: new Date() } });
+    assert.deepEqual(await dismissProjectJoinRequest(prisma, pending.id, moderator.id), { ok: false, reason: "project_unavailable" });
+
+    await prisma.project.update({ where: { id: project.id }, data: { archivedAt: null, pendingClosureAt: new Date() } });
+    assert.deepEqual(await requestToJoinProject(prisma, account.id, project.id), { ok: false, reason: "project_unavailable" });
+
+    await prisma.project.update({ where: { id: project.id }, data: { pendingClosureAt: null } });
+    await prisma.projectHosting.updateMany({ where: { projectId: project.id }, data: { endedAt: new Date() } });
+    assert.deepEqual(await approveProjectJoinRequest(prisma, pending.id, moderator.id), { ok: false, reason: "project_unavailable" });
+  } finally {
+    await cleanupFixture("pjr_unavailable");
   }
 });
 
@@ -577,8 +800,21 @@ async function createFixture(prefix: string) {
   return { node, group, group2, account, project };
 }
 
+async function createAccount(prefix: string, suffix: string) {
+  return prisma.account.create({
+    data: {
+      id: `${prefix}_${suffix}_account`,
+      homeNodeId: `${prefix}_node`,
+      displayName: `User ${prefix} ${suffix}`,
+      accountType: "member",
+      profileVisibility: "private",
+    },
+  });
+}
+
 async function cleanupFixture(prefix: string) {
   await prisma.actionLog.deleteMany({ where: { actorAccountId: { startsWith: prefix } } });
+  await prisma.actionLog.deleteMany({ where: { projectId: { startsWith: prefix } } });
   await prisma.projectMembership.deleteMany({ where: { projectId: { startsWith: prefix } } });
   await prisma.projectHosting.deleteMany({ where: { projectId: { startsWith: prefix } } });
   await prisma.project.deleteMany({ where: { id: { startsWith: prefix } } });

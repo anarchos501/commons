@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { addPetitionSupport } from "../lib/petitions";
+import { addPetitionSupport, withdrawPetition } from "../lib/petitions";
 import { evaluateAndApplyPetition } from "../lib/petition-evaluation";
 import {
   openCoalitionDepartureProposal,
@@ -73,6 +73,95 @@ test("coalition bundle rejection supersedes unfinished child petitions", async (
   }
 });
 
+test("one group can initiate formation while every group keeps its own electorate", async () => {
+  const fixture = await createFixture("coal_independent", 2);
+  try {
+    const result = await openCoalitionFormationProposal(prisma, {
+      name: "Independent Sponsors",
+      content: "Should our groups form this coalition?",
+      participants: [
+        sponsor(fixture, 0),
+        { groupId: fixture.groups[1].id },
+      ],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const children = await prisma.coalitionProposalPetition.findMany({
+      where: { proposalId: result.proposalId },
+      orderBy: { groupId: "asc" },
+    });
+    const childPetitions = await prisma.petition.findMany({
+      where: { id: { in: children.map((child) => child.petitionId) } },
+    });
+    const petitionById = new Map(childPetitions.map((petition) => [petition.id, petition]));
+    assert.equal(children.length, 2);
+    assert.equal(petitionById.get(children[0].petitionId)?.createdByMembershipId, fixture.memberships[0].id);
+    assert.equal(petitionById.get(children[1].petitionId)?.createdByMembershipId, null);
+
+    await approveBundle(result.petitionIds, fixture);
+    const proposal = await prisma.coalitionProposal.findUniqueOrThrow({ where: { id: result.proposalId } });
+    assert.equal(proposal.status, "succeeded");
+  } finally {
+    await cleanupFixture("coal_independent");
+  }
+});
+
+test("withdrawing one child immediately fails the bundle and supersedes siblings", async () => {
+  const fixture = await createFixture("coal_withdraw", 2);
+  try {
+    const result = await openCoalitionFormationProposal(prisma, {
+      name: "Withdrawn Coalition",
+      content: "Should our groups form this coalition?",
+      participants: sponsors(fixture),
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const withdrawal = await withdrawPetition(prisma, result.petitionIds[0], fixture.memberships[0].id);
+    assert.equal(withdrawal.outcome, "withdrawn");
+    await evaluateAndApplyPetition(prisma, result.petitionIds[0]);
+
+    const proposal = await prisma.coalitionProposal.findUniqueOrThrow({ where: { id: result.proposalId } });
+    const sibling = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionIds[1] } });
+    assert.equal(proposal.status, "failed-withdrawn");
+    assert.equal(sibling.status, "superseded");
+  } finally {
+    await cleanupFixture("coal_withdraw");
+  }
+});
+
+test("duplicate formation approvals fail the losing bundle instead of leaving it open", async () => {
+  const fixture = await createFixture("coal_duplicate", 2);
+  try {
+    const first = await openCoalitionFormationProposal(prisma, {
+      name: "One Name",
+      content: "First attempt.",
+      participants: sponsors(fixture),
+    });
+    const second = await openCoalitionFormationProposal(prisma, {
+      name: "One Name",
+      content: "Concurrent attempt.",
+      participants: sponsors(fixture),
+    });
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    if (!first.ok || !second.ok) return;
+
+    await approveBundle(first.petitionIds, fixture);
+    await approveBundle(second.petitionIds, fixture);
+
+    const losingProposal = await prisma.coalitionProposal.findUniqueOrThrow({ where: { id: second.proposalId } });
+    assert.equal(losingProposal.status, "failed-withdrawn");
+    assert.equal(
+      await prisma.coalition.count({ where: { nodeId: fixture.node.id, name: "One Name" } }),
+      1,
+    );
+  } finally {
+    await cleanupFixture("coal_duplicate");
+  }
+});
+
 test("joining requires approval from the applicant and every existing member", async () => {
   const fixture = await createFixture("coal_join", 3);
   try {
@@ -91,6 +180,29 @@ test("joining requires approval from the applicant and every existing member", a
     assert.deepEqual(await activeCoalitionGroups(coalitionId), fixture.groups.map((group) => group.id).sort());
   } finally {
     await cleanupFixture("coal_join");
+  }
+});
+
+test("an applicant can initiate joining without belonging to every current member group", async () => {
+  const fixture = await createFixture("coal_join_independent", 3);
+  try {
+    const coalitionId = await formCoalition(fixture, [0, 1], "Independent Join Coalition");
+    const result = await openCoalitionJoinProposal(prisma, {
+      coalitionId,
+      applicant: sponsor(fixture, 2),
+      memberSponsors: [
+        { groupId: fixture.groups[0].id },
+        { groupId: fixture.groups[1].id },
+      ],
+      content: "Should the applicant join?",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await approveBundle(result.petitionIds, fixture);
+    assert.deepEqual(await activeCoalitionGroups(coalitionId), fixture.groups.map((group) => group.id).sort());
+  } finally {
+    await cleanupFixture("coal_join_independent");
   }
 });
 
@@ -122,6 +234,30 @@ test("voluntary departure requires only the departing group's approval", async (
   }
 });
 
+test("the final departure dissolves an empty coalition", async () => {
+  const fixture = await createFixture("coal_dissolve", 2);
+  try {
+    const coalitionId = await formCoalition(fixture, [0, 1], "Dissolving Coalition");
+    for (const index of [0, 1]) {
+      const result = await openCoalitionDepartureProposal(prisma, {
+        coalitionId,
+        departing: sponsor(fixture, index),
+        content: "Our group is leaving.",
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      await approveBundle(result.petitionIds, fixture);
+    }
+
+    const coalition = await prisma.coalition.findUniqueOrThrow({ where: { id: coalitionId } });
+    assert.equal(coalition.status, "dissolved");
+    assert.ok(coalition.dissolvedAt);
+    assert.deepEqual(await activeCoalitionGroups(coalitionId), []);
+  } finally {
+    await cleanupFixture("coal_dissolve");
+  }
+});
+
 test("removal excludes the target and requires every remaining group", async () => {
   const fixture = await createFixture("coal_remove", 3);
   try {
@@ -144,6 +280,32 @@ test("removal excludes the target and requires every remaining group", async () 
     );
   } finally {
     await cleanupFixture("coal_remove");
+  }
+});
+
+test("one remaining group can initiate removal while all remaining groups decide", async () => {
+  const fixture = await createFixture("coal_remove_independent", 3);
+  try {
+    const coalitionId = await formCoalition(fixture, [0, 1, 2], "Independent Removal Coalition");
+    const result = await openCoalitionRemovalProposal(prisma, {
+      coalitionId,
+      targetGroupId: fixture.groups[2].id,
+      remainingSponsors: [
+        sponsor(fixture, 0),
+        { groupId: fixture.groups[1].id },
+      ],
+      content: "Should the remaining groups remove the target?",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await approveBundle(result.petitionIds, fixture);
+    assert.deepEqual(
+      await activeCoalitionGroups(coalitionId),
+      [fixture.groups[0].id, fixture.groups[1].id].sort(),
+    );
+  } finally {
+    await cleanupFixture("coal_remove_independent");
   }
 });
 

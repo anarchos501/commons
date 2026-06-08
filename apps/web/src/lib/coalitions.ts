@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { PrismaClient } from "../generated/prisma/client";
+import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import type { ProposalFamily } from "./governance-proposal-families";
-import { evaluatePetition, openPetition } from "./petitions";
+import { evaluatePetition, openPetition, openSystemGroupPetition } from "./petitions";
 
 export type CoalitionProposalAction = "formation" | "join" | "departure" | "removal";
 
 type GroupSponsor = {
   groupId: string;
-  createdByMembershipId: string;
+  createdByMembershipId?: string;
 };
 
 type ParticipantSnapshot = {
@@ -57,6 +57,7 @@ export async function openCoalitionFormationProposal(
 
   const groups = await loadSponsorGroups(prisma, uniqueParticipants);
   if (!groups) return { ok: false, reason: "not_eligible" };
+  const initiatingGroupId = uniqueParticipants.find((participant) => participant.createdByMembershipId)!.groupId;
   const nodeIds = new Set(groups.map((group) => group.nodeId));
   if (nodeIds.size !== 1) return { ok: false, reason: "invalid_participants" };
 
@@ -69,7 +70,7 @@ export async function openCoalitionFormationProposal(
   return createCoalitionProposal(prisma, {
     action: "formation",
     coalitionId: null,
-    proposedByGroupId: uniqueParticipants[0].groupId,
+    proposedByGroupId: initiatingGroupId,
     targetGroupId: null,
     name: normalizedName,
     description: description?.trim() || null,
@@ -110,11 +111,12 @@ export async function openCoalitionJoinProposal(
   if (!groups || groups.some((group) => group.nodeId !== coalition.nodeId)) {
     return { ok: false, reason: "not_eligible" };
   }
+  const initiatingGroupId = sponsors.find((sponsor) => sponsor.createdByMembershipId)!.groupId;
 
   return createCoalitionProposal(prisma, {
     action: "join",
     coalitionId,
-    proposedByGroupId: applicant.groupId,
+    proposedByGroupId: initiatingGroupId,
     targetGroupId: applicant.groupId,
     name: null,
     description: null,
@@ -182,11 +184,12 @@ export async function openCoalitionRemovalProposal(
   }
   const groups = await loadSponsorGroups(prisma, remainingSponsors);
   if (!groups) return { ok: false, reason: "not_eligible" };
+  const initiatingGroupId = remainingSponsors.find((sponsor) => sponsor.createdByMembershipId)!.groupId;
 
   return createCoalitionProposal(prisma, {
     action: "removal",
     coalitionId,
-    proposedByGroupId: remainingSponsors[0].groupId,
+    proposedByGroupId: initiatingGroupId,
     targetGroupId,
     name: null,
     description: null,
@@ -219,7 +222,8 @@ export async function evaluateCoalitionProposal(
     return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
   }
 
-  await evaluateDuePetitions(prisma, proposal.petitions.map((child) => child.petitionId));
+  const evaluatedAt = new Date();
+  await evaluateDuePetitions(prisma, proposal.petitions.map((child) => child.petitionId), evaluatedAt);
   const petitions = await prisma.petition.findMany({
     where: { id: { in: proposal.petitions.map((child) => child.petitionId) } },
     select: { id: true, status: true, closesAt: true },
@@ -233,7 +237,7 @@ export async function evaluateCoalitionProposal(
   if (petitions.some((petition) => petition.status === "rejected" || petition.status === "blocked")) {
     return failCoalitionProposal(prisma, proposal, "failed-rejected");
   }
-  if (petitions.some((petition) => petition.status === "open" && petition.closesAt <= new Date())) {
+  if (petitions.some((petition) => petition.status === "open" && petition.closesAt <= evaluatedAt)) {
     return failCoalitionProposal(prisma, proposal, "failed-timeout");
   }
   if (!petitions.every((petition) => petition.status === "approved")) return { outcome: "pending" };
@@ -291,29 +295,43 @@ async function createCoalitionProposal(
 
   const petitionIds: string[] = [];
   const family = familyForAction(input.action);
-  for (const sponsor of input.sponsors) {
-    const petition = await openPetition(prisma, {
-      groupId: sponsor.groupId,
-      category: "group_settings",
-      subjectType: family,
-      subjectId: proposalId,
-      createdByMembershipId: sponsor.createdByMembershipId,
-    });
-    if (!petition.ok) {
-      await failOpenProposal(prisma, proposalId, petitionIds);
-      return { ok: false, reason: "petition_error" };
+  try {
+    for (const sponsor of input.sponsors) {
+      const petition = sponsor.createdByMembershipId
+        ? await openPetition(prisma, {
+            groupId: sponsor.groupId,
+            category: "group_settings",
+            subjectType: family,
+            subjectId: proposalId,
+            createdByMembershipId: sponsor.createdByMembershipId,
+          })
+        : await openSystemGroupPetition(prisma, {
+            groupId: sponsor.groupId,
+            category: "group_settings",
+            subjectType: family,
+            subjectId: proposalId,
+          });
+      if (!petition.ok) {
+        await failOpenProposal(prisma, proposalId, petitionIds);
+        return { ok: false, reason: "petition_error" };
+      }
+      petitionIds.push(petition.petitionId);
+      const group = input.groups.find((candidate) => candidate.id === sponsor.groupId)!;
+      await prisma.coalitionProposalPetition.create({
+        data: {
+          proposalId,
+          groupId: sponsor.groupId,
+          petitionId: petition.petitionId,
+          role: sponsor.role,
+          groupSnapshot: { id: group.id, name: group.name, nodeId: group.nodeId },
+        },
+      });
     }
-    petitionIds.push(petition.petitionId);
-    const group = input.groups.find((candidate) => candidate.id === sponsor.groupId)!;
-    await prisma.coalitionProposalPetition.create({
-      data: {
-        proposalId,
-        groupId: sponsor.groupId,
-        petitionId: petition.petitionId,
-        role: sponsor.role,
-        groupSnapshot: { id: group.id, name: group.name, nodeId: group.nodeId },
-      },
-    });
+  } catch {
+    if (petitionIds.length > 0) {
+      await failOpenProposal(prisma, proposalId, petitionIds);
+    }
+    return { ok: false, reason: "petition_error" };
   }
 
   return { ok: true, proposalId, petitionIds };
@@ -334,51 +352,75 @@ async function applyCoalitionProposal(
   },
 ): Promise<EvaluateCoalitionProposalResult> {
   const snapshot = proposal.participantSnapshot as ParticipantSnapshot;
-  return prisma.$transaction(async (tx) => {
-    if (proposal.action === "formation") {
-      const sponsorGroup = await tx.group.findUniqueOrThrow({
-        where: { id: proposal.proposedByGroupId },
-        select: { nodeId: true },
-      });
-      const coalition = await tx.coalition.create({
-        data: {
-          nodeId: sponsorGroup.nodeId,
-          name: proposal.name!,
-          description: proposal.description,
-        },
-      });
-      await tx.coalitionMembership.createMany({
-        data: snapshot.groupIds.map((groupId) => ({ coalitionId: coalition.id, groupId })),
-      });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      if (proposal.action === "formation") {
+        const sponsorGroup = await tx.group.findUniqueOrThrow({
+          where: { id: proposal.proposedByGroupId },
+          select: { nodeId: true },
+        });
+        const coalition = await tx.coalition.create({
+          data: {
+            nodeId: sponsorGroup.nodeId,
+            name: proposal.name!,
+            description: proposal.description,
+          },
+        });
+        await tx.coalitionMembership.createMany({
+          data: snapshot.groupIds.map((groupId) => ({ coalitionId: coalition.id, groupId })),
+        });
+        await tx.coalitionProposal.update({
+          where: { id: proposal.id },
+          data: { coalitionId: coalition.id, status: "succeeded", resolvedAt: new Date() },
+        });
+        return { outcome: "succeeded" as const, coalitionId: coalition.id };
+      }
+
+      if (!proposal.coalitionId || !proposal.targetGroupId) {
+        throw new Error("Coalition proposal is missing its coalition or target group.");
+      }
+      if (proposal.action === "join") {
+        await tx.coalitionMembership.create({
+          data: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId },
+        });
+      } else {
+        const endedAt = new Date();
+        const updated = await tx.coalitionMembership.updateMany({
+          where: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId, endedAt: null },
+          data: {
+            endedAt,
+            endReason: proposal.action === "departure" ? "voluntary_departure" : "removed_by_members",
+          },
+        });
+        if (updated.count === 0) {
+          await tx.coalitionProposal.updateMany({
+            where: { id: proposal.id, status: "open" },
+            data: { status: "failed-withdrawn", resolvedAt: endedAt },
+          });
+          return { outcome: "failed-withdrawn" as const };
+        }
+        const remaining = await tx.coalitionMembership.count({
+          where: { coalitionId: proposal.coalitionId, endedAt: null },
+        });
+        if (remaining === 0) {
+          await tx.coalition.update({
+            where: { id: proposal.coalitionId },
+            data: { status: "dissolved", dissolvedAt: endedAt },
+          });
+        }
+      }
       await tx.coalitionProposal.update({
         where: { id: proposal.id },
-        data: { coalitionId: coalition.id, status: "succeeded", resolvedAt: new Date() },
+        data: { status: "succeeded", resolvedAt: new Date() },
       });
-      return { outcome: "succeeded", coalitionId: coalition.id };
-    }
-
-    if (!proposal.coalitionId || !proposal.targetGroupId) {
-      throw new Error("Coalition proposal is missing its coalition or target group.");
-    }
-    if (proposal.action === "join") {
-      await tx.coalitionMembership.create({
-        data: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId },
-      });
-    } else {
-      await tx.coalitionMembership.updateMany({
-        where: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId, endedAt: null },
-        data: {
-          endedAt: new Date(),
-          endReason: proposal.action === "departure" ? "voluntary_departure" : "removed_by_members",
-        },
-      });
-    }
-    await tx.coalitionProposal.update({
-      where: { id: proposal.id },
-      data: { status: "succeeded", resolvedAt: new Date() },
+      return { outcome: "succeeded" as const, coalitionId: proposal.coalitionId };
     });
-    return { outcome: "succeeded", coalitionId: proposal.coalitionId };
-  });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
+    }
+    throw error;
+  }
 }
 
 async function failCoalitionProposal(
@@ -413,9 +455,9 @@ async function failOpenProposal(prisma: PrismaClient, proposalId: string, petiti
   ]);
 }
 
-async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[]): Promise<void> {
+async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[], now: Date): Promise<void> {
   const due = await prisma.petition.findMany({
-    where: { id: { in: petitionIds }, status: "open", closesAt: { lte: new Date() } },
+    where: { id: { in: petitionIds }, status: "open", closesAt: { lte: now } },
     select: { id: true },
   });
   for (const petition of due) await evaluatePetition(prisma, petition.id);
@@ -447,8 +489,10 @@ async function loadSponsorGroups(
 ): Promise<Array<{ id: string; name: string; nodeId: string }> | null> {
   const unique = uniqueSponsors(sponsors);
   if (unique.length !== sponsors.length) return null;
+  const initiated = sponsors.filter((sponsor) => sponsor.createdByMembershipId);
+  if (initiated.length === 0) return null;
   const memberships = await prisma.groupMembership.findMany({
-    where: { id: { in: sponsors.map((sponsor) => sponsor.createdByMembershipId) } },
+    where: { id: { in: initiated.map((sponsor) => sponsor.createdByMembershipId!) } },
     select: {
       id: true,
       groupId: true,
@@ -457,10 +501,10 @@ async function loadSponsorGroups(
       group: { select: { id: true, name: true, nodeId: true } },
     },
   });
-  if (memberships.length !== sponsors.length) return null;
+  if (memberships.length !== initiated.length) return null;
   const byId = new Map(memberships.map((membership) => [membership.id, membership]));
-  for (const sponsor of sponsors) {
-    const membership = byId.get(sponsor.createdByMembershipId);
+  for (const sponsor of initiated) {
+    const membership = byId.get(sponsor.createdByMembershipId!);
     if (
       !membership ||
       membership.groupId !== sponsor.groupId ||
@@ -470,7 +514,13 @@ async function loadSponsorGroups(
       return null;
     }
   }
-  return sponsors.map((sponsor) => byId.get(sponsor.createdByMembershipId)!.group);
+  const groups = await prisma.group.findMany({
+    where: { id: { in: sponsors.map((sponsor) => sponsor.groupId) } },
+    select: { id: true, name: true, nodeId: true },
+  });
+  if (groups.length !== sponsors.length) return null;
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
+  return sponsors.map((sponsor) => groupsById.get(sponsor.groupId)!);
 }
 
 function familyForAction(action: CoalitionProposalAction): ProposalFamily {

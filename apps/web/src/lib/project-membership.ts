@@ -36,6 +36,206 @@ export async function assertProjectWritable(prisma: PrismaClient, projectId: str
   }
 }
 
+export type RequestToJoinProjectResult =
+  | { ok: true; membershipId: string }
+  | {
+      ok: false;
+      reason:
+        | "project_not_found"
+        | "project_unavailable"
+        | "not_eligible"
+        | "already_member"
+        | "already_requested"
+        | "revoked";
+    };
+
+export type ModerateProjectJoinRequestResult =
+  | { ok: true }
+  | { ok: false; reason: "request_not_found" | "moderator_not_eligible" | "project_unavailable" };
+
+const PROJECT_APPLICATION_NOTE_MAX_LENGTH = 2000;
+
+/**
+ * Requests direct project membership. Eligibility comes from active
+ * participation in at least one group currently hosting the project.
+ */
+export async function requestToJoinProject(
+  prisma: PrismaClient,
+  accountId: string,
+  projectId: string,
+  note?: string | null,
+): Promise<RequestToJoinProjectResult> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      status: true,
+      archivedAt: true,
+      pendingClosureAt: true,
+      hostings: { where: { endedAt: null }, select: { groupId: true } },
+    },
+  });
+  if (!project) return { ok: false, reason: "project_not_found" };
+  if (
+    project.archivedAt !== null ||
+    project.status === "completed" ||
+    project.status === "closed" ||
+    project.pendingClosureAt !== null ||
+    project.hostings.length === 0
+  ) {
+    return { ok: false, reason: "project_unavailable" };
+  }
+
+  const eligibleHostMembership = await prisma.groupMembership.findFirst({
+    where: {
+      accountId,
+      groupId: { in: project.hostings.map((hosting) => hosting.groupId) },
+      status: "active",
+      participationStatus: "active",
+    },
+    select: { id: true },
+  });
+  if (!eligibleHostMembership) return { ok: false, reason: "not_eligible" };
+
+  const existing = await prisma.projectMembership.findUnique({
+    where: { accountId_projectId: { accountId, projectId } },
+    select: { id: true, status: true },
+  });
+  if (existing?.status === "active") return { ok: false, reason: "already_member" };
+  if (existing?.status === "pending") return { ok: false, reason: "already_requested" };
+  if (existing?.status === "revoked") return { ok: false, reason: "revoked" };
+
+  const applicationNote = cleanApplicationNote(note);
+  if (existing) {
+    const updated = await prisma.projectMembership.updateMany({
+      where: { id: existing.id, status: "inactive" },
+      data: {
+        status: "pending",
+        participationStatus: "active",
+        joinedAt: new Date(),
+        lastSeenAt: null,
+        applicationNote,
+      },
+    });
+    if (updated.count === 1) return { ok: true, membershipId: existing.id };
+
+    const current = await prisma.projectMembership.findUnique({
+      where: { id: existing.id },
+      select: { status: true },
+    });
+    if (current?.status === "active") return { ok: false, reason: "already_member" };
+    if (current?.status === "pending") return { ok: false, reason: "already_requested" };
+    if (current?.status === "revoked") return { ok: false, reason: "revoked" };
+    return { ok: false, reason: "project_unavailable" };
+  }
+
+  const membership = await prisma.projectMembership.create({
+    data: {
+      accountId,
+      projectId,
+      status: "pending",
+      applicationNote,
+    },
+    select: { id: true },
+  });
+  return { ok: true, membershipId: membership.id };
+}
+
+export async function approveProjectJoinRequest(
+  prisma: PrismaClient,
+  pendingMembershipId: string,
+  approverAccountId: string,
+): Promise<ModerateProjectJoinRequestResult> {
+  const request = await findModeratableProjectJoinRequest(prisma, pendingMembershipId, approverAccountId);
+  if (!request.ok) return request;
+
+  const updated = await prisma.projectMembership.updateMany({
+    where: { id: pendingMembershipId, projectId: request.projectId, status: "pending" },
+    data: {
+      status: "active",
+      participationStatus: "active",
+      lastSeenAt: new Date(),
+      applicationNote: null,
+    },
+  });
+  if (updated.count !== 1) return { ok: false, reason: "request_not_found" };
+
+  await logAction(prisma, {
+    actorAccountId: approverAccountId,
+    projectId: request.projectId,
+    action: "project_membership.joined",
+    targetType: "project_membership",
+    targetId: pendingMembershipId,
+    metadata: { accountId: request.applicantAccountId },
+  });
+  await syncProjectStatus(prisma, request.projectId);
+  return { ok: true };
+}
+
+export async function dismissProjectJoinRequest(
+  prisma: PrismaClient,
+  pendingMembershipId: string,
+  dismisserAccountId: string,
+): Promise<ModerateProjectJoinRequestResult> {
+  const request = await findModeratableProjectJoinRequest(prisma, pendingMembershipId, dismisserAccountId);
+  if (!request.ok) return request;
+
+  const updated = await prisma.projectMembership.updateMany({
+    where: { id: pendingMembershipId, projectId: request.projectId, status: "pending" },
+    data: { status: "inactive", applicationNote: null },
+  });
+  return updated.count === 1 ? { ok: true } : { ok: false, reason: "request_not_found" };
+}
+
+async function findModeratableProjectJoinRequest(
+  prisma: PrismaClient,
+  pendingMembershipId: string,
+  moderatorAccountId: string,
+): Promise<
+  | { ok: true; projectId: string; applicantAccountId: string }
+  | { ok: false; reason: "request_not_found" | "moderator_not_eligible" | "project_unavailable" }
+> {
+  const request = await prisma.projectMembership.findUnique({
+    where: { id: pendingMembershipId },
+    select: {
+      accountId: true,
+      projectId: true,
+      status: true,
+      project: {
+        select: {
+          status: true,
+          archivedAt: true,
+          pendingClosureAt: true,
+          hostings: { where: { endedAt: null }, select: { id: true }, take: 1 },
+        },
+      },
+    },
+  });
+  if (!request || request.status !== "pending") return { ok: false, reason: "request_not_found" };
+  if (
+    request.project.archivedAt !== null ||
+    request.project.status === "completed" ||
+    request.project.status === "closed" ||
+    request.project.pendingClosureAt !== null ||
+    request.project.hostings.length === 0
+  ) {
+    return { ok: false, reason: "project_unavailable" };
+  }
+
+  const moderator = await prisma.projectMembership.findUnique({
+    where: { accountId_projectId: { accountId: moderatorAccountId, projectId: request.projectId } },
+    select: { status: true, participationStatus: true },
+  });
+  if (!moderator || moderator.status !== "active" || moderator.participationStatus !== "active") {
+    return { ok: false, reason: "moderator_not_eligible" };
+  }
+  return { ok: true, projectId: request.projectId, applicantAccountId: request.accountId };
+}
+
+function cleanApplicationNote(note: string | null | undefined): string | null {
+  const normalized = note?.trim();
+  return normalized ? normalized.slice(0, PROJECT_APPLICATION_NOTE_MAX_LENGTH) : null;
+}
+
 /**
  * Records a Project Presence Event for a logged-in project member.
  *

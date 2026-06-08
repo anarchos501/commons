@@ -4,9 +4,12 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import {
   applyProjectParticipationTransitions,
+  approveProjectJoinRequest,
+  dismissProjectJoinRequest,
   syncProjectHostingLifecycle,
   recordProjectPresence,
   leaveProject,
+  requestToJoinProject,
 } from "../../../../lib/project-membership";
 import { proposeBulletinCreation, openProjectBulletinArchivalPetition } from "../../../../lib/bulletins";
 import { proposePublicationCreation, proposePubEntryCreation, openProjectPublicationArchivalPetition } from "../../../../lib/publications";
@@ -56,7 +59,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
   const data = await getProjectSpaceData(session.accountId, projectId, selectedThreadId);
 
   const { project, currentMembership } = data;
-  const isActive = currentMembership?.participationStatus === "active";
+  const isActive = currentMembership?.status === "active" && currentMembership.participationStatus === "active";
   const canWrite = isActive && project.status !== "closed" && project.pendingClosureAt === null;
   const canParticipateInGovernance = isActive && project.status !== "closed";
   const membershipId = currentMembership?.id ?? "";
@@ -77,7 +80,9 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--muted)]">
             <span>{data.activeParticipantCount} active {data.activeParticipantCount === 1 ? "member" : "members"}</span>
             {currentMembership && (
-              <span className="capitalize">You: {currentMembership.participationStatus}</span>
+              <span className="capitalize">
+                You: {currentMembership.status === "active" ? currentMembership.participationStatus : currentMembership.status}
+              </span>
             )}
           </div>
           {project.status === "closed" ? (
@@ -102,6 +107,29 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
               Hosting is endorsement and support, not ownership. Project members govern the project.
             </p>
           </div>
+          {!isActive && (data.canRequestMembership || currentMembership?.status === "pending") && (
+            <div className="mt-4 border-l-2 border-[var(--accent)] pl-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Project membership</p>
+              {currentMembership?.status === "pending" ? (
+                <p className="mt-1 text-sm text-[var(--soft-text)]">Your request to join is pending.</p>
+              ) : (
+                <FormWithNotice action={requestToJoinProjectAction} className="mt-2 space-y-3">
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <label className="block">
+                    <span className="field-label">Optional note</span>
+                    <textarea
+                      name="note"
+                      maxLength={2000}
+                      rows={3}
+                      className="field-input resize-y"
+                      placeholder="Share anything project members should know about your request."
+                    />
+                  </label>
+                  <SubmitButton variant="secondary">Request to join</SubmitButton>
+                </FormWithNotice>
+              )}
+            </div>
+          )}
           {project.pendingClosureAt && (
             <div className="mt-4 border-l-2 border-amber-500 pl-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Propose a successor host</p>
@@ -407,6 +435,38 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                 </div>
               </div>
             )}
+            {isActive && data.pendingJoinRequests.length > 0 && (
+              <div className="mt-4 border-t border-[var(--border)] pt-4 space-y-3">
+                <p className="text-xs font-medium text-[var(--muted)]">
+                  Pending join requests ({data.pendingJoinRequests.length})
+                </p>
+                {data.pendingJoinRequests.map((request) => (
+                  <div key={request.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <p className="text-sm font-medium text-[var(--text)]">{request.account.displayName}</p>
+                    {request.applicationNote && (
+                      <p className="mt-1 whitespace-pre-wrap text-xs text-[var(--soft-text)]">
+                        {request.applicationNote}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      Requested {formatRelativeDate(request.joinedAt)}
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <FormWithNotice action={approveProjectJoinRequestAction}>
+                        <input type="hidden" name="projectId" value={projectId} />
+                        <input type="hidden" name="pendingMembershipId" value={request.id} />
+                        <SubmitButton variant="secondary">Approve</SubmitButton>
+                      </FormWithNotice>
+                      <FormWithNotice action={dismissProjectJoinRequestAction}>
+                        <input type="hidden" name="projectId" value={projectId} />
+                        <input type="hidden" name="pendingMembershipId" value={request.id} />
+                        <SubmitButton variant="secondary">Dismiss</SubmitButton>
+                      </FormWithNotice>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CollapsibleSection>
         </div>
 
@@ -510,7 +570,7 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       where: { id: projectId },
       select: {
         id: true, name: true, description: true, status: true,
-        pendingClosureAt: true, pendingClosureElectorate: true, foundingGroupId: true,
+        archivedAt: true, pendingClosureAt: true, pendingClosureElectorate: true, foundingGroupId: true,
       },
     });
 
@@ -557,14 +617,39 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     }
 
     // If not a project member, check if they're a group member of any host group
+    let hasActiveHostGroupParticipation = false;
     if (!currentMembership || currentMembership.status !== "active") {
       const hostGroupIds = hostGroups.map((g) => g.id);
       const groupMembership = await prisma.groupMembership.findFirst({
         where: { accountId, groupId: { in: hostGroupIds }, status: "active" },
-        select: { id: true },
+        select: { id: true, participationStatus: true },
       });
       if (!groupMembership) redirect("/dashboard");
+      hasActiveHostGroupParticipation = groupMembership.participationStatus === "active";
     }
+    const projectAcceptsJoinRequests =
+      project.archivedAt === null &&
+      project.status !== "completed" &&
+      project.status !== "closed" &&
+      project.pendingClosureAt === null &&
+      hostGroups.length > 0;
+    const canRequestMembership =
+      projectAcceptsJoinRequests &&
+      (hasActiveHostGroupParticipation || currentMembership?.status === "pending");
+    const activeProjectMember =
+      currentMembership?.status === "active" && currentMembership.participationStatus === "active";
+    const pendingJoinRequests = activeProjectMember
+      ? await prisma.projectMembership.findMany({
+          where: { projectId, status: "pending" },
+          select: {
+            id: true,
+            joinedAt: true,
+            applicationNote: true,
+            account: { select: { displayName: true } },
+          },
+          orderBy: { joinedAt: "asc" },
+        })
+      : [];
 
     const [bulletins, publications, livingDocuments, activeParticipantCount] = await Promise.all([
       prisma.bulletin.findMany({
@@ -651,6 +736,8 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     return {
       project,
       currentMembership,
+      canRequestMembership,
+      pendingJoinRequests,
       hostGroups,
       eligibleAsProjectSponsor,
       candidateHostGroups,
@@ -706,6 +793,62 @@ async function leaveProjectAction(formData: FormData) {
   redirect("/dashboard");
 }
 
+async function requestToJoinProjectAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const note = formData.get("note");
+  const prisma = createPrismaClient();
+  try {
+    const result = await requestToJoinProject(
+      prisma,
+      session.accountId,
+      projectId,
+      typeof note === "string" ? note : null,
+    );
+    if (!result.ok) return { kind: "error", message: projectJoinRequestFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Your request to join is pending." };
+}
+
+async function approveProjectJoinRequestAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const pendingMembershipId = requiredString(formData, "pendingMembershipId");
+  const prisma = createPrismaClient();
+  try {
+    const result = await approveProjectJoinRequest(prisma, pendingMembershipId, session.accountId);
+    if (!result.ok) return { kind: "error", message: moderateProjectJoinRequestFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Join request approved." };
+}
+
+async function dismissProjectJoinRequestAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const pendingMembershipId = requiredString(formData, "pendingMembershipId");
+  const prisma = createPrismaClient();
+  try {
+    const result = await dismissProjectJoinRequest(prisma, pendingMembershipId, session.accountId);
+    if (!result.ok) return { kind: "error", message: moderateProjectJoinRequestFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Join request dismissed." };
+}
+
 async function proposeProjectHostingAction(_prev: FormState, formData: FormData): Promise<FormState> {
   "use server";
   const session = await getSession();
@@ -757,6 +900,27 @@ function projectHostingProposalFailureMessage(reason: string) {
     case "empty_electorate": return "This project's frozen pre-closure membership is empty, so adoption cannot proceed — its remaining participants may found a new group instead.";
     case "petition_error": return "This proposal could not be submitted.";
     default: return "This proposal could not be submitted.";
+  }
+}
+
+function projectJoinRequestFailureMessage(reason: string) {
+  switch (reason) {
+    case "project_not_found": return "That project could not be found.";
+    case "project_unavailable": return "This project is not currently accepting join requests.";
+    case "not_eligible": return "You must hold active participation in a current host group to request project membership.";
+    case "already_member": return "You are already a project member.";
+    case "already_requested": return "Your request to join is already pending.";
+    case "revoked": return "This account cannot request membership for this project.";
+    default: return "Your request could not be submitted.";
+  }
+}
+
+function moderateProjectJoinRequestFailureMessage(reason: string) {
+  switch (reason) {
+    case "request_not_found": return "That join request is no longer pending.";
+    case "moderator_not_eligible": return "Only active project participants can approve or dismiss join requests.";
+    case "project_unavailable": return "This project is not currently accepting membership changes.";
+    default: return "The join request could not be updated.";
   }
 }
 
@@ -989,6 +1153,15 @@ async function proposeCategoryAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/projects/${projectId}`);
+}
+
+function formatRelativeDate(date: Date) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────

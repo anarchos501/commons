@@ -317,6 +317,7 @@ model Node {
   actionLogs          ActionLog[]
   linkedNodePresences LinkedNodePresence[]
   signedEvents        SignedEvent[]
+  feedbackReports     FeedbackReport[]
 
   @@index([stewardGroupId])
 }
@@ -391,6 +392,7 @@ model Account {
   nodePetitionSupport      NodePetitionSupport[]
   nodeStewardProposals     NodeStewardProposal[]
   createdNodePetitions     Petition[] @relation("PetitionAccountCreator")
+  feedbackReports          FeedbackReport[]
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -461,6 +463,39 @@ model NodeHost {
   @@index([nodeId])
   @@index([accountId])
   @@index([revokedAt])
+}
+
+model FeedbackReport {
+  id                       String   @id @default(cuid())
+  nodeId                   String
+  accountId                String?
+  type                     String
+  title                    String
+  body                     String
+  expected                 String?
+  path                     String?
+  userAgent                String?
+  appVersion               String?
+  status                   String   @default("new")
+  githubIssueUrl           String?
+  hostNotes                String?
+  redactedTitle            String?
+  redactedBody             String?
+  redactedExpected         String?
+  redactedPath             String?
+  redactedUserAgent        String?
+  redactedAppVersion       String?
+  anonymousFingerprintHash String?
+  createdAt                DateTime @default(now())
+  reviewedAt               DateTime?
+  resolvedAt               DateTime?
+
+  node    Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([nodeId, status, createdAt])
+  @@index([nodeId, anonymousFingerprintHash, createdAt])
+  @@index([accountId])
 }
 
 model NodeGovernanceSignal {
@@ -704,6 +739,7 @@ model ProjectMembership {
   status              MembershipStatus    @default(active)
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
+  applicationNote     String?             // optional note submitted with a pending project join request
 
   account          Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)

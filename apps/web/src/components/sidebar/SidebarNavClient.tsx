@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Briefcase, CircleDot, HelpCircle, LayoutDashboard, Network, Shield, UserRound, Users } from "lucide-react";
+import { Bell, Briefcase, CircleDot, HelpCircle, LayoutDashboard, MessageSquareWarning, Network, Shield, UserRound, Users } from "lucide-react";
 import type { SidebarData } from "../../lib/sidebar-data";
 
 interface Props {
@@ -13,7 +13,7 @@ export function SidebarNavClient({ data }: Props) {
 }
 
 function GlobalSidebarNav({ data }: { data: SidebarData }) {
-  const { groupMemberships, projectMemberships, coalitionMemberships, canAccessNodeGovernance, responsibilityAssignments, unreadRouteCount } = data;
+  const { groupMemberships, projectMemberships, coalitionMemberships, canAccessNodeGovernance, canManageFeedback, responsibilityAssignments, unreadRouteCount } = data;
 
   return (
     <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4 gap-1">
@@ -33,6 +33,11 @@ function GlobalSidebarNav({ data }: { data: SidebarData }) {
       {canAccessNodeGovernance && (
         <NavLink href="/node" icon={<CircleDot className="h-4 w-4" />}>
           Node Governance
+        </NavLink>
+      )}
+      {canManageFeedback && (
+        <NavLink href="/node/feedback" icon={<MessageSquareWarning className="h-4 w-4" />}>
+          Feedback Inbox
         </NavLink>
       )}
 

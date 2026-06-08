@@ -6,6 +6,7 @@ export type SidebarData = {
   projectMemberships: Array<{ projectId: string; projectName: string }>;
   coalitionMemberships: Array<{ coalitionId: string; coalitionName: string }>;
   canAccessNodeGovernance: boolean;
+  canManageFeedback: boolean;
   responsibilityAssignments: Array<{ responsibilityId: string; type: string; groupId: string }>;
   unreadRouteCount: number;
 };
@@ -74,6 +75,7 @@ export async function getSidebarData(prisma: PrismaClient, accountId: string): P
       coalitionName: coalition.name,
     })),
     canAccessNodeGovernance: groupMemberships.length > 0 || activeHostCount > 0,
+    canManageFeedback: activeHostCount > 0,
     responsibilityAssignments: activeAssignments.map((a) => ({
       responsibilityId: a.responsibility.id,
       type: a.responsibility.type,

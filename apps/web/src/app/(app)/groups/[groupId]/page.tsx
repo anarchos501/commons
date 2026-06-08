@@ -33,7 +33,7 @@ import {
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { proposeProject } from "../../../../lib/projects";
 import { openProjectHostingWithdrawalPetition } from "../../../../lib/project-hosting";
-import { openCoalitionFormationProposal } from "../../../../lib/coalitions";
+import { openCoalitionFormationProposal, openCoalitionJoinProposal } from "../../../../lib/coalitions";
 import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
 import {
@@ -611,13 +611,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <fieldset className="space-y-1.5">
                     <legend className="field-label">Partner groups (select at least one)</legend>
                     <p className="text-xs leading-5 text-[var(--muted)]">
-                      You can only sponsor a group&apos;s side of this proposal where you hold active participation —
-                      each selected group opens its own internal petition, decided by its own members.
+                      Each selected group receives its own internal petition, decided independently by its members.
                     </p>
                     {data.eligibleCoalitionPartners.map((partner) => (
-                      <label key={partner.groupId} className="flex items-center gap-2 text-sm text-[var(--text)]">
-                        <input type="checkbox" name="partnerGroupId" value={partner.groupId} />
-                        {partner.group.name}
+                      <label key={partner.id} className="flex items-center gap-2 text-sm text-[var(--text)]">
+                        <input type="checkbox" name="partnerGroupId" value={partner.id} />
+                        {partner.label}
                       </label>
                     ))}
                   </fieldset>
@@ -625,11 +624,31 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 </FormWithNotice>
               ) : (
                 <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                  Forming a coalition requires sponsoring every participating group&apos;s internal petition with your
-                  own active membership there. You don&apos;t currently hold active participation in any other group on
-                  this node.
+                  There are no other groups on this node to invite into a coalition.
                 </p>
               )}
+            </details>
+          )}
+          {isActive && data.joinableCoalitions.length > 0 && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Apply to join a coalition</summary>
+              <FormWithNotice action={proposeCoalitionJoinAction} className="mt-3 space-y-3">
+                <input type="hidden" name="groupId" value={groupId} />
+                <label className="block">
+                  <span className="field-label">Coalition</span>
+                  <select name="coalitionId" required className="field-input">
+                    <option value="">Select a coalition&hellip;</option>
+                    {data.joinableCoalitions.map((coalition) => (
+                      <option key={coalition.id} value={coalition.id}>{coalition.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="field-label">Rationale</span>
+                  <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this group join?" />
+                </label>
+                <SubmitButton variant="secondary">Open join proposal</SubmitButton>
+              </FormWithNotice>
             </details>
           )}
         </CollapsibleSection>
@@ -1218,22 +1237,22 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     ]);
 
-    // Other groups on this node where the current account holds active+active
-    // membership — the only groups it can sponsor into a coalition formation
-    // proposal alongside this one (each sponsoring group's consent is supplied
-    // by an active member's own membership; see openCoalitionFormationProposal).
+    // The acting member initiates for this group; every selected partner receives
+    // an independent system-opened petition for its own electorate.
     const eligibleCoalitionPartners =
       currentMembership.participationStatus === "active"
-        ? await prisma.groupMembership.findMany({
+        ? nodeGroupOptions.filter((candidate) => candidate.id !== groupId)
+        : [];
+    const joinableCoalitions =
+      currentMembership.participationStatus === "active"
+        ? await prisma.coalition.findMany({
             where: {
-              accountId,
+              nodeId: group.nodeId,
               status: "active",
-              participationStatus: "active",
-              groupId: { not: groupId },
-              group: { nodeId: group.nodeId },
+              memberships: { none: { groupId, endedAt: null } },
             },
-            select: { id: true, groupId: true, group: { select: { id: true, name: true } } },
-            orderBy: { group: { name: "asc" } },
+            select: { id: true, name: true },
+            orderBy: { name: "asc" },
           })
         : [];
 
@@ -1416,6 +1435,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       projects,
       coalitions,
       eligibleCoalitionPartners,
+      joinableCoalitions,
       bulletins,
       publications,
       livingDocuments,
@@ -1650,26 +1670,13 @@ async function proposeCoalitionFormationAction(
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    const partnerMemberships = await prisma.groupMembership.findMany({
-      where: {
-        accountId: session.accountId,
-        status: "active",
-        participationStatus: "active",
-        groupId: { in: partnerGroupIds },
-      },
-      select: { id: true, groupId: true },
-    });
-    if (partnerMemberships.length !== partnerGroupIds.length) {
-      return { kind: "error", message: "You must hold active participation in every group you sponsor into this proposal." };
-    }
-
     const result = await openCoalitionFormationProposal(prisma, {
       name,
       description: description.trim() || null,
       content,
       participants: [
         { groupId, createdByMembershipId: membership.id },
-        ...partnerMemberships.map((m) => ({ groupId: m.groupId, createdByMembershipId: m.id })),
+        ...partnerGroupIds.map((partnerGroupId) => ({ groupId: partnerGroupId })),
       ],
     });
     if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
@@ -1678,6 +1685,38 @@ async function proposeCoalitionFormationAction(
   }
   revalidatePath(`/groups/${groupId}`);
   return { kind: "success", message: "Coalition formation proposal opened — each group's members will decide through their own petition." };
+}
+
+async function proposeCoalitionJoinAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const coalitionId = requiredString(formData, "coalitionId");
+  const content = requiredString(formData, "content");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const coalition = await prisma.coalition.findUnique({
+      where: { id: coalitionId },
+      select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
+    });
+    if (!coalition) return { kind: "error", message: coalitionProposalFailureMessage("not_found") };
+    const result = await openCoalitionJoinProposal(prisma, {
+      coalitionId,
+      applicant: { groupId, createdByMembershipId: membership.id },
+      memberSponsors: coalition.memberships.map((member) => ({ groupId: member.groupId })),
+      content,
+    });
+    if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Join proposal opened. Every participating group will decide independently." };
 }
 
 function coalitionProposalFailureMessage(reason: string) {
@@ -2111,6 +2150,7 @@ async function withdrawPetitionAction(
   let outcome: "withdrawn" | "not_eligible";
   try {
     ({ outcome } = await withdrawPetition(prisma, petitionId, membership.id));
+    if (outcome === "withdrawn") await evaluateAndApplyPetition(prisma, petitionId);
   } finally {
     await prisma.$disconnect();
   }

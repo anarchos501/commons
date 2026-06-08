@@ -20,6 +20,7 @@ import {
 } from "../../../../lib/discussions";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
+import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
 import { requiredString } from "../../../../lib/support-form";
 
 export const dynamic = "force-dynamic";
@@ -175,18 +176,18 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
           >
             <div className="space-y-6">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--text)]">Apply to join this coalition</h3>
+                <h3 className="text-sm font-semibold text-[var(--text)]">Invite a group to join</h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
                   Joining requires unanimous consent — every current member group, plus the applicant, decides
-                  through its own internal petition. You can only sponsor that consent where you hold active
-                  participation.
+                  through its own internal petition. An active participant in any current member group can initiate
+                  the bundle.
                 </p>
-                {data.canSponsorEveryCurrentMember ? (
+                {data.canSponsorCurrentMember ? (
                   data.joinApplicantOptions.length > 0 ? (
                     <FormWithNotice action={joinCoalitionAction} className="mt-3 space-y-3">
                       <input type="hidden" name="coalitionId" value={coalitionId} />
                       <label className="block">
-                        <span className="field-label">Applying as</span>
+                        <span className="field-label">Group to invite</span>
                         <select name="applicantGroupId" required className="field-input">
                           <option value="">Select a group&hellip;</option>
                           {data.joinApplicantOptions.map((option) => (
@@ -202,13 +203,12 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                     </FormWithNotice>
                   ) : (
                     <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                      You don&apos;t hold active participation in any other group on this node that could apply to join.
+                      There are no other groups on this node to invite.
                     </p>
                   )
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    Applying to join requires sponsoring every current member group&apos;s consent with your own active
-                    membership there — you don&apos;t currently hold active participation in all of them.
+                    You need active participation in a current member group to initiate an invitation.
                   </p>
                 )}
               </div>
@@ -270,8 +270,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                   </FormWithNotice>
                 ) : (
                   <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    Proposing removal requires sponsoring every remaining member group&apos;s consent with your own
-                    active membership there — you don&apos;t currently hold active participation in enough of them.
+                    You need active participation in a remaining member group to initiate removal.
                   </p>
                 )}
               </div>
@@ -340,10 +339,8 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
 
     const currentGroupIds = coalition.memberships.map((membership) => membership.groupId);
 
-    // The account's active+active memberships in this coalition's CURRENT member
-    // groups — the only memberships it can use to sponsor a join/removal proposal,
-    // each of which requires every relevant existing member group's own consent
-    // (see openCoalitionJoinProposal / openCoalitionRemovalProposal).
+    // One active member-group participant may initiate a bundle; every affected
+    // group still decides through its own petition.
     const myCurrentMemberMemberships = await prisma.groupMembership.findMany({
       where: {
         accountId,
@@ -354,7 +351,7 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       select: { id: true, groupId: true },
     });
     const myMembershipIdByGroupId = new Map(myCurrentMemberMemberships.map((m) => [m.groupId, m.id]));
-    const canSponsorEveryCurrentMember = currentGroupIds.every((id) => myMembershipIdByGroupId.has(id));
+    const canSponsorCurrentMember = myCurrentMemberMemberships.length > 0;
 
     const departureOptions = currentGroupIds
       .filter((id) => myMembershipIdByGroupId.has(id))
@@ -364,24 +361,16 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       });
 
     const removalOptions = currentGroupIds
-      .filter((targetId) => currentGroupIds.filter((id) => id !== targetId).every((id) => myMembershipIdByGroupId.has(id)))
+      .filter((targetId) => currentGroupIds.some((id) => id !== targetId && myMembershipIdByGroupId.has(id)))
       .map((targetId) => {
         const membership = coalition.memberships.find((m) => m.groupId === targetId)!;
         return { groupId: targetId, groupName: membership.group.name };
       });
 
-    const joinApplicantOptions = canSponsorEveryCurrentMember
-      ? await prisma.groupMembership.findMany({
-          where: {
-            accountId,
-            status: "active",
-            participationStatus: "active",
-            groupId: { notIn: currentGroupIds },
-            group: { nodeId: coalition.nodeId },
-          },
-          select: { id: true, groupId: true, group: { select: { id: true, name: true } } },
-          orderBy: { group: { name: "asc" } },
-        })
+    const joinApplicantOptions = canSponsorCurrentMember
+      ? (await listNodeGroupLabelsForAccount(prisma, coalition.nodeId, accountId))
+          .filter((group) => !currentGroupIds.includes(group.id))
+          .map((group) => ({ groupId: group.id, group: { name: group.label } }))
       : [];
 
     const canWrite = myCurrentMemberMemberships.length > 0;
@@ -394,7 +383,7 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       canWrite,
       departureOptions,
       removalOptions,
-      canSponsorEveryCurrentMember,
+      canSponsorCurrentMember,
       joinApplicantOptions,
     };
   } finally {
@@ -460,25 +449,22 @@ async function joinCoalitionAction(_prev: FormState, formData: FormData): Promis
         accountId: session.accountId,
         status: "active",
         participationStatus: "active",
-        groupId: { in: [applicantGroupId, ...currentGroupIds] },
+        groupId: { in: currentGroupIds },
       },
       select: { id: true, groupId: true },
     });
     const myMembershipByGroupId = new Map(myMemberships.map((m) => [m.groupId, m]));
-
-    const applicant = myMembershipByGroupId.get(applicantGroupId);
-    if (!applicant) {
-      return { kind: "error", message: "You must hold active participation in the applying group." };
-    }
-    const memberSponsors = currentGroupIds.map((groupId) => myMembershipByGroupId.get(groupId)).filter((m): m is { id: string; groupId: string } => !!m);
-    if (memberSponsors.length !== currentGroupIds.length) {
-      return { kind: "error", message: "You must hold active participation in every current member group to sponsor their consent." };
+    if (myMemberships.length === 0) {
+      return { kind: "error", message: "You must hold active participation in a current member group." };
     }
 
     const result = await openCoalitionJoinProposal(prisma, {
       coalitionId,
-      applicant: { groupId: applicantGroupId, createdByMembershipId: applicant.id },
-      memberSponsors: memberSponsors.map((m) => ({ groupId: m.groupId, createdByMembershipId: m.id })),
+      applicant: { groupId: applicantGroupId },
+      memberSponsors: currentGroupIds.map((groupId) => ({
+        groupId,
+        createdByMembershipId: myMembershipByGroupId.get(groupId)?.id,
+      })),
       content,
     });
     if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
@@ -550,14 +536,18 @@ async function removeCoalitionMemberAction(_prev: FormState, formData: FormData)
       },
       select: { id: true, groupId: true },
     });
-    if (remainingMemberships.length !== remainingGroupIds.length) {
-      return { kind: "error", message: "You must hold active participation in every remaining member group to sponsor this proposal." };
+    if (remainingMemberships.length === 0) {
+      return { kind: "error", message: "You must hold active participation in a remaining member group to sponsor this proposal." };
     }
+    const membershipByGroupId = new Map(remainingMemberships.map((membership) => [membership.groupId, membership.id]));
 
     const result = await openCoalitionRemovalProposal(prisma, {
       coalitionId,
       targetGroupId,
-      remainingSponsors: remainingMemberships.map((m) => ({ groupId: m.groupId, createdByMembershipId: m.id })),
+      remainingSponsors: remainingGroupIds.map((groupId) => ({
+        groupId,
+        createdByMembershipId: membershipByGroupId.get(groupId),
+      })),
       content,
     });
     if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
