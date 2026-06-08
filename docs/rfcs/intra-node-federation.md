@@ -279,9 +279,11 @@ A Node Host is an account with an active, node-scoped `NodeHost` record.
 
 Initial host assignment is a bootstrap convenience. When the first group is created on a fresh node, its creator receives the initial `NodeHost` record. This records who initialized the node and grants no authority over that first group, future groups, or the node community.
 
-A node may have multiple host records for operational redundancy. Host status never grants access to private group content, authority over users or groups, petition overrides, or direct steward appointment or removal.
+A node may have multiple host records for operational redundancy. Creating, revoking, or transferring these operational records is controlled by the server owner or operator and is outside community petition governance. Commons petitions cannot appoint or remove a node host.
 
-**Invariant:** `NodeHost` status is an infrastructure marker, not a governance role. Every binding stewardship outcome requires candidate-group consent, node-wide approval, or current-steward group resignation approval.
+Host status grants no in-app authority over users or groups, petition overrides, or direct steward appointment or removal. This application-level limit does not prevent a server operator from accessing plaintext data stored on infrastructure they control.
+
+**Invariant:** `NodeHost` status is an operator-controlled infrastructure marker, not a petition-governed role. Community governance appoints, accepts the resignation of, or removes only the steward group. Every binding stewardship outcome requires candidate-group consent, node-wide approval, or current-steward group resignation approval.
 
 ### Node Governance Eligibility
 

@@ -54,7 +54,7 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Current steward</p>
               <p className="mt-1 text-sm text-[var(--soft-text)]">{data.steward?.label ?? "No steward group"}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                Host status is infrastructure bookkeeping. Stewardship outcomes require consent or governance approval.
+                The server operator controls host status. Community governance appoints or removes only the steward collective.
               </p>
             </div>
           </div>
@@ -100,8 +100,10 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
               {data.steward && data.isHost && (
                 <form action={hostNoConfidenceAction} className="space-y-3 border border-[var(--border)] p-3">
                   <input type="hidden" name="nodeId" value={data.node.id} />
-                  <p className="text-sm text-[var(--soft-text)]">Open a node-wide no-confidence question. This creates no finding or interim removal.</p>
-                  <SubmitButton variant="secondary">Open no-confidence question</SubmitButton>
+                  <p className="text-sm text-[var(--soft-text)]">
+                    Ask the node whether to remove the current steward collective. This does not affect the node host or create an interim removal.
+                  </p>
+                  <SubmitButton variant="secondary">Open steward no-confidence question</SubmitButton>
                 </form>
               )}
               {data.steward && data.myGroups.length > 0 && (
@@ -115,7 +117,10 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                       ))}
                     </select>
                   </label>
-                  <SubmitButton variant="secondary">Open group initiation</SubmitButton>
+                  <p className="text-sm text-[var(--soft-text)]">
+                    Ask this collective whether to initiate a node-wide vote to remove the current steward collective.
+                  </p>
+                  <SubmitButton variant="secondary">Open steward no-confidence initiation</SubmitButton>
                 </form>
               )}
               {data.canResignSteward && (

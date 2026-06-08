@@ -47,10 +47,10 @@ const concepts = [
     detail: "Joining a coalition requires unanimous consent — every current member collective, and the applicant, must agree through their own internal petition. Coalition proposals (joining, departing, removal) run as bundled petitions across all member collectives. The coalition space does not create a shared electorate or pool voting rights.",
   },
   {
-    title: "Node hosts",
+    title: "Node hosts and stewards",
     icon: BookOpen,
-    body: "A node is one local Commons site. Node hosts help care for the site, but they do not own the community.",
-    detail: "The first person to register on a new Commons site founds the node. Node host status is earned by creating the first collective — not simply by registering. Hosts can be appointed and removed through collective consent. They have limited administrative access and cannot override collective decisions or read private member data.",
+    body: "A node host owns or operates the server infrastructure. An optional steward collective carries delegated node administration and is accountable to the node community.",
+    detail: "The first person to register on a new Commons site founds the node, and creating its first collective establishes the initial host record. Host assignment, transfer, and revocation are controlled by the server operator, not by Commons petitions. Community petitions instead appoint the steward collective, accept its resignation, or remove it through a vote of no confidence. Host status does not override collective decisions, but the server operator can access plaintext data stored on infrastructure they control.",
   },
 ];
 

@@ -157,14 +157,14 @@ export default async function FindGroupsPage() {
                             </div>
                           )}
 
-                          {/* Request to Join / Apply to Join */}
+                          {/* Join / Apply to Join */}
                           {!isMember && (
                             <Link
                               href={`/groups/${group.id}/join`}
                               className="inline-flex items-center gap-2 border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium leading-none text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
                             >
                               <UserPlus className="h-4 w-4" aria-hidden="true" />
-                              {canJoinDirectly ? "Request to Join" : "Apply to Join"}
+                              {canJoinDirectly ? "Join" : "Apply to Join"}
                             </Link>
                           )}
 
