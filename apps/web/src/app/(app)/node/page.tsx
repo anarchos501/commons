@@ -14,6 +14,7 @@ import {
   getNodeParticipationStatus,
   upsertNodeGovernanceSignal,
 } from "../../../lib/node-governance";
+import { governanceCategoryDescription } from "../../../lib/governance-categories";
 import {
   openGroupNoConfidence,
   openGroupStewardNomination,
@@ -190,6 +191,9 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
           </CollapsibleSection>
 
           <CollapsibleSection id="signals" title="Governance Signal" eyebrow="Node stewardship temperature" storageKey="node:section:signals" className="bg-[var(--surface)] p-5 sm:p-6">
+            <p className="mb-4 text-xs leading-5 text-[var(--soft-text)]">
+              {governanceCategoryDescription("node_stewardship")}
+            </p>
             {data.participationStatus === "active" || data.participationStatus === "quiet" ? (
               <form action={nodeSignalAction} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="nodeId" value={data.node.id} />

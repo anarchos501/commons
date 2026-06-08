@@ -39,6 +39,29 @@ export function isGovernanceCategory(value: string): value is GovernanceCategory
   return (GOVERNANCE_CATEGORIES as readonly string[]).includes(value);
 }
 
+export const GOVERNANCE_CATEGORY_DESCRIPTIONS: Record<GovernanceCategory, string> = {
+  membership: "Affects petitions to approve new members when a collective requires membership approval.",
+  project: "Affects project creation, host withdrawal, and proposals for a collective to begin or accept hosting a project.",
+  responsibility: "Affects creating responsibilities, confirming volunteers, and how often responsibility holders must be reconfirmed.",
+  accountability: "Affects petitions proposing actions in response to substantiated accountability concerns.",
+  living_document: "Affects approval of revisions to existing living documents.",
+  archival: "Affects petitions to archive bulletins, publications, publication entries, and living documents.",
+  support_request: "Affects collective decisions to open or approve governed support requests.",
+  contribution_offer: "Affects collective decisions to open or approve governed offers of contribution.",
+  emergency: "Affects emergency declarations, including their approval threshold, petition window, and duration.",
+  discussion: "Affects closing discussion threads and how long messages and inactive threads are retained.",
+  contribution_category: "Affects creating and archiving the categories used to organize contributions and support.",
+  trusted_provider: "Affects recognizing or revoking trusted-provider status for contribution categories.",
+  group_settings: "Affects collective-wide settings such as public visibility, coalition formation, and coalition membership changes.",
+  publishing: "Affects approval of new bulletins, publications, publication entries, and living documents.",
+  participation: "Affects when inactive members become quiet or dormant and therefore stop counting toward active work.",
+  node_stewardship: "Affects steward nomination, appointment, resignation, and no-confidence decisions. It does not govern node hosts.",
+};
+
+export function governanceCategoryDescription(category: GovernanceCategory): string {
+  return GOVERNANCE_CATEGORY_DESCRIPTIONS[category];
+}
+
 // Parameter anchors: [restrictive (-1), default (0), permissive (+1)]
 type NumericAnchors = [number, number, number];
 

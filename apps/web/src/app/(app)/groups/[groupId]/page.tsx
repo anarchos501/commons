@@ -45,6 +45,7 @@ import { proposeResponsibility, PROPOSABLE_RESPONSIBILITY_ABILITIES } from "../.
 import {
   CATEGORY_REGISTRY,
   GOVERNANCE_CATEGORIES,
+  governanceCategoryDescription,
   resolveParameter,
   type GovernanceCategory,
 } from "../../../../lib/governance-categories";
@@ -1053,7 +1054,12 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             {data.governanceSettings.map((setting) => (
               <div key={setting.category} className="bg-[var(--subtle)] p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">{governanceCategoryLabel(setting.category)}</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
+                      {governanceCategoryDescription(setting.category)}
+                    </p>
+                  </div>
                   {/* Temperature indicator: -1 (blue/careful) → 0 (neutral) → +1 (green/permissive) */}
                   <span className={`shrink-0 text-xs font-medium px-1.5 py-0.5 ${
                     setting.temperature > 0.2 ? "bg-green-100 text-green-800" :

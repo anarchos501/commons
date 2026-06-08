@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GOVERNANCE_CATEGORIES,
+  GOVERNANCE_CATEGORY_DESCRIPTIONS,
   CATEGORY_REGISTRY,
   isGovernanceCategory,
   resolveParameter,
@@ -13,6 +14,13 @@ test("all 16 categories are registered", () => {
   assert.equal(GOVERNANCE_CATEGORIES.length, 16);
   for (const category of GOVERNANCE_CATEGORIES) {
     assert.ok(CATEGORY_REGISTRY[category], `${category} missing from registry`);
+  }
+});
+
+test("all governance categories have a plain-language description", () => {
+  assert.deepEqual(Object.keys(GOVERNANCE_CATEGORY_DESCRIPTIONS).sort(), [...GOVERNANCE_CATEGORIES].sort());
+  for (const category of GOVERNANCE_CATEGORIES) {
+    assert.ok(GOVERNANCE_CATEGORY_DESCRIPTIONS[category].length > 20);
   }
 });
 
