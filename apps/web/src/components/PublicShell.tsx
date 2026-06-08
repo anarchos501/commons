@@ -22,10 +22,16 @@ export function PublicShell({ sidebarData, isAuthenticated, children }: Props) {
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-5xl items-center">
           {/* Left: hamburger on mobile when authenticated, empty spacer otherwise */}
-          <div className="flex flex-1 items-center">
+          <div className="flex flex-1 items-center gap-1">
             {sidebarData && (
               <SidebarTriggerButton onOpen={openSidebar} />
             )}
+            <Link
+              href="/guide"
+              className="text-xs font-medium text-[var(--muted)] hover:text-[var(--accent)] sm:text-sm"
+            >
+              Guide
+            </Link>
           </div>
 
           <Link

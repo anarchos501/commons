@@ -179,7 +179,9 @@ export async function updateFeedbackReview(
   });
 }
 
-export function githubFeedbackConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+type GithubFeedbackEnv = Record<string, string | undefined>;
+
+export function githubFeedbackConfigured(env: GithubFeedbackEnv = process.env): boolean {
   return Boolean(env.GITHUB_FEEDBACK_REPO?.trim() && env.GITHUB_FEEDBACK_TOKEN?.trim());
 }
 
@@ -190,7 +192,7 @@ export async function exportFeedbackToGithub(
     hostAccountId: string;
     reportId: string;
     fetchImpl?: typeof fetch;
-    env?: NodeJS.ProcessEnv;
+    env?: GithubFeedbackEnv;
   },
 ): Promise<{ issueUrl: string }> {
   await requireActiveNodeHost(prisma, input.nodeId, input.hostAccountId);
