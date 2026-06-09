@@ -1,0 +1,24 @@
+# Replace your-domain.example with your actual domain.
+# Replace you@example.com with your email (used by Let's Encrypt for cert renewal notices).
+
+{
+  email you@example.com
+}
+
+www.your-domain.example {
+  redir https://your-domain.example{uri} permanent
+}
+
+your-domain.example {
+  reverse_proxy web:3000
+
+  encode gzip
+
+  header {
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+}
