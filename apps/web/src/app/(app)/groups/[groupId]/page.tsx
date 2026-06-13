@@ -5,6 +5,7 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
+import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
 import { getCoverageStatus } from "../../../../lib/concerns";
 import { proposeBulletinCreation, openBulletinArchivalPetition } from "../../../../lib/bulletins";
 import { proposePublicationCreation, proposePubEntryCreation, openPublicationArchivalPetition } from "../../../../lib/publications";
@@ -59,7 +60,7 @@ import {
 import { computeAllParameterTemperatures, upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
-  describePetitionSubject,
+  getPetitionDetail,
   proposalFamilyLabel,
   governanceCategoryLabel,
 } from "../../../../lib/petition-evaluation";
@@ -443,7 +444,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <a href={`/responsibilities/${r.id}`} className="text-sm font-medium text-[var(--text)] hover:text-[var(--accent)] capitalize">
-                        {r.type}
+                        {responsibilityTypeLabel(r.type)}
                       </a>
                       {r.assignments.length > 0 && (
                         <p className="mt-0.5 text-xs text-[var(--muted)]">
@@ -741,11 +742,15 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   )}
                   <p className="mt-1 text-xs text-[var(--muted)]">Applied {formatRelativeDate(app.joinedAt)}</p>
                   <div className="mt-3 flex gap-2">
-                    <form action={sponsorApplicationAction}>
-                      <input type="hidden" name="groupId" value={groupId} />
-                      <input type="hidden" name="pendingMembershipId" value={app.id} />
-                      <SubmitButton variant="secondary">Sponsor</SubmitButton>
-                    </form>
+                    {app.hasOpenSponsorship ? (
+                      <p className="text-xs text-[var(--soft-text)]">Sponsorship petition open</p>
+                    ) : (
+                      <FormWithNotice action={sponsorApplicationAction}>
+                        <input type="hidden" name="groupId" value={groupId} />
+                        <input type="hidden" name="pendingMembershipId" value={app.id} />
+                        <SubmitButton variant="secondary">Sponsor</SubmitButton>
+                      </FormWithNotice>
+                    )}
                     <form action={dismissApplicationAction}>
                       <input type="hidden" name="groupId" value={groupId} />
                       <input type="hidden" name="pendingMembershipId" value={app.id} />
@@ -1243,11 +1248,38 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     ]);
 
+    // Flag applicants that already have an open sponsorship petition so the UI can show
+    // "Sponsorship petition open" instead of re-offering the Sponsor button (the DB unique
+    // index Petition_membership_request_open_unique is the hard guarantee against duplicates).
+    const openSponsorshipSubjectIds = new Set(
+      pendingApplications.length > 0
+        ? (
+            await prisma.petition.findMany({
+              where: {
+                groupId,
+                subjectType: "membership_request",
+                status: "open",
+                subjectId: { in: pendingApplications.map((a) => a.id) },
+              },
+              select: { subjectId: true },
+            })
+          ).map((p) => p.subjectId)
+        : [],
+    );
+    const pendingApplicationsWithStatus = pendingApplications.map((a) => ({
+      ...a,
+      hasOpenSponsorship: openSponsorshipSubjectIds.has(a.id),
+    }));
+
     // The acting member initiates for this group; every selected partner receives
     // an independent system-opened petition for its own electorate.
+    // Offer only groups the acting member can already legitimately see (public, or private
+    // groups they belong to). Private groups are never shown to non-members, so the coalition
+    // form is not a discovery directory; a shared member bridges private–private coalitions by
+    // initiating from within a group they belong to. (isPrivate = !(public || actor-is-member).)
     const eligibleCoalitionPartners =
       currentMembership.participationStatus === "active"
-        ? nodeGroupOptions.filter((candidate) => candidate.id !== groupId)
+        ? nodeGroupOptions.filter((candidate) => candidate.id !== groupId && !candidate.isPrivate)
         : [];
     const joinableCoalitions =
       currentMembership.participationStatus === "active"
@@ -1276,10 +1308,20 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       petitionRows.map(async (p) => {
         const snapshot = p.governanceSnapshot as { threshold?: number };
         const threshold = typeof snapshot.threshold === "number" ? snapshot.threshold : 1;
+        const detail = await getPetitionDetail(prisma, {
+          subjectType: p.subjectType,
+          subjectId: p.subjectId,
+          status: p.status,
+          createdByMembershipId: p.createdByMembershipId,
+          createdByAccountId: p.createdByAccountId,
+        });
         return {
           id: p.id,
           subjectType: p.subjectType,
-          subjectLabel: await describePetitionSubject(prisma, p.subjectType, p.subjectId),
+          subjectLabel: detail.summary,
+          proposer: detail.proposer,
+          outcome: detail.outcome,
+          detailFields: detail.fields,
           status: p.status,
           closesAt: p.closesAt,
           resolvedAt: p.resolvedAt,
@@ -1459,7 +1501,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       contributionCategories: categoriesWithProviders,
       allProjects,
       groupMembers,
-      pendingApplications,
+      pendingApplications: pendingApplicationsWithStatus,
       activeEmergency,
       responsibilityTypes,
       myResponsibilityTypes,
@@ -1738,7 +1780,7 @@ function coalitionProposalFailureMessage(reason: string) {
   }
 }
 
-async function sponsorApplicationAction(formData: FormData) {
+async function sponsorApplicationAction(_prev: FormState, formData: FormData): Promise<FormState> {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
@@ -1751,11 +1793,16 @@ async function sponsorApplicationAction(formData: FormData) {
       select: { id: true },
     });
     if (!sponsor) redirect("/dashboard");
-    await sponsorMembershipApplication(prisma, sponsor.id, pendingMembershipId);
+    const result = await sponsorMembershipApplication(prisma, sponsor.id, pendingMembershipId);
+    revalidatePath(`/groups/${groupId}`);
+    if (result.ok) return { kind: "success", message: "Sponsorship petition opened." };
+    if (result.reason === "already_open") {
+      return { kind: "success", message: "A sponsorship petition for this applicant is already open." };
+    }
+    return { kind: "error", message: "This sponsorship could not be submitted." };
   } finally {
     await prisma.$disconnect();
   }
-  revalidatePath(`/groups/${groupId}`);
 }
 
 async function dismissApplicationAction(formData: FormData) {
@@ -2361,6 +2408,9 @@ type SpacePetition = {
   id: string;
   subjectType: string;
   subjectLabel: string;
+  proposer: string | null;
+  outcome: string;
+  detailFields: { label: string; value: string }[];
   status: string;
   closesAt: Date;
   resolvedAt: Date | null;
@@ -2378,12 +2428,32 @@ function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-[var(--text)]">{proposalFamilyLabel(petition.subjectType)}</p>
-          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{petition.subjectLabel}</p>
+          {petition.subjectLabel && petition.subjectLabel !== proposalFamilyLabel(petition.subjectType) && (
+            <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{petition.subjectLabel}</p>
+          )}
         </div>
         <span className="shrink-0 border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
           {petition.status}
         </span>
       </div>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-[var(--accent)] hover:underline">Details</summary>
+        <dl className="mt-2 grid gap-1 text-[var(--soft-text)]">
+          <div><p className="text-[var(--text)]">{petition.outcome}</p></div>
+          {petition.proposer && (
+            <div className="flex gap-2">
+              <dt className="shrink-0 text-[var(--muted)]">Proposed by</dt>
+              <dd>{petition.proposer}</dd>
+            </div>
+          )}
+          {petition.detailFields.map((field) => (
+            <div key={field.label} className="flex gap-2">
+              <dt className="shrink-0 text-[var(--muted)]">{field.label}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words">{field.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
       <div className="mt-3 grid gap-2 text-xs text-[var(--muted)] sm:grid-cols-3">
         <p>{petition.supportCount} supporting</p>
         <p>{petition.requiredSupport} needed</p>

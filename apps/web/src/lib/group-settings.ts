@@ -1,15 +1,24 @@
 import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import type { OpenPetitionResult } from "./petitions";
+import { provisionConcernReviewer } from "./concern-reviewer";
 
 export type GroupMembershipPolicy = "open" | "request_required";
+export type GroupVisibilityValue = "private" | "public";
 
 const VALID_MEMBERSHIP_POLICIES: ReadonlySet<string> = new Set<GroupMembershipPolicy>(["open", "request_required"]);
+const VALID_VISIBILITIES: ReadonlySet<string> = new Set<GroupVisibilityValue>(["private", "public"]);
 
 function sanitizeMembershipPolicy(value: unknown): GroupMembershipPolicy {
   return typeof value === "string" && VALID_MEMBERSHIP_POLICIES.has(value)
     ? (value as GroupMembershipPolicy)
     : "request_required";
+}
+
+function sanitizeVisibility(value: unknown): GroupVisibilityValue {
+  return typeof value === "string" && VALID_VISIBILITIES.has(value)
+    ? (value as GroupVisibilityValue)
+    : "private";
 }
 
 export type CreateGroupInput = {
@@ -18,6 +27,7 @@ export type CreateGroupInput = {
   description?: string;
   creatorAccountId: string;
   membershipPolicy?: GroupMembershipPolicy;
+  visibility?: GroupVisibilityValue;
 };
 
 export type CreateGroupResult =
@@ -35,6 +45,7 @@ export async function createGroup(
   if (existing) return { ok: false, reason: "duplicate_name" };
 
   const membershipPolicy = sanitizeMembershipPolicy(input.membershipPolicy);
+  const visibility = sanitizeVisibility(input.visibility);
 
   let result: string | null = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -47,7 +58,7 @@ export async function createGroup(
             name: input.name,
             description: input.description,
             membershipPolicy,
-            visibility: "private",
+            visibility,
           },
         });
         await tx.groupMembership.create({
@@ -58,6 +69,9 @@ export async function createGroup(
             participationStatus: "active",
           },
         });
+        // Every group gets the Concern Reviewer accountability role so the path always
+        // exists for members to volunteer for (no one is assigned it automatically).
+        await provisionConcernReviewer(tx, group.id);
         if (existingGroupCount === 0) {
           await tx.nodeHost.create({
             data: { nodeId: input.nodeId, accountId: input.creatorAccountId },

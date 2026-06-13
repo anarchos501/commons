@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import { applyGroupVisibilityFromPetition, createGroup, proposeGroupVisibility } from "../lib/group-settings";
+import { applyForGroupMembership, sponsorMembershipApplication } from "../lib/group-membership";
+import { provisionConcernReviewer } from "../lib/concern-reviewer";
 
 const prisma = createPrismaClient();
 
@@ -122,6 +124,145 @@ test("group visibility petition approval makes the group public", async () => {
   }
 });
 
+test("createGroup respects explicit 'public' visibility and provisions a Concern Reviewer", async () => {
+  await cleanupFixture("gs_public");
+  try {
+    const { node, account } = await createBase("gs_public");
+    const result = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "Public Group",
+      creatorAccountId: account.id,
+      visibility: "public",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: result.groupId } });
+    assert.equal(group.visibility, "public");
+
+    // Every group is provisioned with the Concern Reviewer accountability role.
+    const reviewer = await prisma.responsibility.findUniqueOrThrow({
+      where: { groupId_type: { groupId: group.id, type: "reviewer" } },
+      include: { abilities: true },
+    });
+    const abilities = reviewer.abilities.map((a) => a.ability).sort();
+    assert.deepEqual(abilities, [
+      "administrative_closure",
+      "issue_action_proposals",
+      "issue_findings",
+      "review_concerns",
+    ]);
+  } finally {
+    await cleanupFixture("gs_public");
+  }
+});
+
+test("sponsoring the same applicant twice does not create duplicate petitions", async () => {
+  await cleanupFixture("gs_dupe");
+  try {
+    const { node, account } = await createBase("gs_dupe");
+    const created = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "Sponsor Group",
+      creatorAccountId: account.id,
+      membershipPolicy: "request_required",
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const applicant = await prisma.account.create({
+      data: {
+        id: "gs_dupe_applicant",
+        homeNodeId: node.id,
+        displayName: "Applicant",
+        accountType: "member",
+        profileVisibility: "private",
+      },
+    });
+    const application = await applyForGroupMembership(prisma, applicant.id, created.groupId);
+    assert.equal(application.ok, true);
+    if (!application.ok) return;
+
+    const sponsor = await prisma.groupMembership.findUniqueOrThrow({
+      where: { accountId_groupId: { accountId: account.id, groupId: created.groupId } },
+      select: { id: true },
+    });
+
+    const first = await sponsorMembershipApplication(prisma, sponsor.id, application.membershipId);
+    const second = await sponsorMembershipApplication(prisma, sponsor.id, application.membershipId);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.reason, "already_open");
+
+    const openPetitions = await prisma.petition.count({
+      where: {
+        groupId: created.groupId,
+        subjectType: "membership_request",
+        subjectId: application.membershipId,
+        status: "open",
+      },
+    });
+    assert.equal(openPetitions, 1);
+  } finally {
+    await cleanupFixture("gs_dupe");
+  }
+});
+
+test("createGroup with default (private) visibility also provisions the Concern Reviewer", async () => {
+  await cleanupFixture("gs_default_reviewer");
+  try {
+    const { node, account } = await createBase("gs_default_reviewer");
+    const result = await createGroup(prisma, {
+      nodeId: node.id,
+      name: "Default Reviewer Group",
+      creatorAccountId: account.id,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: result.groupId } });
+    assert.equal(group.visibility, "private");
+
+    const reviewer = await prisma.responsibility.findUniqueOrThrow({
+      where: { groupId_type: { groupId: group.id, type: "reviewer" } },
+      include: { abilities: true },
+    });
+    const abilities = reviewer.abilities.map((a) => a.ability).sort();
+    assert.deepEqual(abilities, [
+      "administrative_closure",
+      "issue_action_proposals",
+      "issue_findings",
+      "review_concerns",
+    ]);
+  } finally {
+    await cleanupFixture("gs_default_reviewer");
+  }
+});
+
+test("provisionConcernReviewer backfills a group missing the role and is idempotent", async () => {
+  await cleanupFixture("gs_backfill");
+  try {
+    const { node } = await createBase("gs_backfill");
+    // A group created WITHOUT the reviewer role (simulates a pre-auto-provision group).
+    const group = await prisma.group.create({
+      data: { id: "gs_backfill_group", nodeId: node.id, name: "Legacy Group", membershipPolicy: "open", visibility: "private" },
+    });
+    assert.equal(await prisma.responsibility.count({ where: { groupId: group.id, type: "reviewer" } }), 0);
+
+    await provisionConcernReviewer(prisma, group.id);
+    await provisionConcernReviewer(prisma, group.id); // second call must be a no-op
+
+    const reviewers = await prisma.responsibility.findMany({
+      where: { groupId: group.id, type: "reviewer" },
+      include: { abilities: true },
+    });
+    assert.equal(reviewers.length, 1);
+    assert.equal(reviewers[0].abilities.length, 4);
+  } finally {
+    await cleanupFixture("gs_backfill");
+  }
+});
+
 async function createBase(prefix: string) {
   const node = await prisma.node.create({
     data: {
@@ -170,6 +311,9 @@ async function createGroupFixture(prefix: string) {
 async function cleanupFixture(prefix: string) {
   await prisma.petitionSupport.deleteMany({ where: { petition: { group: { nodeId: { startsWith: prefix } } } } });
   await prisma.petition.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
+  // createGroup now auto-provisions a Concern Reviewer responsibility (+ abilities) per group.
+  await prisma.responsibilityAbility.deleteMany({ where: { responsibility: { group: { nodeId: { startsWith: prefix } } } } });
+  await prisma.responsibility.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.groupMembership.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.group.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

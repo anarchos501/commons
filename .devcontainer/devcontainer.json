@@ -4,5 +4,8 @@
   "service": "app",
   "workspaceFolder": "/workspaces/commons",
   "forwardPorts": [3000, 5432],
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
   "postCreateCommand": "pnpm install"
 }

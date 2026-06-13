@@ -5,6 +5,7 @@ import { EmptyState } from "../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import type { FormState } from "../../../../components/shared/form-state";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
+import { LocalTime } from "../../../../components/shared/LocalTime";
 import {
   FEEDBACK_STATUSES,
   exportFeedbackToGithub,
@@ -58,7 +59,7 @@ export default async function FeedbackInboxPage() {
                 </div>
                 <dl className="mt-3 grid gap-1 text-xs text-[var(--muted)] sm:grid-cols-2">
                   <div>Submitted by: {report.account?.displayName ?? "Anonymous"}</div>
-                  <div>Created: {report.createdAt.toLocaleString()}</div>
+                  <div>Created: <LocalTime value={report.createdAt.toISOString()} /></div>
                   <div>Page: {report.path ?? "Not provided"}</div>
                   <div>App: {report.appVersion ?? "Not provided"}</div>
                 </dl>

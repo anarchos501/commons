@@ -28,6 +28,7 @@ import {
 } from "./project-hosting";
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
+import { responsibilityTypeLabel } from "./concern-reviewer";
 
 export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string) {
   const result = await evaluatePetition(prisma, petitionId);
@@ -91,6 +92,22 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
 }
 
 export async function describePetitionSubject(prisma: PrismaClient, subjectType: string, subjectId: string) {
+  if (subjectType === "membership_request") {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: subjectId },
+      select: { account: { select: { displayName: true } } },
+    });
+    return membership ? membership.account.displayName : subjectId;
+  }
+
+  if (subjectType === "project_proposal") {
+    const proposal = await prisma.proposal.findUnique({
+      where: { id: subjectId },
+      select: { title: true },
+    });
+    return proposal ? proposal.title : subjectId;
+  }
+
   if (subjectType === "living_document_revision") {
     const revision = await prisma.livingDocumentRevision.findUnique({
       where: { id: subjectId },
@@ -208,7 +225,160 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return `Propose ${typeLabel}: ${draft.title ?? "(untitled)"}`;
   }
 
-  return subjectId;
+  // Never surface a raw identity code: fall back to the human-readable family label.
+  return proposalFamilyLabel(subjectType);
+}
+
+// ── Petition detail (expandable governance context) ───────────────────────────
+
+export type PetitionDetail = {
+  summary: string;
+  proposer: string | null;
+  outcome: string;
+  fields: { label: string; value: string }[];
+};
+
+type PetitionDetailInput = {
+  subjectType: string;
+  subjectId: string;
+  status: string;
+  createdByMembershipId: string | null;
+  createdByAccountId: string | null;
+};
+
+async function resolvePetitionProposer(prisma: PrismaClient, petition: PetitionDetailInput): Promise<string | null> {
+  if (petition.createdByMembershipId) {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: petition.createdByMembershipId },
+      select: { account: { select: { displayName: true } } },
+    });
+    if (membership) return membership.account.displayName;
+  }
+  if (petition.createdByAccountId) {
+    const account = await prisma.account.findUnique({
+      where: { id: petition.createdByAccountId },
+      select: { displayName: true },
+    });
+    if (account) return account.displayName;
+  }
+  return null;
+}
+
+/**
+ * Frames a present-tense effect clause as a status-aware outcome sentence, so the line is
+ * accurate whether the petition is still open or already resolved (an open petition reads
+ * "If approved: …"; a rejected one reads "Rejected. Would have: …").
+ */
+function frameOutcome(status: string, effect: string): string {
+  switch (status) {
+    case "open":
+      return `If approved: ${effect}.`;
+    case "approved":
+      return `Approved: ${effect}.`;
+    case "rejected":
+      return `Rejected. Would have: ${effect}.`;
+    case "withdrawn":
+      return `Withdrawn. Would have: ${effect}.`;
+    default: // superseded, blocked, anything else terminal
+      return `Closed without effect. Would have: ${effect}.`;
+  }
+}
+
+/**
+ * Derives expandable governance context for a petition — a one-line summary, who proposed it,
+ * a plain-language status-aware outcome, and type-specific details — so members can evaluate a
+ * proposal without opening anything else. All values are derived from the subject (the Petition
+ * model has no free-text body); the subject is fetched once per petition. Unhandled families
+ * degrade to a family-label summary + a generic outcome.
+ */
+export async function getPetitionDetail(prisma: PrismaClient, petition: PetitionDetailInput): Promise<PetitionDetail> {
+  const proposer = await resolvePetitionProposer(prisma, petition);
+  const { subjectType, subjectId, status } = petition;
+  const familyLabel = proposalFamilyLabel(subjectType);
+  const fields: { label: string; value: string }[] = [];
+
+  if (subjectType === "membership_request") {
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: subjectId },
+      select: { applicationNote: true, account: { select: { displayName: true } } },
+    });
+    const applicant = membership?.account.displayName ?? "the applicant";
+    fields.push({ label: "Applicant", value: applicant });
+    fields.push({ label: "Application message", value: membership?.applicationNote?.trim() || "—" });
+    const summary = membership ? applicant : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `${applicant} becomes a member of this group`), fields };
+  }
+
+  if (subjectType === "project_proposal") {
+    const proposal = await prisma.proposal.findUnique({
+      where: { id: subjectId },
+      select: { title: true, body: true },
+    });
+    const title = proposal?.title ?? "the project";
+    fields.push({ label: "Project", value: title });
+    fields.push({ label: "Description", value: proposal?.body?.trim() || "—" });
+    const summary = proposal ? proposal.title : familyLabel;
+    return {
+      summary,
+      proposer,
+      outcome: frameOutcome(status, `the project "${title}" is created and hosted by this group`),
+      fields,
+    };
+  }
+
+  if (subjectType === "responsibility_creation_proposal") {
+    const draft = await prisma.responsibilityProposalDraft.findUnique({
+      where: { id: subjectId },
+      select: { type: true, description: true, abilities: true },
+    });
+    const label = responsibilityTypeLabel(draft?.type ?? "") || "the proposed role";
+    fields.push({ label: "Responsibility", value: label });
+    if (draft?.description) fields.push({ label: "Purpose", value: draft.description });
+    const abilities = Array.isArray(draft?.abilities)
+      ? (draft.abilities as { ability: string }[]).map((a) => a.ability.replace(/_/g, " "))
+      : [];
+    if (abilities.length > 0) fields.push({ label: "Abilities", value: abilities.join(", ") });
+    const summary = draft ? `Propose responsibility: ${label}` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `a new responsibility "${label}" is created`), fields };
+  }
+
+  if (subjectType === "responsibility_proposal") {
+    const [membershipId, type] = subjectId.split(":", 2);
+    const membership = await prisma.groupMembership.findUnique({
+      where: { id: membershipId },
+      select: { account: { select: { displayName: true } } },
+    });
+    const who = membership?.account.displayName ?? "the volunteer";
+    const role = responsibilityTypeLabel(type ?? "");
+    fields.push({ label: "Member", value: who });
+    fields.push({ label: "Role", value: role });
+    const summary = membership ? `${who} for ${role}` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `${who} holds the ${role} responsibility`), fields };
+  }
+
+  if (subjectType === "group_visibility_proposal") {
+    const group = await prisma.group.findUnique({ where: { id: subjectId }, select: { name: true } });
+    if (group) fields.push({ label: "Collective", value: group.name });
+    const summary = group ? `Make "${group.name}" publicly visible` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, "this collective becomes publicly visible on this node"), fields };
+  }
+
+  if (subjectType === "discussion_thread_close") {
+    const thread = await prisma.discussionThread.findUnique({ where: { id: subjectId }, select: { title: true } });
+    if (thread) fields.push({ label: "Thread", value: thread.title });
+    const summary = thread ? `Close "${thread.title}"` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, "this discussion thread is closed to new replies"), fields };
+  }
+
+  // Other families: delegate the one-line summary to describePetitionSubject (its single
+  // caller path), and frame a generic outcome. No extra subject fetch for the rich types above.
+  const summary = await describePetitionSubject(prisma, subjectType, subjectId);
+  return {
+    summary,
+    proposer,
+    outcome: frameOutcome(status, `this ${familyLabel.toLowerCase()} takes effect`),
+    fields,
+  };
 }
 
 async function resolveOfferingEntityLabel(

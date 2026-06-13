@@ -108,7 +108,7 @@ export async function applyForGroupMembership(
 
 export type SponsorApplicationResult =
   | { ok: true; petitionId: string }
-  | { ok: false; reason: "application_not_found" | "sponsor_not_eligible" | "petition_error" };
+  | { ok: false; reason: "application_not_found" | "sponsor_not_eligible" | "already_open" | "petition_error" };
 
 /**
  * Active group member sponsors a pending membership application.
@@ -143,7 +143,12 @@ export async function sponsorMembershipApplication(
     createdByMembershipId: sponsorMembershipId,
   });
 
-  if (!result.ok) return { ok: false, reason: "petition_error" };
+  if (!result.ok) {
+    // A sponsorship petition for this applicant is already open (enforced by the
+    // Petition_membership_request_open_unique index — prevents double-click duplicates).
+    if (result.reason === "petition_already_open") return { ok: false, reason: "already_open" };
+    return { ok: false, reason: "petition_error" };
+  }
   return { ok: true, petitionId: result.petitionId };
 }
 

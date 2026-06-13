@@ -387,6 +387,9 @@ async function cleanup(prefix: string) {
   await prisma.nodeGovernanceSignal.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.nodeHost.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.actionLog.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+  // createGroup auto-provisions a Concern Reviewer responsibility (+ abilities) per group.
+  await prisma.responsibilityAbility.deleteMany({ where: { responsibility: { group: { nodeId: { startsWith: prefix } } } } });
+  await prisma.responsibility.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.groupMembership.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.group.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

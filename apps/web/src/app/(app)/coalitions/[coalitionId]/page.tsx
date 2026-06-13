@@ -366,9 +366,13 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
         return { groupId: targetId, groupName: membership.group.name };
       });
 
+    // Offer only groups the acting member can already legitimately see (public, or private
+    // groups they belong to). Private groups are never shown to non-members, so this is not a
+    // discovery directory; a shared member bridges private–private coalitions from within a
+    // group they belong to. (isPrivate = !(public || actor-is-member).)
     const joinApplicantOptions = canSponsorCurrentMember
       ? (await listNodeGroupLabelsForAccount(prisma, coalition.nodeId, accountId))
-          .filter((group) => !currentGroupIds.includes(group.id))
+          .filter((group) => !currentGroupIds.includes(group.id) && !group.isPrivate)
           .map((group) => ({ groupId: group.id, group: { name: group.label } }))
       : [];
 

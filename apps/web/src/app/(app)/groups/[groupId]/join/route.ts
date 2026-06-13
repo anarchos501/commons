@@ -47,14 +47,27 @@ export async function GET(
     if (group.membershipPolicy === "open") {
       // Open group: immediate join. Private groups still require a valid invite above.
       const result = await joinOpenGroup(prisma, session.accountId, groupId);
-      session.activeGroupId = result.groupId;
-      await session.save();
-      const openRequests = await prisma.supportRequest.findMany({
-        where: { status: "open", groupId },
-        select: { id: true },
-      });
-      for (const req of openRequests) {
-        await routeSupportRequest(prisma, { supportRequestId: req.id });
+
+      // Membership is now committed — everything below is best-effort. A failure in a
+      // post-join side effect (session persistence, support-request routing) must NOT
+      // surface an error page to a user who has already successfully joined; they should
+      // always land cleanly on the group page.
+      try {
+        session.activeGroupId = result.groupId;
+        await session.save();
+      } catch (error) {
+        console.error("join: failed to persist active group in session", error);
+      }
+      try {
+        const openRequests = await prisma.supportRequest.findMany({
+          where: { status: "open", groupId },
+          select: { id: true },
+        });
+        for (const req of openRequests) {
+          await routeSupportRequest(prisma, { supportRequestId: req.id });
+        }
+      } catch (error) {
+        console.error("join: failed to route open support requests after join", error);
       }
       return NextResponse.redirect(new URL(`/groups/${groupId}`, request.url));
     }

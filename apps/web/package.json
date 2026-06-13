@@ -13,7 +13,8 @@
     "db:studio": "prisma studio",
     "test": "node --import tsx --test --test-concurrency=1 src/test/*.test.ts",
     "cleanup:requests": "tsx scripts/cleanup-requests.ts",
-    "cleanup:discussions": "tsx scripts/cleanup-discussions.ts"
+    "cleanup:discussions": "tsx scripts/cleanup-discussions.ts",
+    "backfill:concern-reviewer": "tsx scripts/backfill-concern-reviewer.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

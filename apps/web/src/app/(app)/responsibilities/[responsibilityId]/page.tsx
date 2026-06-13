@@ -7,6 +7,7 @@ import { proposePublicationCreation, proposePubEntryCreation } from "../../../..
 import { proposeLivingDocumentCreation, draftLivingDocumentRevision, openRevisionPetition } from "../../../../lib/living-documents";
 import { createDiscussionThread, listDiscussionMessages, listDiscussionThreads, postDiscussionMessage } from "../../../../lib/discussions";
 import { getResponsibilityPurposeDocument, requireResponsibilityHolderMembership, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
+import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
@@ -45,7 +46,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
       <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
         <div id="overview" className="bg-[var(--surface)] p-5 sm:p-6">
           <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Responsibility</span>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] capitalize">{responsibility.type}</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] capitalize">{responsibilityTypeLabel(responsibility.type)}</h1>
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--muted)]">
             <a href={`/groups/${responsibility.groupId}`} className="text-[var(--accent)] hover:underline">
               ↑ {data.groupName}
