@@ -31,6 +31,12 @@ import { Notice, AlphaNotice } from "../../../components/shared/Notice";
 import { RequestHelpForm } from "../../../components/shared/RequestHelpForm";
 import type { GroupOption } from "../../../components/shared/RequestHelpForm";
 import { NotificationFilters } from "../../../components/shared/NotificationFilters";
+import { DashboardCalendar } from "../../../components/shared/DashboardCalendar";
+import { loadDashboardCalendarData } from "../../../lib/calendar-data";
+import { submitEvent, setInterest, cancelEvent, setCalendarFilterPreferences } from "../../../lib/events";
+import { parseEventSubmission, submitEventFailureMessage } from "../../../lib/event-form";
+import type { FormState } from "../../../components/shared/form-state";
+import type { EventInterestLevel } from "../../../generated/prisma/enums";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +61,74 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
     groupId: typeof params.notifGroup === "string" ? params.notifGroup : null,
   };
   const data = await getDashboardData(session.accountId, session.activeGroupId ?? null, notifFilters);
+  const calendar = await loadDashboardCalendarData(session.accountId);
+  const accountId = session.accountId;
+
+  async function submitDashboardEventAction(_prev: FormState, formData: FormData): Promise<FormState> {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const input = parseEventSubmission(formData, { accountId: s.accountId, hostType: "account", hostId: s.accountId });
+    const prisma = createPrismaClient();
+    try {
+      const result = await submitEvent(prisma, input);
+      if (!result.ok) return { kind: "error", message: submitEventFailureMessage(result.reason) };
+      revalidatePath("/dashboard");
+      return { kind: "success", message: "Personal event added." };
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  async function eventInterestAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const raw = formData.get("level");
+    const level: EventInterestLevel | null = raw === "planning_to_attend" || raw === "interested" ? raw : null;
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await setInterest(prisma, { accountId: s.accountId, eventId, level });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath("/dashboard");
+  }
+
+  async function eventCancelAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await cancelEvent(prisma, { accountId: s.accountId, eventId });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath("/dashboard");
+  }
+
+  async function setCalendarFilterAction(_prev: FormState, formData: FormData): Promise<FormState> {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const prisma = createPrismaClient();
+    try {
+      await setCalendarFilterPreferences(prisma, s.accountId, {
+        showGroupEvents: formData.get("showGroupEvents") === "on",
+        showProjectEvents: formData.get("showProjectEvents") === "on",
+        showResponsibilityEvents: formData.get("showResponsibilityEvents") === "on",
+        showCoalitionEvents: formData.get("showCoalitionEvents") === "on",
+        showPersonalEvents: formData.get("showPersonalEvents") === "on",
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath("/dashboard");
+    return { kind: "success", message: "Calendar filters updated." };
+  }
 
   return (
     <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-6 sm:px-6 lg:px-8">
@@ -74,6 +148,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             Support requests are shared only for coordination. Contribution summaries do not name who received support.
           </div>
         </div>
+
+        <DashboardCalendar
+          events={calendar.events}
+          myInterests={calendar.myInterests}
+          filters={calendar.filters}
+          currentAccountId={accountId}
+          submitAction={submitDashboardEventAction}
+          interestAction={eventInterestAction}
+          cancelAction={eventCancelAction}
+          filterAction={setCalendarFilterAction}
+        />
 
         <div className="flex flex-col gap-6">
 

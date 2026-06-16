@@ -22,6 +22,11 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
 import { requiredString } from "../../../../lib/support-form";
+import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
+import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
+import { submitEvent, setInterest, cancelEvent } from "../../../../lib/events";
+import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
+import type { EventInterestLevel } from "../../../../generated/prisma/enums";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +44,59 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
   if (!session.accountId) redirect("/login");
 
   const data = await getCoalitionSpaceData(session.accountId, coalitionId, selectedThreadId);
+
+  const calendar = await loadSpaceCalendarData(session.accountId, "coalition", coalitionId);
+
+  async function submitCoalitionEventAction(_prev: FormState, formData: FormData): Promise<FormState> {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const input = parseEventSubmission(formData, { accountId: s.accountId, hostType: "coalition", hostId: coalitionId });
+    const prisma = createPrismaClient();
+    try {
+      const result = await submitEvent(prisma, input);
+      if (!result.ok) return { kind: "error", message: submitEventFailureMessage(result.reason) };
+      revalidatePath(`/coalitions/${coalitionId}`);
+      return {
+        kind: "success",
+        message: result.kind === "created"
+          ? "Workshop scheduled."
+          : "Event proposed — each member collective decides through its own petition.",
+      };
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  async function eventInterestAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const raw = formData.get("level");
+    const level: EventInterestLevel | null = raw === "planning_to_attend" || raw === "interested" ? raw : null;
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await setInterest(prisma, { accountId: s.accountId, eventId, level });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/coalitions/${coalitionId}`);
+  }
+
+  async function eventCancelAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await cancelEvent(prisma, { accountId: s.accountId, eventId });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/coalitions/${coalitionId}`);
+  }
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -143,6 +201,20 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
               </form>
             )}
           </CollapsibleSection>
+
+          <SpaceCalendar
+            sectionId="calendar"
+            storageKey={`coalition:${coalitionId}:section:calendar`}
+            events={calendar.events}
+            myInterests={calendar.myInterests}
+            audiences={calendar.audiences}
+            canCreate={data.canWrite}
+            allowMeeting
+            currentAccountId={session.accountId}
+            submitAction={submitCoalitionEventAction}
+            interestAction={eventInterestAction}
+            cancelAction={eventCancelAction}
+          />
 
           <CollapsibleSection
             id="members"

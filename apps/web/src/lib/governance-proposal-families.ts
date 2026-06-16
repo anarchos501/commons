@@ -41,7 +41,9 @@ export type ProposalFamily =
   | "bulletin_creation"
   | "publication_creation"
   | "publication_entry_creation"
-  | "living_document_creation";
+  | "living_document_creation"
+  // RFC-008: Coordination Events & Shared Calendars
+  | "event_authorization";
 
 const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   membership_request: "membership",
@@ -80,6 +82,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   publication_creation: "publishing",
   publication_entry_creation: "publishing",
   living_document_creation: "publishing",
+  event_authorization: "coordination",
 };
 
 export function isProposalFamily(value: string): value is ProposalFamily {
@@ -121,6 +124,9 @@ export function deriveCompetitionKey(
     case "node_steward_resignation":
     // Non-competing: making a group public is idempotent; multiple concurrent proposals are allowed
     case "group_visibility_proposal":
+    // Non-competing: each event proposal is independent; coalition events open one petition
+    // per member group sharing the same subjectId (proposalId) and must not compete.
+    case "event_authorization":
       return null;
     case "node_steward_appointment":
       return `${groupId}:node_steward_appointment`;

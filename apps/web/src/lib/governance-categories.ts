@@ -14,7 +14,8 @@ export type GovernanceCategory =
   | "group_settings"
   | "publishing"
   | "participation"
-  | "node_stewardship";
+  | "node_stewardship"
+  | "coordination";
 
 export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "membership",
@@ -33,6 +34,7 @@ export const GOVERNANCE_CATEGORIES: readonly GovernanceCategory[] = [
   "publishing",
   "participation",
   "node_stewardship",
+  "coordination",
 ] as const;
 
 export function isGovernanceCategory(value: string): value is GovernanceCategory {
@@ -56,6 +58,7 @@ export const GOVERNANCE_CATEGORY_DESCRIPTIONS: Record<GovernanceCategory, string
   publishing: "Affects approval of new bulletins, publications, publication entries, and living documents.",
   participation: "Affects when inactive members become quiet or dormant and therefore stop counting toward active work.",
   node_stewardship: "Affects steward nomination, appointment, resignation, and no-confidence decisions. It does not govern node hosts.",
+  coordination: "Affects authorization of official meetings and cross-space workshops — events where a collective acts as a body and must consent before scheduling on its calendar.",
 };
 
 export function governanceCategoryDescription(category: GovernanceCategory): string {
@@ -153,6 +156,10 @@ export const CATEGORY_REGISTRY: CategoryRegistry = {
     threshold: { anchors: [0.95, 0.50, 0.05], min: 0.05, max: 1.0 },
     petitionDuration: { anchors: [7, 3, 1], min: 1, max: 30 },
     noConfidenceThreshold: { anchors: [0.95, 0.667, 0.50], min: 0.50, max: 1.0 },
+  },
+  coordination: {
+    threshold: { anchors: [0.95, 0.50, 0.05], min: 0.1, max: 1.0 },
+    petitionDuration: { anchors: [7, 3, 1], min: 1, max: 30 },
   },
 };
 

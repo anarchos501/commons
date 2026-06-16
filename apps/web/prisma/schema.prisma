@@ -295,6 +295,31 @@ enum ContentCreationType {
   living_document
 }
 
+// RFC-008: Coordination Events & Shared Calendars
+enum EventHostType {
+  group
+  project
+  responsibility
+  coalition
+  account // personal events
+}
+
+enum EventCategory {
+  meeting
+  workshop
+}
+
+enum EventVisibility {
+  host_only
+  audience
+  public
+}
+
+enum EventInterestLevel {
+  planning_to_attend
+  interested
+}
+
 model Node {
   id                        String           @id @default(cuid())
   name                      String
@@ -393,6 +418,9 @@ model Account {
   nodeStewardProposals     NodeStewardProposal[]
   createdNodePetitions     Petition[] @relation("PetitionAccountCreator")
   feedbackReports          FeedbackReport[]
+  calendarEventsCreated    CalendarEvent[] @relation("CalendarEventCreator")
+  eventInterests           EventInterest[] @relation("EventInterestAccount")
+  calendarFilterPreference CalendarFilterPreference? @relation("CalendarFilterPrefs")
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -1684,4 +1712,128 @@ model ContentCreationDraft {
 
   @@index([groupId])
   @@index([appliedAt])
+}
+
+// ── RFC-008: Coordination Events & Shared Calendars ───────────────────────────
+
+// Canonical event row. hostId / EventAudience.audienceId are polymorphic and not
+// FK-enforced (same convention as Bulletin.spaceId); validated in the service layer.
+model CalendarEvent {
+  id                    String          @id @default(cuid())
+  category              EventCategory
+  hostType              EventHostType
+  hostId                String          // group/project/responsibility/coalition id, or accountId (personal)
+  title                 String
+  description           String?
+  startTime             DateTime        // stored UTC
+  endTime               DateTime        // stored UTC
+  timezone              String          // IANA id for display
+  location              String?
+  visibility            EventVisibility @default(host_only)
+  createdByAccountId    String
+  authorizingPetitionId String?         // set for petitioned events; null for direct workshops/personal
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  canceledAt            DateTime?
+  canceledByAccountId   String?
+  cancelReason          String?
+
+  createdBy Account         @relation("CalendarEventCreator", fields: [createdByAccountId], references: [id])
+  audiences EventAudience[]
+  interests EventInterest[]
+
+  @@index([hostType, hostId])
+  @@index([startTime])
+  @@index([canceledAt])
+}
+
+// Additional target spaces (other than the host) the event is broadcast to.
+// Empty = internal event. A non-empty audience on a space-hosted event triggers
+// the authorization requirement (see eventRequiresAuthorization in events.ts).
+model EventAudience {
+  id           String        @id @default(cuid())
+  eventId      String
+  audienceType EventHostType  // group|project|responsibility|coalition (account is never an audience)
+  audienceId   String
+  createdAt    DateTime      @default(now())
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, audienceType, audienceId])
+  @@index([audienceType, audienceId])
+}
+
+// Lightweight planning signal. accountId is stored to enforce one-response-per-account
+// and allow self-withdraw, but is NEVER surfaced — only aggregate counts are read.
+model EventInterest {
+  id        String             @id @default(cuid())
+  eventId   String
+  accountId String
+  level     EventInterestLevel
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  event   CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  account Account       @relation("EventInterestAccount", fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, accountId])
+  @@index([eventId, level])
+}
+
+// Per-account dashboard calendar filter preferences.
+model CalendarFilterPreference {
+  id                       String   @id @default(cuid())
+  accountId                String   @unique
+  showGroupEvents          Boolean  @default(true)
+  showProjectEvents        Boolean  @default(true)
+  showResponsibilityEvents Boolean  @default(true)
+  showCoalitionEvents      Boolean  @default(true)
+  showPersonalEvents       Boolean  @default(true)
+  spaceFilters             Json?    // optional per-space allowlist; validated in service layer
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  account Account @relation("CalendarFilterPrefs", fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// An event awaiting collective authorization (Meeting, or cross-space Workshop).
+// Mirrors CoalitionProposal: one child petition per governing group (one for
+// group/project/responsibility hosts; one per active member group for coalitions).
+model EventProposal {
+  id                  String          @id @default(cuid())
+  category            EventCategory
+  hostType            EventHostType   // service rejects "account"
+  hostId              String
+  title               String
+  description         String?
+  startTime           DateTime
+  endTime             DateTime
+  timezone            String
+  location            String?
+  visibility          EventVisibility @default(host_only)
+  audienceJson        Json            // [{audienceType, audienceId}] applied to EventAudience on approval
+  proposedByAccountId String
+  status              String          @default("open") // open | succeeded | failed-rejected | failed-withdrawn | failed-timeout
+  participantSnapshot Json?           // coalition only: frozen active member-group ids at proposal time
+  createdAt           DateTime        @default(now())
+  resolvedAt          DateTime?
+  appliedAt           DateTime?       // idempotency guard
+  createdEventId      String?
+
+  petitions EventProposalPetition[]
+
+  @@index([hostType, hostId])
+  @@index([status])
+}
+
+model EventProposalPetition {
+  id         String   @id @default(cuid())
+  proposalId String
+  petitionId String   @unique
+  groupId    String   // governing group whose electorate voted this petition
+  createdAt  DateTime @default(now())
+
+  proposal EventProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
 }

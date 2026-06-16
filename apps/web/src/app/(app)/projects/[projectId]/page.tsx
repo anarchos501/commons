@@ -37,6 +37,11 @@ import { CollapsibleSection } from "../../../../components/shared/CollapsibleSec
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { type FormState } from "../../../../components/shared/form-state";
+import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
+import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
+import { submitEvent, setInterest, cancelEvent } from "../../../../lib/events";
+import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
+import type { EventInterestLevel } from "../../../../generated/prisma/enums";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 
@@ -61,6 +66,54 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
   const { project, currentMembership } = data;
   const isActive = currentMembership?.status === "active" && currentMembership.participationStatus === "active";
   const canWrite = isActive && project.status !== "closed" && project.pendingClosureAt === null;
+
+  const calendar = await loadSpaceCalendarData(session.accountId, "project", projectId);
+
+  async function submitProjectEventAction(_prev: FormState, formData: FormData): Promise<FormState> {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const input = parseEventSubmission(formData, { accountId: s.accountId, hostType: "project", hostId: projectId });
+    const prisma = createPrismaClient();
+    try {
+      const result = await submitEvent(prisma, input);
+      if (!result.ok) return { kind: "error", message: submitEventFailureMessage(result.reason) };
+      revalidatePath(`/projects/${projectId}`);
+      return { kind: "success", message: result.kind === "created" ? "Workshop scheduled." : "Event proposed — check Petitions." };
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  async function eventInterestAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const raw = formData.get("level");
+    const level: EventInterestLevel | null = raw === "planning_to_attend" || raw === "interested" ? raw : null;
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await setInterest(prisma, { accountId: s.accountId, eventId, level });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/projects/${projectId}`);
+  }
+
+  async function eventCancelAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await cancelEvent(prisma, { accountId: s.accountId, eventId });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/projects/${projectId}`);
+  }
   const canParticipateInGovernance = isActive && project.status !== "closed";
 
   return (
@@ -250,6 +303,20 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
         </CollapsibleSection>
         )}
 
+        {/* ── Calendar ────────────────────────────────────────────── */}
+        <SpaceCalendar
+          sectionId="calendar"
+          storageKey={`project:${projectId}:section:calendar`}
+          events={calendar.events}
+          myInterests={calendar.myInterests}
+          audiences={calendar.audiences}
+          canCreate={canWrite}
+          allowMeeting
+          currentAccountId={session.accountId}
+          submitAction={submitProjectEventAction}
+          interestAction={eventInterestAction}
+          cancelAction={eventCancelAction}
+        />
         {/* ── Library ─────────────────────────────────────────────── */}
         {isActive && (
         <CollapsibleSection id="library" title="Library" eyebrow="Project resources" storageKey={`project:${projectId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">

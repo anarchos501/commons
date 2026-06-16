@@ -27,6 +27,7 @@ import {
   onProjectHostingWithdrawalPetitionApproved,
 } from "./project-hosting";
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
+import { evaluateEventProposalForPetition } from "./events";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
 import { responsibilityTypeLabel } from "./concern-reviewer";
 
@@ -36,6 +37,8 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
   if (hostingProposalResult) return;
   const coalitionProposalResult = await evaluateCoalitionProposalForPetition(prisma, petitionId);
   if (coalitionProposalResult) return;
+  const eventProposalResult = await evaluateEventProposalForPetition(prisma, petitionId);
+  if (eventProposalResult) return;
   const nodeStewardResult = await evaluateNodeStewardProposalForPetition(prisma, petitionId);
   if (nodeStewardResult) return;
   if (result.outcome !== "approved") return;
@@ -223,6 +226,15 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     if (!draft) return subjectId;
     const typeLabel = draft.contentType.replace(/_/g, " ");
     return `Propose ${typeLabel}: ${draft.title ?? "(untitled)"}`;
+  }
+
+  if (subjectType === "event_authorization") {
+    const proposal = await prisma.eventProposal.findUnique({
+      where: { id: subjectId },
+      select: { category: true, title: true },
+    });
+    if (!proposal) return subjectId;
+    return `Authorize ${proposal.category}: ${proposal.title}`;
   }
 
   // Never surface a raw identity code: fall back to the human-readable family label.
@@ -430,6 +442,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "node_steward_no_confidence_initiation": return "Node steward no-confidence initiation";
     case "node_steward_no_confidence": return "Node steward no confidence";
     case "node_steward_resignation": return "Node steward resignation";
+    case "event_authorization": return "Event authorization";
     default: return subjectType.replace(/_/g, " ");
   }
 }
@@ -452,6 +465,7 @@ export function governanceCategoryLabel(category: string) {
     case "publishing": return "Publishing";
     case "participation": return "Participation";
     case "node_stewardship": return "Node Stewardship";
+    case "coordination": return "Coordination";
     default: return category.replace(/_/g, " ");
   }
 }

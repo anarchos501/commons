@@ -89,6 +89,11 @@ import { CreateThreadForm } from "../../../../components/shared/CreateThreadForm
 import { InviteLinkSection } from "../../../../components/shared/InviteLinkSection";
 import { ThreadList } from "../../../../components/shared/ThreadList";
 import { type FormState, type ThreadFormState, type InviteFormState } from "../../../../components/shared/form-state";
+import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
+import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
+import { submitEvent, setInterest, cancelEvent } from "../../../../lib/events";
+import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
+import type { EventInterestLevel } from "../../../../generated/prisma/enums";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +134,54 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
   const { group, currentMembership } = data;
   const isActive = currentMembership?.participationStatus === "active";
+
+  const calendar = await loadSpaceCalendarData(session.accountId, "group", groupId);
+
+  async function submitGroupEventAction(_prev: FormState, formData: FormData): Promise<FormState> {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const input = parseEventSubmission(formData, { accountId: s.accountId, hostType: "group", hostId: groupId });
+    const prisma = createPrismaClient();
+    try {
+      const result = await submitEvent(prisma, input);
+      if (!result.ok) return { kind: "error", message: submitEventFailureMessage(result.reason) };
+      revalidatePath(`/groups/${groupId}`);
+      return { kind: "success", message: result.kind === "created" ? "Workshop scheduled." : "Event proposed — check Petitions." };
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  async function eventInterestAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const raw = formData.get("level");
+    const level: EventInterestLevel | null = raw === "planning_to_attend" || raw === "interested" ? raw : null;
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await setInterest(prisma, { accountId: s.accountId, eventId, level });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/groups/${groupId}`);
+  }
+
+  async function eventCancelAction(formData: FormData) {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const eventId = typeof formData.get("eventId") === "string" ? (formData.get("eventId") as string) : "";
+    const prisma = createPrismaClient();
+    try {
+      await cancelEvent(prisma, { accountId: s.accountId, eventId });
+    } finally {
+      await prisma.$disconnect();
+    }
+    revalidatePath(`/groups/${groupId}`);
+  }
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -243,6 +296,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
             <CreateThreadForm action={createDiscussionThreadAction} groupId={groupId} />
           )}
         </CollapsibleSection>
+        {/* ══ Calendar ══════════════════════════════════════════════════ */}
+        <SpaceCalendar
+          sectionId="calendar"
+          storageKey={`group:${groupId}:section:calendar`}
+          events={calendar.events}
+          myInterests={calendar.myInterests}
+          audiences={calendar.audiences}
+          canCreate={isActive}
+          allowMeeting
+          currentAccountId={session.accountId}
+          submitAction={submitGroupEventAction}
+          interestAction={eventInterestAction}
+          cancelAction={eventCancelAction}
+        />
         {/* ══ Library ═══════════════════════════════════════════════════ */}
         <CollapsibleSection id="library" title="Library" eyebrow="Resources" storageKey={`group:${groupId}:section:library`} className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
           <div className="divide-y divide-[var(--border)] -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-3">
