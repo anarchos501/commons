@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted — implemented (event proposals & authorization, shared calendars, per-account event visibility).
 
 ## Purpose
 

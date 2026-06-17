@@ -212,7 +212,7 @@ test("createContributionCategoryFromPetition creates category on approved petiti
   }
 });
 
-test("first approved contribution category makes a private group public", async () => {
+test("approving the first contribution category does NOT change a private group's visibility (F2: decoupled consent)", async () => {
   const { group, memberships } = await createFixture("cc_publicize_first", 3);
   try {
     const propResult = await proposeContributionCategory(prisma, {
@@ -229,8 +229,9 @@ test("first approved contribution category makes a private group public", async 
     await prisma.petition.update({ where: { id: propResult.petitionId }, data: { status: "approved" } });
     await createContributionCategoryFromPetition(prisma, propResult.petitionId);
 
+    // Visibility is its own consented, reversible decision — category approval must not touch it.
     const updated = await prisma.group.findUniqueOrThrow({ where: { id: group.id } });
-    assert.equal(updated.visibility, "public");
+    assert.equal(updated.visibility, "private");
   } finally {
     await cleanupFixture("cc_publicize_first");
   }

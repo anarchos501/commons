@@ -39,7 +39,9 @@ test("internal workshop is created directly with NO petition", async () => {
     const event = await prisma.calendarEvent.findUniqueOrThrow({ where: { id: result.eventId } });
     assert.equal(event.category, "workshop");
     assert.equal(event.authorizingPetitionId, null);
-    assert.equal(await prisma.petition.count({ where: { subjectType: "event_authorization" } }), 0);
+    // Scope to this fixture's group: an unscoped global count picks up unrelated seed/other-test
+    // data and is not what this test means — it asserts THIS workshop opened no authorization petition.
+    assert.equal(await prisma.petition.count({ where: { subjectType: "event_authorization", groupId } }), 0);
     assert.equal(await prisma.eventProposal.count({ where: { hostId: groupId } }), 0);
   } finally {
     await cleanupEventFixture(prisma, prefix);

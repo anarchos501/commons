@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { proposeContentCreation, applyContentCreationDraft } from "../lib/content-creation-drafts";
+import { proposeContentCreation, applyContentCreationDraft, expireStaleContentDrafts } from "../lib/content-creation-drafts";
 // Helper: force approve then directly apply (matches pattern used in other test files)
 async function approveAndApply(
   prisma: ReturnType<typeof createPrismaClient>,
@@ -16,6 +16,71 @@ const prisma = createPrismaClient();
 
 test.after(async () => {
   await prisma.$disconnect();
+});
+
+// ── F6: draft expiry sweep ─────────────────────────────────────────────────────
+
+test("expireStaleContentDrafts deletes an unapplied, past-expiry draft once its petition has resolved", async () => {
+  await cleanupFixture("dc_sweep");
+  try {
+    const { groupId, membershipId } = await createFixture("dc_sweep");
+    const result = await proposeContentCreation(prisma, {
+      contentType: "bulletin",
+      spaceType: "group",
+      spaceId: groupId,
+      groupId,
+      title: "Stale draft",
+      body: "Body",
+      createdByMembershipId: membershipId,
+    });
+    assert.ok(result.ok);
+    if (!result.ok) return;
+
+    // Petition resolves (rejected) and the draft ages past its expiry.
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "rejected" } });
+    await prisma.contentCreationDraft.update({
+      where: { id: result.draftId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    await expireStaleContentDrafts(prisma, groupId);
+    assert.equal(await prisma.contentCreationDraft.findUnique({ where: { id: result.draftId } }), null);
+  } finally {
+    await cleanupFixture("dc_sweep");
+  }
+});
+
+test("expireStaleContentDrafts preserves drafts with an open petition or already applied", async () => {
+  await cleanupFixture("dc_sweep_keep");
+  try {
+    const { groupId, membershipId } = await createFixture("dc_sweep_keep");
+
+    // (a) Open petition, past expiry → must be preserved (proposal still in flight).
+    const open = await proposeContentCreation(prisma, {
+      contentType: "bulletin", spaceType: "group", spaceId: groupId, groupId,
+      title: "Open", body: "B", createdByMembershipId: membershipId,
+    });
+    assert.ok(open.ok);
+    if (!open.ok) return;
+    await prisma.contentCreationDraft.update({ where: { id: open.draftId }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    // (b) Applied draft, past expiry → must be preserved (it backs created content).
+    const applied = await proposeContentCreation(prisma, {
+      contentType: "bulletin", spaceType: "group", spaceId: groupId, groupId,
+      title: "Applied", body: "B", createdByMembershipId: membershipId,
+    });
+    assert.ok(applied.ok);
+    if (!applied.ok) return;
+    await approveAndApply(prisma, applied.petitionId, "bulletin_creation");
+    await prisma.contentCreationDraft.update({ where: { id: applied.draftId }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    await expireStaleContentDrafts(prisma, groupId);
+
+    assert.ok(await prisma.contentCreationDraft.findUnique({ where: { id: open.draftId } }));
+    assert.ok(await prisma.contentCreationDraft.findUnique({ where: { id: applied.draftId } }));
+  } finally {
+    await cleanupFixture("dc_sweep_keep");
+  }
 });
 
 // ── Bulletin creation ─────────────────────────────────────────────────────────

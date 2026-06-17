@@ -105,6 +105,7 @@ test("group visibility petition approval makes the group public", async () => {
     const result = await proposeGroupVisibility(prisma, {
       groupId: group.id,
       createdByMembershipId: membership.id,
+      target: "public",
     });
     assert.equal(result.ok, true);
     if (!result.ok) return;
@@ -112,7 +113,8 @@ test("group visibility petition approval makes the group public", async () => {
     const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
     assert.equal(petition.category, "group_settings");
     assert.equal(petition.subjectType, "group_visibility_proposal");
-    assert.equal(petition.subjectId, group.id);
+    // subjectId now encodes the target direction as `${groupId}:${target}`.
+    assert.equal(petition.subjectId, `${group.id}:public`);
 
     await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
     await applyGroupVisibilityFromPetition(prisma, result.petitionId);
@@ -121,6 +123,57 @@ test("group visibility petition approval makes the group public", async () => {
     assert.equal(updated.visibility, "public");
   } finally {
     await cleanupFixture("gs_visibility");
+  }
+});
+
+test("group visibility is reversible: a public group can be petitioned back to private (F2)", async () => {
+  await cleanupFixture("gs_reverse");
+  try {
+    const { group, membership } = await createGroupFixture("gs_reverse");
+    // Start the group public.
+    await prisma.group.update({ where: { id: group.id }, data: { visibility: "public" } });
+
+    const result = await proposeGroupVisibility(prisma, {
+      groupId: group.id,
+      createdByMembershipId: membership.id,
+      target: "private",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionId } });
+    assert.equal(petition.subjectId, `${group.id}:private`);
+
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
+    await applyGroupVisibilityFromPetition(prisma, result.petitionId);
+
+    const updated = await prisma.group.findUniqueOrThrow({ where: { id: group.id } });
+    assert.equal(updated.visibility, "private");
+  } finally {
+    await cleanupFixture("gs_reverse");
+  }
+});
+
+test("proposeGroupVisibility refuses a no-op (target equals current visibility)", async () => {
+  await cleanupFixture("gs_noop");
+  try {
+    const { group, membership } = await createGroupFixture("gs_noop"); // created private
+    const result = await proposeGroupVisibility(prisma, {
+      groupId: group.id,
+      createdByMembershipId: membership.id,
+      target: "private",
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, "already_set");
+
+    // No petition should have been opened.
+    const count = await prisma.petition.count({
+      where: { groupId: group.id, subjectType: "group_visibility_proposal" },
+    });
+    assert.equal(count, 0);
+  } finally {
+    await cleanupFixture("gs_noop");
   }
 });
 

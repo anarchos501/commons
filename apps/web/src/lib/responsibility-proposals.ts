@@ -8,22 +8,25 @@ const MAX_TYPE_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 500;
 
 /**
- * Curated allowlist of abilities a member may grant when proposing a new
- * responsibility. This is an alpha-stage restriction, not a permanent
- * architectural boundary: accountability/gatekeeping abilities
+ * Curated allowlist of abilities a member may grant when proposing a new responsibility.
+ *
+ * Every ability offered here now gates real behavior on the responsibility-acting path (F1),
+ * so the toggles are no longer decorative. accountability/gatekeeping abilities
  * (approve_membership, review_concerns, issue_findings, issue_action_proposals,
- * administrative_closure) are excluded for now out of caution, even though real
- * responsibilities the platform will eventually want — e.g. a "Membership Review"
- * or "Concern Review" role — legitimately need exactly these abilities. Expanding
- * this later should be a one-line addition to this single constant.
+ * administrative_closure) are still excluded — review_concerns et al. are auto-provisioned on
+ * the Concern Reviewer role (concern-reviewer.ts), and approve_membership has no consented
+ * delegation path yet (F1.4).
+ *
+ * issue_support_requests / issue_contribution_offers are also excluded: their underlying flows
+ * are egalitarian/guest-facing and not gated, so offering them here would imply a scope they do
+ * not enforce (the "illusory scoping" this work set out to remove). Re-add them only once an
+ * opt-in, recallable delegation path exists (F1.4).
  */
 export const PROPOSABLE_RESPONSIBILITY_ABILITIES: { ability: CoordinationAbility; label: string }[] = [
   { ability: CoordinationAbility.create_bulletins, label: "Create bulletins" },
   { ability: CoordinationAbility.create_publications, label: "Create publications" },
   { ability: CoordinationAbility.create_publication_entries, label: "Create publication entries" },
   { ability: CoordinationAbility.create_projects, label: "Create projects" },
-  { ability: CoordinationAbility.issue_support_requests, label: "Issue support requests" },
-  { ability: CoordinationAbility.issue_contribution_offers, label: "Issue contribution offers" },
   { ability: CoordinationAbility.create_contribution_categories, label: "Create contribution categories" },
 ];
 

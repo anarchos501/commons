@@ -117,7 +117,6 @@ Alpha data is stored in plaintext on the server. No end-to-end encryption exists
 | Plugin runtime | Deferred |
 | Challenge window mechanics | Deferred |
 | Mobile/PWA offline support | Deferred |
-| Responsibility type creation by petition | Not implemented |
 | Advanced proposal-family workflows | Partially surfaced |
 
 Governance UX is now surfaced in group, project, and responsibility contexts, but it remains alpha-grade and should be tested for clarity and correctness.

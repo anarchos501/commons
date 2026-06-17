@@ -10,6 +10,7 @@ import {
 import { evaluateEmergencyPetition, addPetitionSupport } from "../lib/petitions";
 import { grantAbility, hasAbilityNow } from "../lib/responsibility-abilities";
 import { createAssignment } from "../lib/responsibilities";
+import { proposeBulletinCreation } from "../lib/bulletins";
 
 const prisma = createPrismaClient();
 
@@ -209,6 +210,58 @@ test("available_during_emergency ability becomes inactive after emergency expire
   }
 });
 
+// ---- F1: emergency-only ability is observable end-to-end via the responsibility-acting path ----
+
+test("emergency-only create_bulletins is enforced on the acting-as path and unlocked only during an emergency (F1.2/F1.3)", async () => {
+  const { group, membership, memberships } = await createFixture("ge_acting", 5);
+  try {
+    await createAssignment(prisma, membership.id, "comms");
+    const responsibility = await prisma.responsibility.findFirstOrThrow({ where: { groupId: group.id, type: "comms" } });
+    await grantAbility(prisma, responsibility.id, "create_bulletins", "available_during_emergency");
+
+    const actingArgs = {
+      spaceType: "group" as const,
+      spaceId: group.id,
+      groupId: group.id,
+      createdByMembershipId: membership.id,
+      actingResponsibilityId: responsibility.id,
+      title: "Acting bulletin",
+      body: "Posted as the Comms responsibility.",
+    };
+
+    // No emergency: the emergency-only ability is not available now → acting-as path is refused.
+    const blocked = await proposeBulletinCreation(prisma, actingArgs);
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.reason, "ability_required");
+
+    // The egalitarian baseline is untouched: the SAME member proposing as themselves always succeeds.
+    const baseline = await proposeBulletinCreation(prisma, {
+      spaceType: "group",
+      spaceId: group.id,
+      groupId: group.id,
+      createdByMembershipId: membership.id,
+      title: "Member bulletin",
+      body: "Posted as a plain member.",
+    });
+    assert.equal(baseline.ok, true);
+
+    // Declare an emergency.
+    const result = await openEmergencyPetition(prisma, { groupId: group.id, createdByMembershipId: memberships[0].id });
+    if (!result.ok) return;
+    for (let i = 0; i < 4; i++) {
+      await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
+    }
+    await evaluateEmergencyPetition(prisma, result.petitionId);
+    await onEmergencyPetitionApproved(prisma, result.petitionId);
+
+    // Now the acting-as path is unlocked — emergency state observably changes behavior.
+    const allowed = await proposeBulletinCreation(prisma, actingArgs);
+    assert.equal(allowed.ok, true);
+  } finally {
+    await cleanupFixture("ge_acting");
+  }
+});
+
 // ---- fixtures ----
 
 async function createFixture(prefix: string, memberCount = 1) {
@@ -227,6 +280,7 @@ async function createFixture(prefix: string, memberCount = 1) {
 async function cleanupFixture(prefix: string) {
   await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: { startsWith: prefix } } } });
   await prisma.petition.deleteMany({ where: { groupId: { startsWith: prefix } } });
+  await prisma.contentCreationDraft.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.emergencyPeriod.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.responsibilityAbility.deleteMany({ where: { responsibility: { groupId: { startsWith: prefix } } } });
   await prisma.responsibilityAssignment.deleteMany({ where: { responsibility: { groupId: { startsWith: prefix } } } });

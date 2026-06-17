@@ -5,7 +5,7 @@ import {
   onLivingDocumentArchivalPetitionApproved,
 } from "./living-documents";
 import { onThreadClosurePetitionApproved } from "./discussions";
-import { confirmResponsibilityAssignment } from "./responsibilities";
+import { confirmResponsibilityAssignment, applyResponsibilityRecallFromPetition } from "./responsibilities";
 import {
   createContributionCategoryFromPetition,
   archiveContributionCategoryFromPetition,
@@ -107,6 +107,8 @@ async function applyApprovedPetition(
     await confirmResponsibilityAssignment(tx, petitionId);
   } else if (subjectType === "responsibility_creation_proposal") {
     await createResponsibilityFromProposal(tx, petitionId);
+  } else if (subjectType === "responsibility_recall") {
+    await applyResponsibilityRecallFromPetition(tx, petitionId);
   } else if (subjectType === "contribution_category_proposal") {
     await createContributionCategoryFromPetition(tx, petitionId);
   } else if (subjectType === "contribution_category_archive") {
@@ -216,6 +218,16 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return `Propose responsibility: ${draft.type} — ${description}`;
   }
 
+  if (subjectType === "responsibility_recall") {
+    // subjectId is the target ResponsibilityAssignment id.
+    const assignment = await prisma.responsibilityAssignment.findUnique({
+      where: { id: subjectId },
+      select: { membership: { select: { account: { select: { displayName: true } } } }, responsibility: { select: { type: true } } },
+    });
+    if (!assignment) return subjectId;
+    return `Recall ${assignment.membership.account.displayName} from ${responsibilityTypeLabel(assignment.responsibility.type)}`;
+  }
+
   if (subjectType === "discussion_thread_close") {
     const thread = await prisma.discussionThread.findUnique({
       where: { id: subjectId },
@@ -274,11 +286,15 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
   }
 
   if (subjectType === "group_visibility_proposal") {
+    // subjectId is `${groupId}:${target}` (legacy: bare groupId → public).
+    const [gid, rawTarget] = subjectId.split(":");
+    const target = rawTarget === "private" ? "private" : "public";
     const group = await prisma.group.findUnique({
-      where: { id: subjectId },
+      where: { id: gid },
       select: { name: true },
     });
-    return group ? `Make "${group.name}" publicly visible` : subjectId;
+    if (!group) return subjectId;
+    return target === "private" ? `Make "${group.name}" private` : `Make "${group.name}" publicly visible`;
   }
 
   if (
@@ -436,11 +452,32 @@ export async function getPetitionDetail(prisma: PrismaClient, petition: Petition
     return { summary, proposer, outcome: frameOutcome(status, `${who} holds the ${role} responsibility`), fields };
   }
 
+  if (subjectType === "responsibility_recall") {
+    const assignment = await prisma.responsibilityAssignment.findUnique({
+      where: { id: subjectId },
+      select: { membership: { select: { account: { select: { displayName: true } } } }, responsibility: { select: { type: true } } },
+    });
+    const who = assignment?.membership.account.displayName ?? "the holder";
+    const role = responsibilityTypeLabel(assignment?.responsibility.type ?? "");
+    fields.push({ label: "Member", value: who });
+    fields.push({ label: "Role", value: role });
+    const summary = assignment ? `Recall ${who} from ${role}` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `${who} is recalled from the ${role} responsibility`), fields };
+  }
+
   if (subjectType === "group_visibility_proposal") {
-    const group = await prisma.group.findUnique({ where: { id: subjectId }, select: { name: true } });
+    // subjectId is `${groupId}:${target}` (legacy: bare groupId → public).
+    const [gid, rawTarget] = subjectId.split(":");
+    const target = rawTarget === "private" ? "private" : "public";
+    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
     if (group) fields.push({ label: "Collective", value: group.name });
-    const summary = group ? `Make "${group.name}" publicly visible` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, "this collective becomes publicly visible on this node"), fields };
+    const label = target === "private" ? `Make "${group?.name}" private` : `Make "${group?.name}" publicly visible`;
+    const summary = group ? label : familyLabel;
+    const effect =
+      target === "private"
+        ? "this collective becomes private and is no longer discoverable on this node"
+        : "this collective becomes publicly visible on this node";
+    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
   }
 
   if (subjectType === "discussion_thread_close") {
@@ -488,6 +525,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "discussion_thread_close": return "Discussion thread closure";
     case "responsibility_proposal": return "Responsibility volunteer";
     case "responsibility_creation_proposal": return "Responsibility proposal";
+    case "responsibility_recall": return "Responsibility recall";
     case "contribution_category_proposal": return "Contribution category proposal";
     case "contribution_category_archive": return "Contribution category archival";
     case "trusted_provider_proposal": return "Trusted provider recognition";

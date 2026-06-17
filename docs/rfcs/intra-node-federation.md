@@ -2,7 +2,8 @@
 
 ## Status
 
-Draft
+Accepted — implemented (coalitions, node stewardship, project hosting). Partial: the
+one-way Project `completed` exit is specified but not yet wired (deferred; tracked in the roadmap).
 
 ## Purpose
 

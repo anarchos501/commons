@@ -96,28 +96,49 @@ export async function createGroup(
   return { ok: true, groupId: result };
 }
 
+export type ProposeGroupVisibilityResult =
+  | OpenPetitionResult
+  | { ok: false; reason: "already_set" };
+
+/**
+ * Opens a petition to change a group's visibility. Bidirectional: a group can
+ * petition to become public (discoverable) or back to private (reversibility).
+ * The target is carried in subjectId as `${groupId}:${target}` so the approval
+ * handler and the petition framing can both recover it without a schema change
+ * (same encoding pattern as responsibility_proposal's `${membershipId}:${type}`).
+ */
 export async function proposeGroupVisibility(
   prisma: PrismaClient,
-  { groupId, createdByMembershipId }: { groupId: string; createdByMembershipId: string },
-): Promise<OpenPetitionResult> {
+  {
+    groupId,
+    createdByMembershipId,
+    target = "public",
+  }: { groupId: string; createdByMembershipId: string; target?: GroupVisibilityValue },
+): Promise<ProposeGroupVisibilityResult> {
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { visibility: true } });
+  // No-op guard: don't open a petition to set the visibility a group already has.
+  if (group && group.visibility === target) return { ok: false, reason: "already_set" };
   return openPetition(prisma, {
     groupId,
     category: "group_settings",
     subjectType: "group_visibility_proposal",
-    subjectId: groupId,
+    subjectId: `${groupId}:${target}`,
     createdByMembershipId,
   });
 }
 
 // Called when a group_visibility_proposal petition is approved.
-// Idempotent: setting public→public is a no-op.
+// Idempotent: setting a visibility the group already has is a no-op.
 export async function applyGroupVisibilityFromPetition(
   prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "group_visibility_proposal");
+  // subjectId is `${groupId}:${target}`; fall back to "public" for any legacy
+  // petition whose subjectId was the bare groupId (the old one-way behavior).
+  const target = sanitizeVisibility(petition.subjectId.split(":")[1] ?? "public");
   await prisma.group.update({
     where: { id: petition.groupId },
-    data: { visibility: "public" },
+    data: { visibility: target },
   });
 }

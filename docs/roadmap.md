@@ -23,7 +23,7 @@ The current alpha has enough of that loop implemented to test on one local node:
 
 - Polish onboarding for public requesters, applicants, members, project participants, and responsibility holders.
 - Improve petition visibility, status explanations, and outcome history.
-- Add missing responsibility type governance, likely as a distinct `responsibility_type_proposal`.
+- Wire the one-way Project `completed` exit (RFC-007) — the status exists but has no writer yet.
 - Add production-grade account recovery, email or anti-abuse controls, and operator tooling.
 - Add user-facing data deletion/export workflows.
 - Continue simplifying the dashboard and sidebar as more workflows become available.

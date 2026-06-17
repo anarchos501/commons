@@ -9,8 +9,20 @@ import { isEmergencyActive } from "./emergency";
  * change an ability from always_available to available_during_emergency
  * (or vice versa) as a governance action.
  *
- * Abilities are coordination affordances, not permissions.
- * No platform behavior is gated on abilities in D2.
+ * Enforcement (F1): abilities now gate real behavior, and the gate is legitimate because the
+ * authority is consent-delegated — bound to an active responsibility seat, expiring with the
+ * term, and recallable by petition (see proposeResponsibilityRecall). Enforced today:
+ *   - accountability: review_concerns / issue_findings / issue_action_proposals /
+ *     administrative_closure gate the concern-review actions (concerns.ts).
+ *   - creation: create_bulletins / create_publications / create_publication_entries /
+ *     create_projects / create_contribution_categories gate the *responsibility-acting* path
+ *     (acting "as" a seat), never a member's egalitarian baseline.
+ *
+ * Still NON-gating affordances (deferred — F1.4): approve_membership, issue_support_requests,
+ * issue_contribution_offers. Their underlying flows are deliberately egalitarian/guest-facing
+ * (community membership vote; guest-and-member support requests), so gating them would convert
+ * open coordination into a permissioned system. Delegating these to a recallable seat is a future
+ * opt-in path — until it exists, granting these abilities records intent but changes no behavior.
  */
 export async function grantAbility(
   prisma: PrismaClient,
@@ -103,4 +115,62 @@ export async function hasAbilityNow(
   if (!responsibility) return false;
 
   return isEmergencyActive(prisma, responsibility.groupId);
+}
+
+// --- F1: Term-bound ability enforcement (authority lives only as long as the seat) ---
+//
+// hasAbilityNow alone is NOT a sufficient gate: it answers "does this responsibility carry
+// this ability now?" but not "does this member currently hold that seat?". Enforcing abilities
+// requires BOTH — and the seat check (active assignment, unexpired, recallable) is exactly what
+// makes the authority legitimate: it vanishes the moment the term ends or the holder is recalled.
+
+/**
+ * True when `membershipId` currently holds an ACTIVE, unexpired assignment to
+ * `responsibilityId` AND that responsibility has `ability` available now (emergency-gating
+ * respected). Use on the responsibility-acting path (a member acting "as" a specific seat).
+ */
+export async function hasActiveAbility(
+  prisma: PrismaClient,
+  membershipId: string,
+  responsibilityId: string,
+  ability: CoordinationAbility,
+): Promise<boolean> {
+  const assignment = await prisma.responsibilityAssignment.findFirst({
+    where: {
+      membershipId,
+      responsibilityId,
+      endedAt: null,
+      expiresAt: { gt: new Date() },
+      membership: { status: "active", participationStatus: "active" },
+    },
+    select: { id: true },
+  });
+  if (!assignment) return false;
+  return hasAbilityNow(prisma, responsibilityId, ability);
+}
+
+/**
+ * Like hasActiveAbility, but identifies the seat by responsibility `type` (e.g. "reviewer")
+ * rather than id. True if the member holds an active assignment of that type whose
+ * responsibility has `ability` available now. Used by accountability gates where the
+ * responsibility is found by its first-class type.
+ */
+export async function hasActiveAbilityByType(
+  prisma: PrismaClient,
+  membershipId: string,
+  type: string,
+  ability: CoordinationAbility,
+): Promise<boolean> {
+  const assignment = await prisma.responsibilityAssignment.findFirst({
+    where: {
+      membershipId,
+      endedAt: null,
+      expiresAt: { gt: new Date() },
+      responsibility: { type },
+      membership: { status: "active", participationStatus: "active" },
+    },
+    select: { responsibilityId: true },
+  });
+  if (!assignment) return false;
+  return hasAbilityNow(prisma, assignment.responsibilityId, ability);
 }

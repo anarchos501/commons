@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { isEligibleReviewer, getCoverageStatus, startReview, issueFindings, proposeAction, closeConcern } from "../lib/concerns";
+import { isEligibleReviewer, getCoverageStatus, startReview, issueFindings, proposeAction, closeConcern, autoCloseStaleWithdrawnConcerns } from "../lib/concerns";
+import { provisionConcernReviewer } from "../lib/concern-reviewer";
+import { revokeAbility } from "../lib/responsibility-abilities";
 
 const prisma = createPrismaClient();
 
@@ -80,6 +82,48 @@ test("filing an unrelated concern against a reviewer does not disable them globa
     await prisma.report.delete({ where: { id: unrelatedReport.id } });
   } finally {
     await cleanupFixture("cer_unrelated");
+  }
+});
+
+test("isEligibleReviewer returns false when the reviewer is the subject of the concern (F3)", async () => {
+  const { group, reviewerAccount, report } = await createFixture("cer_subject");
+  try {
+    // The reviewer is named as the subject of this concern.
+    await prisma.report.update({ where: { id: report.id }, data: { subjectAccountId: reviewerAccount.id } });
+    const eligible = await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id);
+    assert.equal(eligible, false);
+  } finally {
+    await cleanupFixture("cer_subject");
+  }
+});
+
+test("naming a different member as subject leaves the reviewer eligible (F3)", async () => {
+  const { account, group, reviewerAccount, report } = await createFixture("cer_subject_other");
+  try {
+    // The reporter (not the reviewer) is named as the subject — reviewer remains impartial.
+    await prisma.report.update({ where: { id: report.id }, data: { subjectAccountId: account.id } });
+    const eligible = await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id);
+    assert.equal(eligible, true);
+  } finally {
+    await cleanupFixture("cer_subject_other");
+  }
+});
+
+test("revoking review_concerns disables review even with an active reviewer seat (F1.1: ability is the source of truth)", async () => {
+  const { group, reviewerAccount, report, responsibility } = await createFixture("cer_revoke");
+  try {
+    // The active reviewer is eligible...
+    assert.equal(await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id), true);
+    // ...until the group revokes the ability from the reviewer responsibility — the seat persists,
+    // but the authority does not. (Behavior is now sourced from the granted ability, not the type.)
+    await revokeAbility(prisma, responsibility.id, "review_concerns");
+    assert.equal(await isEligibleReviewer(prisma, reviewerAccount.id, group.id, report.id), false);
+    await assert.rejects(
+      () => startReview(prisma, reviewerAccount.id, group.id, report.id),
+      /not eligible/i,
+    );
+  } finally {
+    await cleanupFixture("cer_revoke");
   }
 });
 
@@ -273,19 +317,78 @@ test("closeConcern blocks review_complete_no_action when actionable finding exis
   }
 });
 
-test("closeConcern allows reporter_withdrawal even when actionable finding exists", async () => {
+test("reporter_withdrawal marks a concern 'withdrawn' (not closed), even with an actionable finding (F4)", async () => {
   const { account, group, reviewerAccount, report } = await createFixture("cc_withdraw");
   try {
     await startReview(prisma, reviewerAccount.id, group.id, report.id);
     await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Issue verified.");
-    // Reporter (account) withdraws despite actionable finding
+    // Reporter (account) withdraws despite actionable finding.
     await closeConcern(prisma, account.id, group.id, report.id, "reporter_withdrawal");
 
     const updated = await prisma.report.findUniqueOrThrow({ where: { id: report.id } });
-    assert.equal(updated.status, "closed");
-    assert.equal(updated.closureReason, "reporter_withdrawal");
+    // Withdrawal must NOT extinguish the concern — it is marked withdrawn, not closed.
+    assert.equal(updated.status, "withdrawn");
+    assert.ok(updated.withdrawnAt);
+    assert.equal(updated.closedAt, null);
   } finally {
     await cleanupFixture("cc_withdraw");
+  }
+});
+
+test("review may continue after reporter withdrawal, and a reviewer can then close (F4)", async () => {
+  const { account, group, reviewerAccount, report } = await createFixture("cc_withdraw_continue");
+  try {
+    // Reporter withdraws before any review.
+    await closeConcern(prisma, account.id, group.id, report.id, "reporter_withdrawal");
+    let state = await prisma.report.findUniqueOrThrow({ where: { id: report.id } });
+    assert.equal(state.status, "withdrawn");
+
+    // An eligible reviewer determines a live concern remains and continues the review.
+    await startReview(prisma, reviewerAccount.id, group.id, report.id);
+    await issueFindings(prisma, reviewerAccount.id, report.id, "substantiated", "Safety issue persists.");
+    await proposeAction(prisma, reviewerAccount.id, group.id, report.id, "warning", "Document the pattern.");
+
+    // The reviewer can then close the concern through the normal path.
+    await closeConcern(prisma, reviewerAccount.id, group.id, report.id, "action_accepted_and_implemented");
+    state = await prisma.report.findUniqueOrThrow({ where: { id: report.id } });
+    assert.equal(state.status, "closed");
+    assert.equal(state.closureReason, "action_accepted_and_implemented");
+  } finally {
+    await cleanupFixture("cc_withdraw_continue");
+  }
+});
+
+test("autoCloseStaleWithdrawnConcerns closes a withdrawn concern left untouched past the cutoff (F4)", async () => {
+  const { account, group, report } = await createFixture("cc_withdraw_sweep");
+  try {
+    await closeConcern(prisma, account.id, group.id, report.id, "reporter_withdrawal");
+    // Backdate the withdrawal beyond the auto-close window.
+    await prisma.report.update({
+      where: { id: report.id },
+      data: { withdrawnAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) },
+    });
+
+    await autoCloseStaleWithdrawnConcerns(prisma, group.id);
+
+    const swept = await prisma.report.findUniqueOrThrow({ where: { id: report.id } });
+    assert.equal(swept.status, "closed");
+    assert.equal(swept.closureReason, "reporter_withdrawal");
+  } finally {
+    await cleanupFixture("cc_withdraw_sweep");
+  }
+});
+
+test("autoCloseStaleWithdrawnConcerns leaves a recently-withdrawn concern open for review (F4)", async () => {
+  const { account, group, report } = await createFixture("cc_withdraw_recent");
+  try {
+    await closeConcern(prisma, account.id, group.id, report.id, "reporter_withdrawal");
+    // withdrawnAt is "now" — inside the window.
+    await autoCloseStaleWithdrawnConcerns(prisma, group.id);
+
+    const state = await prisma.report.findUniqueOrThrow({ where: { id: report.id } });
+    assert.equal(state.status, "withdrawn");
+  } finally {
+    await cleanupFixture("cc_withdraw_recent");
   }
 });
 
@@ -390,8 +493,11 @@ async function createFixture(prefix: string) {
     }),
   ]);
 
-  const responsibility = await prisma.responsibility.create({
-    data: { groupId: group.id, type: "reviewer" },
+  // Provision the Concern Reviewer responsibility WITH its abilities, exactly as createGroup does —
+  // concern actions are now gated on those abilities (F1.1), so the seat alone is not enough.
+  await provisionConcernReviewer(prisma, group.id);
+  const responsibility = await prisma.responsibility.findUniqueOrThrow({
+    where: { groupId_type: { groupId: group.id, type: "reviewer" } },
   });
   const assignment = await prisma.responsibilityAssignment.create({
     data: {
@@ -419,6 +525,7 @@ async function cleanupFixture(prefix: string) {
   await prisma.responsibilityAssignment.deleteMany({
     where: { membership: { groupId: { startsWith: prefix } } },
   });
+  await prisma.responsibilityAbility.deleteMany({ where: { responsibility: { groupId: { startsWith: prefix } } } });
   await prisma.responsibility.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.groupMembership.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });

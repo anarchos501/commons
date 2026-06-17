@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted — implemented (governance temperature signals, derived governance parameters, emergency periods).
 
 ## Purpose
 

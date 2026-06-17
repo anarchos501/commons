@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
-import type { ContentCreationType, CoordinationSpaceType } from "../generated/prisma/enums";
+import type { ContentCreationType, CoordinationSpaceType, CoordinationAbility } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
 import { requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
@@ -7,6 +7,9 @@ import { logAction } from "./action-log";
 import type { ProposalFamily } from "./governance-proposal-families";
 import { assertProjectWritable } from "./project-membership";
 import { assertWithinTransaction } from "./prisma";
+import { hasActiveAbility } from "./responsibility-abilities";
+
+const DRAFT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
 
 function contentTypeToFamily(contentType: ContentCreationType): ProposalFamily {
   switch (contentType) {
@@ -14,6 +17,17 @@ function contentTypeToFamily(contentType: ContentCreationType): ProposalFamily {
     case "publication":        return "publication_creation";
     case "publication_entry":  return "publication_entry_creation";
     case "living_document":    return "living_document_creation";
+  }
+}
+
+// The coordination ability that governs each content type on the responsibility-acting path.
+// living_document has no corresponding ability, so it cannot be proposed "as a responsibility".
+function contentTypeToAbility(contentType: ContentCreationType): CoordinationAbility | null {
+  switch (contentType) {
+    case "bulletin":           return "create_bulletins";
+    case "publication":        return "create_publications";
+    case "publication_entry":  return "create_publication_entries";
+    case "living_document":    return null;
   }
 }
 
@@ -27,6 +41,10 @@ export async function proposeContentCreation(
     groupId: string;
     createdByMembershipId?: string;
     createdByProjectMembershipId?: string;
+    // Optional responsibility-acting path: when set, the proposer is acting AS this responsibility
+    // and must hold an active seat carrying the matching create_* ability now (emergency-gating
+    // respected). Absent → the egalitarian baseline: any active member may propose.
+    actingResponsibilityId?: string;
     title?: string;
     body?: string;
   },
@@ -60,6 +78,16 @@ export async function proposeContentCreation(
       return { ok: false, reason: "not_eligible" };
     }
     authorAccountId = membership.accountId;
+
+    // Responsibility-acting path (F1): only gated when the proposer explicitly acts as a seat.
+    // This never restricts the baseline member path — it makes a responsibility's granted
+    // create_* ability real, term-bound, and emergency-aware.
+    if (opts.actingResponsibilityId) {
+      const ability = contentTypeToAbility(opts.contentType);
+      if (!ability) return { ok: false, reason: "ability_not_applicable" };
+      const allowed = await hasActiveAbility(prisma, opts.createdByMembershipId!, opts.actingResponsibilityId, ability);
+      if (!allowed) return { ok: false, reason: "ability_required" };
+    }
   } else {
     const membership = await prisma.projectMembership.findUnique({
       where: { id: opts.createdByProjectMembershipId! },
@@ -93,7 +121,7 @@ export async function proposeContentCreation(
     }
   }
 
-  // Create the draft
+  // Create the draft (with a data-minimization expiry; swept once unapplied + petition resolved)
   const draft = await prisma.contentCreationDraft.create({
     data: {
       contentType: opts.contentType,
@@ -106,6 +134,7 @@ export async function proposeContentCreation(
       createdByProjectMembershipId: opts.createdByProjectMembershipId ?? null,
       title: opts.title ?? null,
       body: opts.body ?? null,
+      expiresAt: new Date(Date.now() + DRAFT_EXPIRY_MS),
     },
   });
 
@@ -297,4 +326,32 @@ export async function applyContentCreationDraft(
     targetId: createdContentId!,
     metadata: { draftId: appliedDraft.id, petitionId },
   });
+}
+
+/**
+ * Lazily deletes unapplied content-creation drafts whose petition has resolved and whose expiry
+ * has passed — data-minimization hygiene mirroring archiveStalePetitions. NEVER deletes an applied
+ * draft (it backs created content) or one whose petition is still open (the proposal is in flight).
+ */
+export async function expireStaleContentDrafts(
+  prisma: PrismaClient,
+  groupId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  const candidates = await prisma.contentCreationDraft.findMany({
+    where: { groupId, appliedAt: null, expiresAt: { lte: now } },
+    select: { id: true },
+  });
+  if (candidates.length === 0) return;
+
+  const ids = candidates.map((c) => c.id);
+  const openPetitions = await prisma.petition.findMany({
+    where: { subjectId: { in: ids }, status: "open" },
+    select: { subjectId: true },
+  });
+  const stillOpen = new Set(openPetitions.map((p) => p.subjectId));
+  const deletable = ids.filter((id) => !stillOpen.has(id));
+  if (deletable.length === 0) return;
+
+  await prisma.contentCreationDraft.deleteMany({ where: { id: { in: deletable } } });
 }

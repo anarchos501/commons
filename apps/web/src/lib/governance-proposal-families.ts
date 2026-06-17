@@ -18,6 +18,7 @@ export type ProposalFamily =
   | "node_steward_resignation"
   | "responsibility_proposal"
   | "responsibility_creation_proposal"
+  | "responsibility_recall"
   | "accountability_action"
   | "living_document_revision"
   // Fix 2: archive_proposal split into target-typed families so the approved handler
@@ -63,6 +64,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   node_steward_resignation: "node_stewardship",
   responsibility_proposal: "responsibility",
   responsibility_creation_proposal: "responsibility",
+  responsibility_recall: "responsibility",
   accountability_action: "accountability",
   living_document_revision: "living_document",
   bulletin_archive: "archival",

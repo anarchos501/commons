@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { AssignmentEndReason } from "../generated/prisma/enums";
-import { openPetition, requireApprovedPetition } from "./petitions";
+import { openPetition, requireApprovedPetition, type OpenPetitionResult } from "./petitions";
 import { resolveGovernanceParams } from "./governance-resolver";
 
 // An assignment is active when endedAt is null AND expiresAt is in the future.
@@ -394,5 +394,57 @@ export async function confirmResponsibilityAssignment(
 
   await prisma.responsibilityAssignment.create({
     data: { responsibilityId: responsibility.id, membershipId, expiresAt },
+  });
+}
+
+// --- RFC-004: Recall (the constitutional exit) ---
+
+export type ProposeRecallResult = OpenPetitionResult | { ok: false; reason: "no_active_assignment" };
+
+/**
+ * Opens a community petition to recall a responsibility holder before their term expires.
+ * This is the constitutional exit that makes delegated authority legitimate: a seat granted
+ * by consent (volunteer → confirmation) can be withdrawn by consent. Any active member may
+ * initiate it. subjectId is the target assignment id, so approval ends exactly that seat —
+ * and with it, every ability the seat conferred (enforcement checks require an active seat).
+ */
+export async function proposeResponsibilityRecall(
+  prisma: PrismaClient,
+  { assignmentId, createdByMembershipId }: { assignmentId: string; createdByMembershipId: string },
+): Promise<ProposeRecallResult> {
+  const assignment = await prisma.responsibilityAssignment.findUnique({
+    where: { id: assignmentId },
+    select: { endedAt: true, expiresAt: true, responsibility: { select: { groupId: true } } },
+  });
+  // Nothing to recall if the seat has already ended or expired.
+  if (!assignment || assignment.endedAt || assignment.expiresAt <= new Date()) {
+    return { ok: false, reason: "no_active_assignment" };
+  }
+  return openPetition(prisma, {
+    groupId: assignment.responsibility.groupId,
+    category: "responsibility",
+    subjectType: "responsibility_recall",
+    subjectId: assignmentId,
+    createdByMembershipId,
+  });
+}
+
+/**
+ * Ends the targeted assignment with reason "recall" after a recall petition is approved.
+ * Idempotent: a no-op if the seat already ended (expired/resigned) before the vote resolved.
+ */
+export async function applyResponsibilityRecallFromPetition(
+  prisma: Prisma.TransactionClient,
+  petitionId: string,
+): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "responsibility_recall");
+  const assignment = await prisma.responsibilityAssignment.findUnique({
+    where: { id: petition.subjectId },
+    select: { id: true, endedAt: true },
+  });
+  if (!assignment || assignment.endedAt) return; // already vacated
+  await prisma.responsibilityAssignment.update({
+    where: { id: assignment.id },
+    data: { endedAt: new Date(), endReason: "recall" },
   });
 }

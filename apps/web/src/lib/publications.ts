@@ -225,6 +225,7 @@ export async function proposePublicationCreation(
     groupId: string;
     createdByMembershipId?: string;
     createdByProjectMembershipId?: string;
+    actingResponsibilityId?: string;
     title: string;
   },
 ) {
@@ -240,6 +241,7 @@ export async function proposePubEntryCreation(
     groupId: string;
     createdByMembershipId?: string;
     createdByProjectMembershipId?: string;
+    actingResponsibilityId?: string;
     title?: string;
     body: string;
   },

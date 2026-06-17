@@ -13,6 +13,8 @@ import {
   hasUnendedAssignment,
   requireResponsibilityHolderMembership,
   resignAssignment,
+  proposeResponsibilityRecall,
+  applyResponsibilityRecallFromPetition,
 } from "../lib/responsibilities";
 import { applyParticipationTransitions, recordGroupPresence } from "../lib/participation";
 
@@ -207,6 +209,73 @@ test("resignAssignment ends assignment with reason resigned", async () => {
     assert.equal(assignment?.endReason, "resigned");
   } finally {
     await cleanupFixture("res_resign");
+  }
+});
+
+// --- Recall (the constitutional exit) ---
+
+test("proposeResponsibilityRecall + approval ends the seat with reason recall (F1.0)", async () => {
+  const { membershipA, membershipB } = await createFixture("rec_recall");
+  try {
+    await createAssignment(prisma, membershipA.id, "reviewer");
+    const seat = await prisma.responsibilityAssignment.findFirstOrThrow({ where: { membershipId: membershipA.id } });
+
+    // Another member petitions to recall the holder before the term expires.
+    const result = await proposeResponsibilityRecall(prisma, { assignmentId: seat.id, createdByMembershipId: membershipB.id });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
+    await applyResponsibilityRecallFromPetition(prisma, result.petitionId);
+
+    const ended = await prisma.responsibilityAssignment.findUniqueOrThrow({ where: { id: seat.id } });
+    assert.ok(ended.endedAt);
+    assert.equal(ended.endReason, "recall");
+    // The seat — and with it every ability it conferred — is gone.
+    assert.equal(await hasActiveEligibleAssignment(prisma, membershipA.id, "reviewer"), false);
+  } finally {
+    await cleanupFixture("rec_recall");
+  }
+});
+
+test("proposeResponsibilityRecall refuses when there is no active seat to recall (F1.0)", async () => {
+  const { membershipA, membershipB } = await createFixture("rec_noseat");
+  try {
+    await createAssignment(prisma, membershipA.id, "reviewer");
+    const seat = await prisma.responsibilityAssignment.findFirstOrThrow({ where: { membershipId: membershipA.id } });
+    await resignAssignment(prisma, membershipA.id, "reviewer"); // seat already ended
+
+    const result = await proposeResponsibilityRecall(prisma, { assignmentId: seat.id, createdByMembershipId: membershipB.id });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, "no_active_assignment");
+  } finally {
+    await cleanupFixture("rec_noseat");
+  }
+});
+
+test("applyResponsibilityRecallFromPetition is a no-op if the seat already ended (F1.0)", async () => {
+  const { membershipA, membershipB } = await createFixture("rec_idem");
+  try {
+    await createAssignment(prisma, membershipA.id, "reviewer");
+    const seat = await prisma.responsibilityAssignment.findFirstOrThrow({ where: { membershipId: membershipA.id } });
+    const result = await proposeResponsibilityRecall(prisma, { assignmentId: seat.id, createdByMembershipId: membershipB.id });
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
+
+    // The holder resigns before the recall is applied.
+    await resignAssignment(prisma, membershipA.id, "reviewer");
+    const beforeReason = (await prisma.responsibilityAssignment.findUniqueOrThrow({ where: { id: seat.id } })).endReason;
+
+    await applyResponsibilityRecallFromPetition(prisma, result.petitionId);
+
+    // The end reason is preserved as "resigned" — recall does not overwrite an already-ended seat.
+    const after = await prisma.responsibilityAssignment.findUniqueOrThrow({ where: { id: seat.id } });
+    assert.equal(after.endReason, beforeReason);
+    assert.equal(after.endReason, "resigned");
+  } finally {
+    await cleanupFixture("rec_idem");
   }
 });
 
@@ -437,6 +506,8 @@ async function createFixture(prefix: string) {
 async function cleanupFixture(prefix: string) {
   await prisma.actionLog.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await prisma.actionLog.deleteMany({ where: { actorAccountId: { startsWith: prefix } } });
+  await prisma.petitionSupport.deleteMany({ where: { petition: { group: { nodeId: { startsWith: prefix } } } } });
+  await prisma.petition.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.livingDocumentRevision.deleteMany({
     where: { livingDocument: { spaceId: { startsWith: prefix } } },
   });

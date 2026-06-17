@@ -288,13 +288,16 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ))}
                   </div>
                 ) : <EmptyState text="No bulletins yet." />}
-                {isHolder && (
+                {isHolder && data.capabilities.canCreateBulletins && (
                   <form action={createBulletinAction} className="space-y-3">
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
                     <label className="block"><span className="field-label">Body</span><textarea name="body" required rows={3} className="field-input resize-none" /></label>
                     <SubmitButton variant="secondary">Propose bulletin</SubmitButton>
                   </form>
+                )}
+                {isHolder && !data.capabilities.canCreateBulletins && (
+                  <p className="text-xs text-[var(--muted)]">This responsibility was not granted the “create bulletins” ability.</p>
                 )}
               </div>
             </details>
@@ -318,7 +321,7 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                           <span className="shrink-0 text-xs text-[var(--muted)]">{p._count.entries} {p._count.entries === 1 ? "entry" : "entries"}</span>
                         </div>
                         <p className="text-xs text-[var(--muted)]">{p.creator.displayName}</p>
-                        {isHolder && (
+                        {isHolder && data.capabilities.canCreatePublicationEntries && (
                           <details className="mt-1">
                             <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose an entry</summary>
                             <form action={proposePubEntryAction} className="mt-2 space-y-2">
@@ -334,12 +337,15 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     ))}
                   </div>
                 ) : <EmptyState text="No publications yet." />}
-                {isHolder && (
+                {isHolder && data.capabilities.canCreatePublications && (
                   <form action={createPublicationAction} className="space-y-3">
                     <input type="hidden" name="responsibilityId" value={responsibilityId} />
                     <label className="block"><span className="field-label">Title</span><input name="title" type="text" required className="field-input" /></label>
                     <SubmitButton variant="secondary">Propose publication</SubmitButton>
                   </form>
+                )}
+                {isHolder && !data.capabilities.canCreatePublications && (
+                  <p className="text-xs text-[var(--muted)]">This responsibility was not granted the “create publications” ability.</p>
                 )}
               </div>
             </details>
@@ -401,7 +407,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
   try {
     const responsibility = await prisma.responsibility.findUnique({
       where: { id: responsibilityId },
-      select: { id: true, type: true, groupId: true, termDays: true, descriptionDocumentId: true, group: { select: { name: true } } },
+      select: { id: true, type: true, groupId: true, termDays: true, descriptionDocumentId: true, group: { select: { name: true } }, abilities: { select: { ability: true } } },
     });
     if (!responsibility) redirect("/dashboard");
 
@@ -492,12 +498,23 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
           })
         : [];
 
+    // Publishing in a responsibility's own space is the responsibility acting (F1): the compose
+    // forms appear only when the role carries the matching create_* ability (granted at proposal
+    // time). Emergency-only abilities still gate on an active emergency at submit.
+    const grantedAbilities = new Set(responsibility.abilities.map((a) => a.ability));
+    const capabilities = {
+      canCreateBulletins: grantedAbilities.has("create_bulletins"),
+      canCreatePublications: grantedAbilities.has("create_publications"),
+      canCreatePublicationEntries: grantedAbilities.has("create_publication_entries"),
+    };
+
     return {
       responsibility: { ...responsibility, termDays: responsibility.termDays },
       groupName: responsibility.group.name,
       currentMembership,
       holders,
       isHolder,
+      capabilities,
       purposeDocument,
       bulletins,
       publications,
@@ -595,7 +612,9 @@ async function createBulletinAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
-    await proposeBulletinCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id });
+    // Content posted in a responsibility's own space is the responsibility acting (F1): gated on
+    // its create_bulletins ability, so the granted ability is real, term-bound, and emergency-aware.
+    await proposeBulletinCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, body, createdByMembershipId: membership.id, actingResponsibilityId: responsibilityId });
   } finally {
     await prisma.$disconnect();
   }
@@ -611,7 +630,7 @@ async function createPublicationAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
-    await proposePublicationCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, createdByMembershipId: membership.id });
+    await proposePublicationCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, groupId: responsibility.groupId, title, createdByMembershipId: membership.id, actingResponsibilityId: responsibilityId });
   } finally {
     await prisma.$disconnect();
   }
@@ -629,7 +648,7 @@ async function proposePubEntryAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     const { membership, responsibility } = await requireResponsibilityHolderMembership(prisma, session.accountId, responsibilityId);
-    await proposePubEntryCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, publicationId, groupId: responsibility.groupId, body, title: title || undefined, createdByMembershipId: membership.id });
+    await proposePubEntryCreation(prisma, { spaceType: "responsibility", spaceId: responsibilityId, publicationId, groupId: responsibility.groupId, body, title: title || undefined, createdByMembershipId: membership.id, actingResponsibilityId: responsibilityId });
   } finally {
     await prisma.$disconnect();
   }

@@ -259,6 +259,9 @@ enum ReportStatus {
   under_review
   findings_issued
   action_proposed
+  // Reporter has withdrawn but the concern is NOT closed: eligible reviewers may
+  // continue if a live safety/accountability issue remains (RFC-002). Not terminal.
+  withdrawn
   closed
   // Legacy values preserved for backward compatibility
   resolved
@@ -402,7 +405,8 @@ model Account {
   availability        ContributorAvailability[]
   groupMemberships    GroupMembership[]
   projectMemberships  ProjectMembership[]
-  reportsSubmitted        Report[]
+  reportsSubmitted        Report[] @relation("ConcernReporter")
+  concernsAbout           Report[] @relation("ConcernSubject")
   concernReviews          ConcernReview[]
   concernFindings         ConcernFinding[]
   concernProposals        ConcernActionProposal[]
@@ -1061,17 +1065,24 @@ model Report {
   guestAccessTokenId  String?
   groupId             String
   subject             String
+  // Optional structured identity of the member the concern is about. Free-text
+  // `subject` remains the narrative; `subjectAccountId` is set only when a specific
+  // member is named (null for concerns about non-persons or guest subjects). Used to
+  // exclude the subject from reviewing their own concern (RFC-002, no direct involvement).
+  subjectAccountId    String?
   context             String?
   description         String
   status              ReportStatus          @default(open)
   visibility          String                @default("private")
   closureReason       ConcernClosureReason?
   closedAt            DateTime?
+  withdrawnAt         DateTime?
   resolvedAt          DateTime?
   resolvedNote        String?
   createdAt           DateTime              @default(now())
 
-  reportedBy       Account?               @relation(fields: [reportedByAccountId], references: [id])
+  reportedBy       Account?               @relation("ConcernReporter", fields: [reportedByAccountId], references: [id])
+  subjectAccount   Account?               @relation("ConcernSubject", fields: [subjectAccountId], references: [id])
   guestAccessToken GuestAccessToken?      @relation(fields: [guestAccessTokenId], references: [id])
   group            Group                  @relation(fields: [groupId], references: [id])
   reviews          ConcernReview[]
@@ -1079,6 +1090,7 @@ model Report {
   actionProposals  ConcernActionProposal[]
 
   @@index([reportedByAccountId])
+  @@index([subjectAccountId])
   @@index([guestAccessTokenId])
   @@index([groupId])
   @@index([status])
@@ -1707,6 +1719,10 @@ model ContentCreationDraft {
   title                        String?
   body                         String?
   createdAt                    DateTime              @default(now())
+  // Data-minimization: unapplied drafts whose petition has resolved are swept after this time
+  // (expireStaleContentDrafts), mirroring the expire+sweep pattern used for petitions, invites,
+  // discussions, and assignments. Nullable for rows created before this field existed.
+  expiresAt                    DateTime?
   appliedAt                    DateTime?
   createdContentId             String?
 
@@ -1714,6 +1730,7 @@ model ContentCreationDraft {
 
   @@index([groupId])
   @@index([appliedAt])
+  @@index([expiresAt])
 }
 
 // ── RFC-008: Coordination Events & Shared Calendars ───────────────────────────

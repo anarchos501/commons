@@ -4,10 +4,11 @@ import { headers } from "next/headers";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
-import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility } from "../../../../lib/responsibilities";
+import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
-import { getCoverageStatus } from "../../../../lib/concerns";
+import { getCoverageStatus, autoCloseStaleWithdrawnConcerns } from "../../../../lib/concerns";
 import { proposeBulletinCreation, openBulletinArchivalPetition } from "../../../../lib/bulletins";
+import { expireStaleContentDrafts } from "../../../../lib/content-creation-drafts";
 import { proposePublicationCreation, proposePubEntryCreation, openPublicationArchivalPetition } from "../../../../lib/publications";
 import {
   proposeLivingDocumentCreation,
@@ -514,9 +515,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                         {responsibilityTypeLabel(r.type)}
                       </a>
                       {r.assignments.length > 0 && (
-                        <p className="mt-0.5 text-xs text-[var(--muted)]">
-                          {r.assignments.map((a) => a.membership.account.displayName).join(", ")}
-                        </p>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {r.assignments.map((a) => (
+                            <li key={a.id} className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                              <span className="truncate">{a.membership.account.displayName}</span>
+                              {isActive && a.membershipId !== currentMembership?.id && (
+                                <form action={recallResponsibilityAction}>
+                                  <input type="hidden" name="groupId" value={groupId} />
+                                  <input type="hidden" name="assignmentId" value={a.id} />
+                                  <button type="submit" className="shrink-0 text-amber-700 hover:text-amber-600 transition">Petition recall</button>
+                                </form>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </div>
                     <span className={`shrink-0 px-2 py-0.5 text-xs font-medium ${hasHolders ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
@@ -934,6 +946,20 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <span className="field-label">What is the concern about?</span>
               <input name="subject" type="text" required className="field-input" placeholder="A brief subject" />
             </label>
+            {data.groupMembers.length > 0 && (
+              <label className="block">
+                <span className="field-label">Is this concern about a specific member? (optional)</span>
+                <select name="subjectMembershipId" className="field-input">
+                  <option value="">Not about a specific member</option>
+                  {data.groupMembers.map((m) => (
+                    <option key={m.id} value={m.id}>{m.account.displayName}</option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-[var(--muted)]">
+                  If named, that member is excluded from reviewing this concern.
+                </span>
+              </label>
+            )}
             <label className="block">
               <span className="field-label">What happened?</span>
               <textarea name="description" required rows={4} className="field-input resize-none" placeholder="Describe what happened or what is concerning." />
@@ -1088,7 +1114,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <CollapsibleSection id="governance" title="Governance Settings" eyebrow="Decision friction" storageKey={`group:${groupId}:section:governance`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
 
-            {/* Collective visibility */}
+            {/* Collective visibility — bidirectional & reversible */}
             {data.group.visibility === "private" ? (
               <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
                 <p className="text-sm font-medium text-[var(--text)]">Visibility</p>
@@ -1099,12 +1125,26 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 {isActive && (
                   <form action={proposeGroupVisibilityAction} className="mt-3">
                     <input type="hidden" name="groupId" value={groupId} />
+                    <input type="hidden" name="target" value="public" />
                     <SubmitButton variant="secondary">Propose Public Visibility</SubmitButton>
                   </form>
                 )}
               </div>
             ) : (
-              <p className="text-xs text-[var(--muted)]">This collective is publicly visible on the Find Collectives page.</p>
+              <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                <p className="text-sm font-medium text-[var(--text)]">Visibility</p>
+                <p className="mt-1 text-xs text-[var(--soft-text)]">
+                  This collective is publicly visible on the Find Collectives page.
+                  {isActive && " Active members can petition to make it private again."}
+                </p>
+                {isActive && (
+                  <form action={proposeGroupVisibilityAction} className="mt-3">
+                    <input type="hidden" name="groupId" value={groupId} />
+                    <input type="hidden" name="target" value="private" />
+                    <SubmitButton variant="secondary">Propose Private Visibility</SubmitButton>
+                  </form>
+                )}
+              </div>
             )}
 
             {/* Emergency period status + declaration */}
@@ -1208,6 +1248,8 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     await applyParticipationTransitions(prisma, groupId);
     await expireStaleAssignments(prisma, groupId);
     await archiveStalePetitions(prisma, groupId);
+    await autoCloseStaleWithdrawnConcerns(prisma, groupId);
+    await expireStaleContentDrafts(prisma, groupId);
 
     const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
 
@@ -1665,10 +1707,11 @@ async function proposeGroupVisibilityAction(formData: FormData) {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = formData.get("groupId") as string;
+  const target = formData.get("target") === "private" ? "private" : "public";
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await proposeGroupVisibility(prisma, { groupId, createdByMembershipId: membership.id });
+    await proposeGroupVisibility(prisma, { groupId, createdByMembershipId: membership.id, target });
   } finally {
     await prisma.$disconnect();
   }
@@ -2197,11 +2240,21 @@ async function submitConcernAction(formData: FormData) {
   const subject = requiredString(formData, "subject");
   const description = requiredString(formData, "description");
   const context = formData.get("context") as string | null;
+  const subjectMembershipId = (formData.get("subjectMembershipId") as string | null) || null;
   await requireGroupMembershipStatus(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
+    // Resolve the optional named subject to an accountId, validating it's an active member of THIS group.
+    let subjectAccountId: string | null = null;
+    if (subjectMembershipId) {
+      const subjectMembership = await prisma.groupMembership.findFirst({
+        where: { id: subjectMembershipId, groupId, status: "active" },
+        select: { accountId: true },
+      });
+      subjectAccountId = subjectMembership?.accountId ?? null;
+    }
     await prisma.report.create({
-      data: { groupId, reportedByAccountId: session.accountId, subject, description, context: context || null },
+      data: { groupId, reportedByAccountId: session.accountId, subject, subjectAccountId, description, context: context || null },
     });
   } finally {
     await prisma.$disconnect();
@@ -2312,6 +2365,22 @@ async function volunteerForResponsibilityAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await volunteerForResponsibility(prisma, { membershipId: membership.id, type });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function recallResponsibilityAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const assignmentId = requiredString(formData, "assignmentId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await proposeResponsibilityRecall(prisma, { assignmentId, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }

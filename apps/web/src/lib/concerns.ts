@@ -1,9 +1,19 @@
 import type { PrismaClient } from "../generated/prisma/client";
-import type { ConcernClosureReason, ConcernFindingOutcome } from "../generated/prisma/enums";
+import type { ConcernClosureReason, ConcernFindingOutcome, ReportStatus, CoordinationAbility } from "../generated/prisma/enums";
 import { logAction } from "./action-log";
-import { getResponsibilityCoverage, hasActiveEligibleAssignment } from "./responsibilities";
+import { getResponsibilityCoverage } from "./responsibilities";
+import { hasActiveAbilityByType } from "./responsibility-abilities";
 
 const ACTIONABLE_OUTCOMES: ConcernFindingOutcome[] = ["substantiated", "partially_substantiated"];
+
+// A concern in a terminal status is immutable. "withdrawn" is intentionally NOT terminal:
+// the reporter has stepped back, but eligible reviewers may continue if a live safety or
+// accountability issue remains (RFC-002 — withdrawal must not extinguish the concern).
+const TERMINAL_STATUSES: ReportStatus[] = ["closed", "resolved", "dismissed"];
+
+function isTerminal(status: ReportStatus | undefined | null): boolean {
+  return status != null && TERMINAL_STATUSES.includes(status);
+}
 
 // Closure reasons allowed even when actionable findings exist.
 // All other reasons are blocked by the actionable-finding guardrail.
@@ -32,7 +42,7 @@ export async function isEligibleReviewer(
     }),
     prisma.report.findUnique({
       where: { id: reportId },
-      select: { reportedByAccountId: true, groupId: true },
+      select: { reportedByAccountId: true, subjectAccountId: true, groupId: true },
     }),
   ]);
 
@@ -41,21 +51,45 @@ export async function isEligibleReviewer(
     return false;
   }
 
-  // Condition 2: Holds an active eligible reviewer assignment in this group
-  const hasReviewer = await hasActiveEligibleAssignment(prisma, membership.id, "reviewer");
-  if (!hasReviewer) return false;
+  // Condition 2: Holds an active reviewer seat that currently carries the review_concerns ability.
+  // Routing through the ability (not just the seat type) makes the granted ability the source of
+  // truth — and keeps the authority term-bound and recallable (the check fails the instant the
+  // seat ends). Every group's auto-provisioned reviewer role carries this ability, so existing
+  // behavior is unchanged.
+  const canReview = await hasActiveAbilityByType(prisma, membership.id, "reviewer", "review_concerns");
+  if (!canReview) return false;
 
   // Condition 3: No direct involvement in this specific concern
   if (!report) return false;
   // Cross-group guard: group/report mismatch is a caller error, not an eligibility failure
   if (report.groupId !== groupId) throw new Error("Concern does not belong to this group.");
   if (report.reportedByAccountId === accountId) return false;
-  // Note: subject-of-concern check deferred — reviewer conflict with report subject not yet implemented
+  // The subject of a concern cannot review it — no one sits in judgment of a concern about themselves (RFC-002).
+  if (report.subjectAccountId === accountId) return false;
 
   // Condition 4: No active conflict specific to this concern (not global concern history)
   // Future: check linked request/project participation here
 
   return true;
+}
+
+/**
+ * True when the account currently holds an active reviewer seat in `groupId` that carries
+ * `ability` now. Resolves the membership and routes through the term-bound ability check —
+ * the per-action accountability gate (issue_findings, issue_action_proposals, etc.).
+ */
+async function holderHasReviewerAbility(
+  prisma: PrismaClient,
+  accountId: string,
+  groupId: string,
+  ability: CoordinationAbility,
+): Promise<boolean> {
+  const membership = await prisma.groupMembership.findUnique({
+    where: { accountId_groupId: { accountId, groupId } },
+    select: { id: true },
+  });
+  if (!membership) return false;
+  return hasActiveAbilityByType(prisma, membership.id, "reviewer", ability);
 }
 
 /**
@@ -84,9 +118,9 @@ export async function startReview(
   const eligible = await isEligibleReviewer(prisma, reviewerId, groupId, reportId);
   if (!eligible) throw new Error("Reviewer is not eligible to review this concern.");
 
-  // Terminal-state guard: closed concerns are immutable
+  // Terminal-state guard: closed concerns are immutable. A withdrawn concern remains reviewable.
   const reportState = await prisma.report.findUnique({ where: { id: reportId }, select: { status: true } });
-  if (reportState?.status === "closed") throw new Error("Concern is closed and cannot be reviewed.");
+  if (isTerminal(reportState?.status)) throw new Error("Concern is closed and cannot be reviewed.");
 
   const review = await prisma.concernReview.create({
     data: { reportId, reviewerId, groupId },
@@ -127,7 +161,10 @@ export async function issueFindings(
   if (!review) {
     throw new Error("Reviewer has no active review for this concern.");
   }
-  if (reportState?.status === "closed") throw new Error("Concern is closed and cannot receive new findings.");
+  if (isTerminal(reportState?.status)) throw new Error("Concern is closed and cannot receive new findings.");
+  if (!(await holderHasReviewerAbility(prisma, reviewerId, review.groupId, "issue_findings"))) {
+    throw new Error("Issuing findings requires the issue_findings ability on an active reviewer responsibility.");
+  }
 
   const finding = await prisma.concernFinding.create({
     data: { reportId, reviewerId, groupId: review.groupId, outcome, summary },
@@ -165,9 +202,12 @@ export async function proposeAction(
   const eligible = await isEligibleReviewer(prisma, proposedById, groupId, reportId);
   if (!eligible) throw new Error("Proposer is not eligible to propose an action for this concern.");
 
-  // Terminal-state guard: closed concerns are immutable
+  // Terminal-state guard: closed concerns are immutable. A withdrawn concern remains reviewable.
   const reportState = await prisma.report.findUnique({ where: { id: reportId }, select: { status: true } });
-  if (reportState?.status === "closed") throw new Error("Concern is closed. No further proposals can be submitted.");
+  if (isTerminal(reportState?.status)) throw new Error("Concern is closed. No further proposals can be submitted.");
+  if (!(await holderHasReviewerAbility(prisma, proposedById, groupId, "issue_action_proposals"))) {
+    throw new Error("Proposing an action requires the issue_action_proposals ability on an active reviewer responsibility.");
+  }
 
   const actionableFindings = await prisma.concernFinding.count({
     where: { reportId, outcome: { in: ACTIONABLE_OUTCOMES } },
@@ -212,13 +252,14 @@ export async function proposeAction(
 }
 
 /**
- * Closes a concern with a recorded reason. Enforces two guardrails:
+ * Resolves a concern with a recorded reason. Enforces two guardrails:
  * 1. Administrative closure requires reviewer authority (RFC-004).
  * 2. When actionable findings exist, only specific closure reasons are permitted.
  *
- * Note: reporter_withdrawal closes the concern immediately and blocks further
- * review actions. RFC-002's "continued review after withdrawal for safety reasons"
- * is acknowledged but deferred as a future refinement.
+ * reporter_withdrawal does NOT close the concern: it marks it "withdrawn" (recording
+ * withdrawnAt) so eligible reviewers may continue if a live safety/accountability issue
+ * remains (RFC-002). All other reasons close the concern terminally. A withdrawn concern
+ * can later be closed by a reviewer, or auto-closed once it has gone untouched (see the sweep).
  */
 export async function closeConcern(
   prisma: PrismaClient,
@@ -234,16 +275,16 @@ export async function closeConcern(
 
   if (!report) throw new Error("Concern not found.");
   if (report.groupId !== groupId) throw new Error("Concern does not belong to this group.");
-  if (report.status === "closed") throw new Error("Concern is already closed.");
+  if (isTerminal(report.status)) throw new Error("Concern is already closed.");
+  // A reporter cannot withdraw a concern they have already withdrawn.
+  if (reason === "reporter_withdrawal" && report.status === "withdrawn") {
+    throw new Error("Concern is already withdrawn.");
+  }
 
-  // Administrative closure requires reviewer authority (RFC-004)
+  // Administrative closure requires the administrative_closure ability on an active reviewer seat (RFC-004).
   if (reason === "administrative_closure") {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: actorId, groupId } },
-      select: { id: true },
-    });
-    const hasReviewer = membership ? await hasActiveEligibleAssignment(prisma, membership.id, "reviewer") : false;
-    if (!hasReviewer) {
+    const canClose = await holderHasReviewerAbility(prisma, actorId, groupId, "administrative_closure");
+    if (!canClose) {
       throw new Error("Administrative closure requires reviewer authority.");
     }
   } else if (reason === "reporter_withdrawal") {
@@ -269,17 +310,46 @@ export async function closeConcern(
     );
   }
 
-  await prisma.report.update({
-    where: { id: reportId },
-    data: { status: "closed", closureReason: reason, closedAt: new Date() },
-  });
+  if (reason === "reporter_withdrawal") {
+    // Withdrawal steps the reporter back without extinguishing the concern.
+    await prisma.report.update({
+      where: { id: reportId },
+      data: { status: "withdrawn", withdrawnAt: new Date() },
+    });
+  } else {
+    await prisma.report.update({
+      where: { id: reportId },
+      data: { status: "closed", closureReason: reason, closedAt: new Date() },
+    });
+  }
 
   await logAction(prisma, {
     actorAccountId: actorId,
     groupId,
-    action: "concern.closed",
+    action: reason === "reporter_withdrawal" ? "concern.withdrawn" : "concern.closed",
     targetType: "report",
     targetId: reportId,
     metadata: { reason },
+  });
+}
+
+const WITHDRAWN_AUTO_CLOSE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Lazily closes concerns the reporter withdrew that reviewers have left untouched for
+ * WITHDRAWN_AUTO_CLOSE_AFTER_MS. Any reviewer who continues a withdrawn concern moves it out
+ * of "withdrawn" status (startReview → under_review), so a row still marked "withdrawn" past
+ * the cutoff means no reviewer took it up — realizing RFC-002's "withdrawal normally results
+ * in closure" while still allowing continuation in the window. Mirrors archiveStalePetitions.
+ */
+export async function autoCloseStaleWithdrawnConcerns(
+  prisma: PrismaClient,
+  groupId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  const cutoff = new Date(now.getTime() - WITHDRAWN_AUTO_CLOSE_AFTER_MS);
+  await prisma.report.updateMany({
+    where: { groupId, status: "withdrawn", withdrawnAt: { lte: cutoff } },
+    data: { status: "closed", closureReason: "reporter_withdrawal", closedAt: now },
   });
 }

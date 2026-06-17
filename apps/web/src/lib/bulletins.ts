@@ -155,6 +155,7 @@ export async function proposeBulletinCreation(
     groupId: string;
     createdByMembershipId?: string;
     createdByProjectMembershipId?: string;
+    actingResponsibilityId?: string;
     title: string;
     body: string;
   },

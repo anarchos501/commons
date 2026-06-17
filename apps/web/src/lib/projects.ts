@@ -1,15 +1,20 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { logAction } from "./action-log";
+import { hasActiveAbility } from "./responsibility-abilities";
 
 export type ProposeProjectResult =
   | { ok: true; proposalId: string; petitionId: string }
-  | { ok: false; reason: "not_eligible" | "petition_error" };
+  | { ok: false; reason: "not_eligible" | "ability_required" | "petition_error" };
 
 /**
  * Active group member proposes a new project. Opens a project_proposal petition
  * with a Proposal record as the subject. The group votes; on approval,
  * createProjectFromPetition() creates the actual Project.
+ *
+ * actingResponsibilityId is the optional responsibility-acting path (F1): when set, the
+ * proposer acts AS that seat and must hold it with the create_projects ability now. Absent →
+ * the egalitarian baseline (any active member may propose).
  */
 export async function proposeProject(
   prisma: PrismaClient,
@@ -19,12 +24,14 @@ export async function proposeProject(
     accountId,
     name,
     description,
+    actingResponsibilityId,
   }: {
     groupId: string;
     createdByMembershipId: string;
     accountId: string;
     name: string;
     description: string;
+    actingResponsibilityId?: string;
   },
 ): Promise<ProposeProjectResult> {
   const membership = await prisma.groupMembership.findUnique({
@@ -38,6 +45,11 @@ export async function proposeProject(
     membership.participationStatus !== "active"
   ) {
     return { ok: false, reason: "not_eligible" };
+  }
+
+  if (actingResponsibilityId) {
+    const allowed = await hasActiveAbility(prisma, createdByMembershipId, actingResponsibilityId, "create_projects");
+    if (!allowed) return { ok: false, reason: "ability_required" };
   }
 
   const proposal = await prisma.proposal.create({
@@ -87,6 +99,9 @@ export async function createProjectFromPetition(
   // Idempotency guard: skip if already implemented
   if (proposal.status === "implemented") return;
 
+  // Projects start "active". Note: ProjectStatus.completed (the one-way "mission fulfilled" exit in
+  // RFC-007) has no writer yet — no code path sets it. Wiring a member-driven completion flow is a
+  // deferred roadmap item; until then "completed" is a declared-but-unreached state, not dead code.
   const project = await prisma.project.create({
     data: {
       foundingGroupId: proposal.groupId,
