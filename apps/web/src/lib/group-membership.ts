@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import { openPetition } from "./petitions";
 
@@ -157,7 +157,7 @@ export async function sponsorMembershipApplication(
  * Activates the pending GroupMembership.
  */
 export async function approveMembershipRequest(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   pendingMembershipId: string,
 ): Promise<void> {
   const membership = await prisma.groupMembership.findUnique({

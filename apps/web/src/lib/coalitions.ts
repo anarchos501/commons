@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import type { ProposalFamily } from "./governance-proposal-families";
 import { evaluatePetition, openPetition, openSystemGroupPetition } from "./petitions";
+import { assertWithinTransaction } from "./prisma";
 
 export type CoalitionProposalAction = "formation" | "join" | "departure" | "removal";
 
@@ -201,7 +202,7 @@ export async function openCoalitionRemovalProposal(
 }
 
 export async function evaluateCoalitionProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
 ): Promise<EvaluateCoalitionProposalResult> {
   const proposal = await prisma.coalitionProposal.findUnique({
@@ -246,7 +247,7 @@ export async function evaluateCoalitionProposal(
 }
 
 export async function evaluateCoalitionProposalForPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateCoalitionProposalResult | null> {
   const child = await prisma.coalitionProposalPetition.findUnique({
@@ -338,7 +339,7 @@ async function createCoalitionProposal(
 }
 
 async function applyCoalitionProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposal: {
     id: string;
     coalitionId: string | null;
@@ -351,94 +352,105 @@ async function applyCoalitionProposal(
     petitions: Array<{ petitionId: string; groupId: string }>;
   },
 ): Promise<EvaluateCoalitionProposalResult> {
+  assertWithinTransaction(prisma, "applyCoalitionProposal");
   const snapshot = proposal.participantSnapshot as ParticipantSnapshot;
-  try {
-    return await prisma.$transaction(async (tx) => {
-      if (proposal.action === "formation") {
-        const sponsorGroup = await tx.group.findUniqueOrThrow({
-          where: { id: proposal.proposedByGroupId },
-          select: { nodeId: true },
-        });
-        const coalition = await tx.coalition.create({
-          data: {
-            nodeId: sponsorGroup.nodeId,
-            name: proposal.name!,
-            description: proposal.description,
-          },
-        });
-        await tx.coalitionMembership.createMany({
-          data: snapshot.groupIds.map((groupId) => ({ coalitionId: coalition.id, groupId })),
-        });
-        await tx.coalitionProposal.update({
-          where: { id: proposal.id },
-          data: { coalitionId: coalition.id, status: "succeeded", resolvedAt: new Date() },
-        });
-        return { outcome: "succeeded" as const, coalitionId: coalition.id };
-      }
 
-      if (!proposal.coalitionId || !proposal.targetGroupId) {
-        throw new Error("Coalition proposal is missing its coalition or target group.");
-      }
-      if (proposal.action === "join") {
-        await tx.coalitionMembership.create({
-          data: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId },
-        });
-      } else {
-        const endedAt = new Date();
-        const updated = await tx.coalitionMembership.updateMany({
-          where: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId, endedAt: null },
-          data: {
-            endedAt,
-            endReason: proposal.action === "departure" ? "voluntary_departure" : "removed_by_members",
-          },
-        });
-        if (updated.count === 0) {
-          await tx.coalitionProposal.updateMany({
-            where: { id: proposal.id, status: "open" },
-            data: { status: "failed-withdrawn", resolvedAt: endedAt },
-          });
-          return { outcome: "failed-withdrawn" as const };
-        }
-        const remaining = await tx.coalitionMembership.count({
-          where: { coalitionId: proposal.coalitionId, endedAt: null },
-        });
-        if (remaining === 0) {
-          await tx.coalition.update({
-            where: { id: proposal.coalitionId },
-            data: { status: "dissolved", dissolvedAt: endedAt },
-          });
-        }
-      }
-      await tx.coalitionProposal.update({
-        where: { id: proposal.id },
-        data: { status: "succeeded", resolvedAt: new Date() },
-      });
-      return { outcome: "succeeded" as const, coalitionId: proposal.coalitionId };
+  if (proposal.action === "formation") {
+    const sponsorGroup = await prisma.group.findUniqueOrThrow({
+      where: { id: proposal.proposedByGroupId },
+      select: { nodeId: true },
     });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
+    // Advisory lock + pre-check replaces the P2002 catch/recover pattern (Fix 9c):
+    // a thrown P2002 inside this transaction would poison it, making recovery impossible.
+    await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${sponsorGroup.nodeId}:coalition_name:${proposal.name}`}, 0))`;
+    const existingCoalition = await prisma.coalition.findFirst({
+      where: { nodeId: sponsorGroup.nodeId, name: proposal.name! },
+    });
+    if (existingCoalition) {
+      const updated = await prisma.coalitionProposal.updateMany({
+        where: { id: proposal.id, status: "open" },
+        data: { status: "failed-withdrawn", resolvedAt: new Date() },
+      });
+      if (updated.count > 0) {
+        await prisma.petition.updateMany({
+          where: { id: { in: proposal.petitions.map((p) => p.petitionId) }, status: "open" },
+          data: { status: "superseded", resolvedAt: new Date() },
+        });
+      }
+      return { outcome: "failed-withdrawn" as const };
     }
-    throw error;
+    const coalition = await prisma.coalition.create({
+      data: {
+        nodeId: sponsorGroup.nodeId,
+        name: proposal.name!,
+        description: proposal.description,
+      },
+    });
+    await prisma.coalitionMembership.createMany({
+      data: snapshot.groupIds.map((groupId) => ({ coalitionId: coalition.id, groupId })),
+    });
+    await prisma.coalitionProposal.update({
+      where: { id: proposal.id },
+      data: { coalitionId: coalition.id, status: "succeeded", resolvedAt: new Date() },
+    });
+    return { outcome: "succeeded" as const, coalitionId: coalition.id };
   }
+
+  if (!proposal.coalitionId || !proposal.targetGroupId) {
+    throw new Error("Coalition proposal is missing its coalition or target group.");
+  }
+  if (proposal.action === "join") {
+    await prisma.coalitionMembership.create({
+      data: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId },
+    });
+  } else {
+    const endedAt = new Date();
+    const updated = await prisma.coalitionMembership.updateMany({
+      where: { coalitionId: proposal.coalitionId, groupId: proposal.targetGroupId, endedAt: null },
+      data: {
+        endedAt,
+        endReason: proposal.action === "departure" ? "voluntary_departure" : "removed_by_members",
+      },
+    });
+    if (updated.count === 0) {
+      await prisma.coalitionProposal.updateMany({
+        where: { id: proposal.id, status: "open" },
+        data: { status: "failed-withdrawn", resolvedAt: endedAt },
+      });
+      return { outcome: "failed-withdrawn" as const };
+    }
+    const remaining = await prisma.coalitionMembership.count({
+      where: { coalitionId: proposal.coalitionId, endedAt: null },
+    });
+    if (remaining === 0) {
+      await prisma.coalition.update({
+        where: { id: proposal.coalitionId },
+        data: { status: "dissolved", dissolvedAt: endedAt },
+      });
+    }
+  }
+  await prisma.coalitionProposal.update({
+    where: { id: proposal.id },
+    data: { status: "succeeded", resolvedAt: new Date() },
+  });
+  return { outcome: "succeeded" as const, coalitionId: proposal.coalitionId };
 }
 
 async function failCoalitionProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposal: { id: string; petitions: Array<{ petitionId: string }> },
   status: "failed-rejected" | "failed-withdrawn" | "failed-timeout",
 ): Promise<EvaluateCoalitionProposalResult> {
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.coalitionProposal.updateMany({
-      where: { id: proposal.id, status: "open" },
-      data: { status, resolvedAt: new Date() },
-    });
-    if (updated.count === 0) return;
-    await tx.petition.updateMany({
+  const updated = await prisma.coalitionProposal.updateMany({
+    where: { id: proposal.id, status: "open" },
+    data: { status, resolvedAt: new Date() },
+  });
+  if (updated.count > 0) {
+    await prisma.petition.updateMany({
       where: { id: { in: proposal.petitions.map((child) => child.petitionId) }, status: "open" },
       data: { status: "superseded", resolvedAt: new Date() },
     });
-  });
+  }
   return { outcome: status };
 }
 
@@ -455,7 +467,7 @@ async function failOpenProposal(prisma: PrismaClient, proposalId: string, petiti
   ]);
 }
 
-async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[], now: Date): Promise<void> {
+async function evaluateDuePetitions(prisma: Prisma.TransactionClient, petitionIds: string[], now: Date): Promise<void> {
   const due = await prisma.petition.findMany({
     where: { id: { in: petitionIds }, status: "open", closesAt: { lte: now } },
     select: { id: true },
@@ -464,7 +476,7 @@ async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[],
 }
 
 async function participantSnapshotStillMatches(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   coalitionId: string,
   rawSnapshot: unknown,
 ): Promise<boolean> {

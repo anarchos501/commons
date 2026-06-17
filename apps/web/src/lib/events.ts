@@ -500,8 +500,10 @@ async function rollbackProposal(prisma: PrismaClient, proposalId: string, petiti
 
 // ── Proposal evaluation + apply (mirrors the coalition multi-petition flow) ────
 
+// Runs inside the caller's transaction (evaluateAndApplyPetition's $transaction) — mirrors the
+// coalition / project-hosting proposal handlers. Must be passed a Prisma.TransactionClient.
 export async function evaluateEventProposalForPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateEventProposalResult | null> {
   const child = await prisma.eventProposalPetition.findUnique({
@@ -532,7 +534,7 @@ type LoadedProposal = {
   petitions: { petitionId: string; groupId: string }[];
 };
 
-async function evaluateEventProposal(prisma: PrismaClient, proposalId: string): Promise<EvaluateEventProposalResult> {
+async function evaluateEventProposal(prisma: Prisma.TransactionClient, proposalId: string): Promise<EvaluateEventProposalResult> {
   const proposal = (await prisma.eventProposal.findUnique({
     where: { id: proposalId },
     include: { petitions: { select: { petitionId: true, groupId: true } } },
@@ -568,7 +570,7 @@ async function evaluateEventProposal(prisma: PrismaClient, proposalId: string): 
   return applyEventProposal(prisma, proposal);
 }
 
-async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[], now: Date): Promise<void> {
+async function evaluateDuePetitions(prisma: Prisma.TransactionClient, petitionIds: string[], now: Date): Promise<void> {
   const due = await prisma.petition.findMany({
     where: { id: { in: petitionIds }, status: "open", closesAt: { lte: now } },
     select: { id: true },
@@ -576,87 +578,83 @@ async function evaluateDuePetitions(prisma: PrismaClient, petitionIds: string[],
   for (const p of due) await evaluatePetition(prisma, p.id);
 }
 
-async function applyEventProposal(prisma: PrismaClient, proposal: LoadedProposal): Promise<EvaluateEventProposalResult> {
+// Runs on the caller-supplied transaction (evaluateAndApplyPetition's $transaction). The
+// proposal row-lock + create + status flip + audit log are all part of that single transaction,
+// so the whole petition resolution commits or rolls back atomically.
+async function applyEventProposal(prisma: Prisma.TransactionClient, proposal: LoadedProposal): Promise<EvaluateEventProposalResult> {
   const audiences = parseAudienceJson(proposal.audienceJson);
-  let createdNow = false;
 
-  const result = await prisma.$transaction(async (tx) => {
-    // Row-lock the proposal to prevent concurrent application.
-    await tx.$queryRaw`SELECT id FROM "EventProposal" WHERE id = ${proposal.id} FOR UPDATE`;
-    const locked = await tx.eventProposal.findUniqueOrThrow({ where: { id: proposal.id } });
-    if (locked.appliedAt !== null) {
-      return { eventId: locked.createdEventId! };
-    }
+  // Row-lock the proposal to prevent concurrent application.
+  await prisma.$queryRaw`SELECT id FROM "EventProposal" WHERE id = ${proposal.id} FOR UPDATE`;
+  const locked = await prisma.eventProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+  if (locked.appliedAt !== null) {
+    return { outcome: "succeeded", eventId: locked.createdEventId! };
+  }
 
-    // Re-validate audience connectivity at apply time (a host may have lost a connection).
-    for (const a of audiences) {
-      const connected = await assertAudienceConnectivity(tx, locked.hostType, locked.hostId, a.audienceType, a.audienceId);
-      if (!connected) {
-        throw new Error(`Audience ${a.audienceType}:${a.audienceId} is no longer connected to the host.`);
-      }
+  // Re-validate audience connectivity at apply time (a host may have lost a connection).
+  for (const a of audiences) {
+    const connected = await assertAudienceConnectivity(prisma, locked.hostType, locked.hostId, a.audienceType, a.audienceId);
+    if (!connected) {
+      throw new Error(`Audience ${a.audienceType}:${a.audienceId} is no longer connected to the host.`);
     }
+  }
 
-    const now = new Date();
-    const event = await tx.calendarEvent.create({
-      data: {
-        category: locked.category,
-        hostType: locked.hostType,
-        hostId: locked.hostId,
-        title: locked.title,
-        description: locked.description,
-        startTime: locked.startTime,
-        endTime: locked.endTime,
-        timezone: locked.timezone,
-        location: locked.location,
-        visibility: locked.visibility,
-        createdByAccountId: locked.proposedByAccountId,
-        authorizingPetitionId: proposal.petitions[0]?.petitionId ?? null,
-      },
-    });
-    if (audiences.length > 0) {
-      await tx.eventAudience.createMany({
-        data: audiences.map((a) => ({ eventId: event.id, audienceType: a.audienceType, audienceId: a.audienceId })),
-        skipDuplicates: true,
-      });
-    }
-    await tx.eventProposal.update({
-      where: { id: locked.id },
-      data: { appliedAt: now, createdEventId: event.id, status: "succeeded", resolvedAt: now },
-    });
-    createdNow = true;
-    return { eventId: event.id };
+  const now = new Date();
+  const event = await prisma.calendarEvent.create({
+    data: {
+      category: locked.category,
+      hostType: locked.hostType,
+      hostId: locked.hostId,
+      title: locked.title,
+      description: locked.description,
+      startTime: locked.startTime,
+      endTime: locked.endTime,
+      timezone: locked.timezone,
+      location: locked.location,
+      visibility: locked.visibility,
+      createdByAccountId: locked.proposedByAccountId,
+      authorizingPetitionId: proposal.petitions[0]?.petitionId ?? null,
+    },
   });
-
-  if (createdNow) {
-    await logAction(prisma, {
-      actorAccountId: proposal.proposedByAccountId,
-      groupId: proposal.petitions[0]?.groupId ?? null,
-      projectId: proposal.hostType === "project" ? proposal.hostId : null,
-      action: "event.created",
-      targetType: "calendar_event",
-      targetId: result.eventId,
-      metadata: { proposalId: proposal.id, category: proposal.category, hostType: proposal.hostType, hostId: proposal.hostId },
+  if (audiences.length > 0) {
+    await prisma.eventAudience.createMany({
+      data: audiences.map((a) => ({ eventId: event.id, audienceType: a.audienceType, audienceId: a.audienceId })),
+      skipDuplicates: true,
     });
   }
-  return { outcome: "succeeded", eventId: result.eventId };
+  await prisma.eventProposal.update({
+    where: { id: locked.id },
+    data: { appliedAt: now, createdEventId: event.id, status: "succeeded", resolvedAt: now },
+  });
+
+  await logAction(prisma, {
+    actorAccountId: proposal.proposedByAccountId,
+    groupId: proposal.petitions[0]?.groupId ?? null,
+    projectId: proposal.hostType === "project" ? proposal.hostId : null,
+    action: "event.created",
+    targetType: "calendar_event",
+    targetId: event.id,
+    metadata: { proposalId: proposal.id, category: proposal.category, hostType: proposal.hostType, hostId: proposal.hostId },
+  });
+
+  return { outcome: "succeeded", eventId: event.id };
 }
 
 async function failEventProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposal: { id: string; petitions: { petitionId: string }[] },
   status: "failed-rejected" | "failed-withdrawn" | "failed-timeout",
 ): Promise<EvaluateEventProposalResult> {
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.eventProposal.updateMany({
-      where: { id: proposal.id, status: "open" },
-      data: { status, resolvedAt: new Date() },
-    });
-    if (updated.count === 0) return;
-    await tx.petition.updateMany({
+  const updated = await prisma.eventProposal.updateMany({
+    where: { id: proposal.id, status: "open" },
+    data: { status, resolvedAt: new Date() },
+  });
+  if (updated.count > 0) {
+    await prisma.petition.updateMany({
       where: { id: { in: proposal.petitions.map((p) => p.petitionId) }, status: "open" },
       data: { status: "superseded", resolvedAt: new Date() },
     });
-  });
+  }
   return { outcome: status };
 }
 

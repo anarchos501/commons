@@ -9,7 +9,7 @@ async function approveAndApply(
   family: "bulletin_creation" | "publication_creation" | "publication_entry_creation" | "living_document_creation",
 ) {
   await prisma.petition.update({ where: { id: petitionId }, data: { status: "approved" } });
-  await applyContentCreationDraft(prisma, petitionId, family);
+  await prisma.$transaction((tx) => applyContentCreationDraft(tx, petitionId, family));
 }
 
 const prisma = createPrismaClient();
@@ -228,7 +228,7 @@ test("publication_entry_creation: approval rejects a publication moved to anothe
     });
 
     await assert.rejects(
-      applyContentCreationDraft(prisma, result.petitionId, "publication_entry_creation"),
+      prisma.$transaction((tx) => applyContentCreationDraft(tx, result.petitionId, "publication_entry_creation")),
       /no longer belongs/,
     );
     assert.equal(await prisma.publicationEntry.count({ where: { publicationId: pub.id } }), 0);
@@ -291,7 +291,7 @@ test("applyContentCreationDraft is idempotent: applying twice creates only one c
     if (!result.ok) return;
 
     await approveAndApply(prisma, result.petitionId, "bulletin_creation");
-    await applyContentCreationDraft(prisma, result.petitionId, "bulletin_creation");
+    await prisma.$transaction((tx) => applyContentCreationDraft(tx, result.petitionId, "bulletin_creation"));
 
     const bulletins = await prisma.bulletin.findMany({ where: { spaceType: "group", spaceId: groupId } });
     assert.equal(bulletins.length, 1);

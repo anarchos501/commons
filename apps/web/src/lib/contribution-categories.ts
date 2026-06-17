@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { OfferingEntityType } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
 import { assertProjectWritable } from "./project-membership";
@@ -187,7 +187,7 @@ export async function proposeProjectContributionCategory(
 }
 
 export async function createContributionCategoryFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await prisma.petition.findUnique({
@@ -301,7 +301,7 @@ export async function proposeContributionCategoryArchival(
 }
 
 export async function archiveContributionCategoryFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await prisma.petition.findUnique({

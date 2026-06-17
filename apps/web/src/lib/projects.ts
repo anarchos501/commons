@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { logAction } from "./action-log";
 
@@ -73,7 +73,7 @@ export async function proposeProject(
  * Idempotent: checks proposal.status before creating to prevent duplicates.
  */
 export async function createProjectFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "project_proposal");

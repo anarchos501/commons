@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import { endAssignmentsForMember } from "./responsibilities";
 import { applyGroupDormancyToProjectMemberships } from "./project-membership";
@@ -158,7 +158,7 @@ export async function applyParticipationTransitions(
  * Count of Active members (membershipStatus: active AND participationStatus: active).
  * Use for petition denominator calculations.
  */
-export async function getActiveParticipantCount(prisma: PrismaClient, groupId: string): Promise<number> {
+export async function getActiveParticipantCount(prisma: Prisma.TransactionClient, groupId: string): Promise<number> {
   return prisma.groupMembership.count({
     where: { groupId, status: "active", participationStatus: "active" },
   });
@@ -178,7 +178,7 @@ type VoterScope = ProjectVoterScope | null | undefined;
  * Note: type "responsibility" is reserved for a future RFC and is not handled here.
  */
 export async function getActiveVoterCount(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petition: { groupId: string | null; scopeType?: string; scopeId?: string; voterScope: unknown },
 ): Promise<number> {
   // Coalesce groupId → scopeId for nullable groupId (P1 migration)

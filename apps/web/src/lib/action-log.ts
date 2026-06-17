@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from "../generated/prisma/client";
+import type { Prisma } from "../generated/prisma/client";
 
 type LogActionInput = {
   actorAccountId?: string | null;
@@ -15,7 +15,7 @@ type LogActionInput = {
  * Best-effort audit logging.
  * Failures are reported in development but do not block user workflows.
  */
-export async function logAction(prisma: PrismaClient, input: LogActionInput): Promise<void> {
+export async function logAction(prisma: Prisma.TransactionClient, input: LogActionInput): Promise<void> {
   try {
     await prisma.actionLog.create({
       data: {

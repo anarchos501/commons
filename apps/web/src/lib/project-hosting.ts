@@ -71,7 +71,7 @@ export async function openProjectHostingWithdrawalPetition(
 }
 
 export async function onProjectHostingWithdrawalPetitionApproved(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await prisma.petition.findUnique({
@@ -255,7 +255,7 @@ export async function openProjectHostingProposal(
 }
 
 export async function evaluateProjectHostingProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
 ): Promise<EvaluateProjectHostingProposalResult> {
   const proposal = await prisma.projectHostingProposal.findUnique({
@@ -309,24 +309,22 @@ export async function evaluateProjectHostingProposal(
       return failProjectHostingProposal(prisma, proposal, "failed-timeout");
     }
 
-    await prisma.$transaction(async (tx) => {
-      const activeHosting = await tx.projectHosting.findFirst({
-        where: { projectId: proposal.projectId, groupId: proposal.candidateGroupId, endedAt: null },
-        select: { id: true },
+    const activeHosting = await prisma.projectHosting.findFirst({
+      where: { projectId: proposal.projectId, groupId: proposal.candidateGroupId, endedAt: null },
+      select: { id: true },
+    });
+    if (!activeHosting) {
+      await prisma.projectHosting.create({
+        data: { projectId: proposal.projectId, groupId: proposal.candidateGroupId },
       });
-      if (!activeHosting) {
-        await tx.projectHosting.create({
-          data: { projectId: proposal.projectId, groupId: proposal.candidateGroupId },
-        });
-      }
-      await tx.project.update({
-        where: { id: proposal.projectId },
-        data: { pendingClosureAt: null, pendingClosureElectorate: Prisma.JsonNull },
-      });
-      await tx.projectHostingProposal.update({
-        where: { id: proposal.id },
-        data: { status: "succeeded", resolvedAt: new Date() },
-      });
+    }
+    await prisma.project.update({
+      where: { id: proposal.projectId },
+      data: { pendingClosureAt: null, pendingClosureElectorate: Prisma.JsonNull },
+    });
+    await prisma.projectHostingProposal.update({
+      where: { id: proposal.id },
+      data: { status: "succeeded", resolvedAt: new Date() },
     });
     await logAction(prisma, {
       groupId: proposal.candidateGroupId,
@@ -342,7 +340,7 @@ export async function evaluateProjectHostingProposal(
 }
 
 export async function evaluateProjectHostingProposalForPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateProjectHostingProposalResult | null> {
   const proposal = await prisma.projectHostingProposal.findFirst({
@@ -353,7 +351,7 @@ export async function evaluateProjectHostingProposalForPetition(
   return evaluateProjectHostingProposal(prisma, proposal.id);
 }
 
-async function evaluateClosedChildPetitions(prisma: PrismaClient, petitionIds: string[]): Promise<void> {
+async function evaluateClosedChildPetitions(prisma: Prisma.TransactionClient, petitionIds: string[]): Promise<void> {
   const duePetitions = await prisma.petition.findMany({
     where: { id: { in: petitionIds }, status: "open", closesAt: { lte: new Date() } },
     select: { id: true },
@@ -364,7 +362,7 @@ async function evaluateClosedChildPetitions(prisma: PrismaClient, petitionIds: s
 }
 
 async function failProjectHostingProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposal: {
     id: string;
     groupPetitionId: string;
@@ -372,20 +370,19 @@ async function failProjectHostingProposal(
   },
   status: "failed-rejected" | "failed-withdrawn" | "failed-timeout",
 ): Promise<EvaluateProjectHostingProposalResult> {
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.projectHostingProposal.updateMany({
-      where: { id: proposal.id, status: "open" },
-      data: { status, resolvedAt: new Date() },
-    });
-    if (updated.count === 0) return;
-    await tx.petition.updateMany({
+  const updated = await prisma.projectHostingProposal.updateMany({
+    where: { id: proposal.id, status: "open" },
+    data: { status, resolvedAt: new Date() },
+  });
+  if (updated.count > 0) {
+    await prisma.petition.updateMany({
       where: {
         id: { in: [proposal.groupPetitionId, proposal.projectPetitionId] },
         status: "open",
       },
       data: { status: "superseded", resolvedAt: new Date() },
     });
-  });
+  }
   return { outcome: status };
 }
 

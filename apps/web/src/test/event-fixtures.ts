@@ -100,7 +100,9 @@ export async function createCoalitionFixture(prisma: PrismaClient, prefix: strin
 /** Force all child petitions of a proposal to approved, then run the apply path. */
 export async function approveEventProposal(prisma: PrismaClient, petitionIds: string[]) {
   await prisma.petition.updateMany({ where: { id: { in: petitionIds } }, data: { status: "approved" } });
-  return evaluateEventProposalForPetition(prisma, petitionIds[0]);
+  // evaluateEventProposalForPetition now runs inside a transaction (it is reached via
+  // evaluateAndApplyPetition's $transaction in production); supply one here.
+  return prisma.$transaction((tx) => evaluateEventProposalForPetition(tx, petitionIds[0]));
 }
 
 export async function cleanupEventFixture(prisma: PrismaClient, prefix: string) {

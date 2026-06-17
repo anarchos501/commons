@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import {
   openNodePetition,
@@ -329,7 +329,7 @@ export async function openStewardResignation(
 }
 
 export async function evaluateNodeStewardProposalForPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateNodeStewardProposalResult | null> {
   const proposal = await prisma.nodeStewardProposal.findFirst({
@@ -391,7 +391,7 @@ export async function evaluateNodeStewardProposalForPetition(
 }
 
 async function openCandidateConsent(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
   candidateGroupId: string,
 ) {
@@ -414,7 +414,7 @@ async function openCandidateConsent(
 }
 
 async function openNodeDecision(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
   action: "appointment" | "no_confidence",
   nodeId: string,
@@ -439,25 +439,23 @@ async function openNodeDecision(
 }
 
 async function applyProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
 ): Promise<EvaluateNodeStewardProposalResult> {
   const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: proposalId } });
   if (!(await proposalContextStillValid(prisma, proposal))) {
     return failProposal(prisma, proposalId, "failed-stale");
   }
-  await prisma.$transaction(async (tx) => {
-    await tx.node.update({
-      where: { id: proposal.nodeId },
-      data: {
-        stewardGroupId: proposal.action === "appointment" ? proposal.candidateGroupId : null,
-        stewardRevision: { increment: 1 },
-      },
-    });
-    await tx.nodeStewardProposal.update({
-      where: { id: proposalId },
-      data: { status: "succeeded", resolvedAt: new Date() },
-    });
+  await prisma.node.update({
+    where: { id: proposal.nodeId },
+    data: {
+      stewardGroupId: proposal.action === "appointment" ? proposal.candidateGroupId : null,
+      stewardRevision: { increment: 1 },
+    },
+  });
+  await prisma.nodeStewardProposal.update({
+    where: { id: proposalId },
+    data: { status: "succeeded", resolvedAt: new Date() },
   });
   await logAction(prisma, {
     actorAccountId: proposal.initiatedByAccountId,
@@ -477,27 +475,26 @@ async function applyProposal(
 }
 
 async function failProposal(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposalId: string,
   status: Extract<ProposalStatus, `failed-${string}`>,
 ): Promise<EvaluateNodeStewardProposalResult> {
   const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: proposalId } });
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.nodeStewardProposal.updateMany({
-      where: { id: proposalId, status: { in: ["open", "awaiting_candidate_consent", "awaiting_node_vote"] } },
-      data: { status, resolvedAt: new Date() },
-    });
-    if (updated.count === 0) return;
+  const updated = await prisma.nodeStewardProposal.updateMany({
+    where: { id: proposalId, status: { in: ["open", "awaiting_candidate_consent", "awaiting_node_vote"] } },
+    data: { status, resolvedAt: new Date() },
+  });
+  if (updated.count > 0) {
     const petitionIds = [
       proposal.groupInitiationPetitionId,
       proposal.candidateConsentPetitionId,
       proposal.nodePetitionId,
     ].filter((id): id is string => Boolean(id));
-    await tx.petition.updateMany({
+    await prisma.petition.updateMany({
       where: { id: { in: petitionIds }, status: "open" },
       data: { status: "superseded", resolvedAt: new Date() },
     });
-  });
+  }
   return { outcome: status };
 }
 
@@ -510,7 +507,7 @@ async function failOpening(
 }
 
 async function proposalContextStillValid(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   proposal: {
     nodeId: string;
     action: string;

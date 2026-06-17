@@ -639,7 +639,7 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     // Hosting lifecycle first: it's the sole authority for pendingClosureAt,
     // which participation transitions read (read-only) to apply the RFC-007
     // electorate freeze for hostless projects.
-    await syncProjectHostingLifecycle(prisma, projectId);
+    await prisma.$transaction((tx) => syncProjectHostingLifecycle(tx, projectId));
     await applyProjectParticipationTransitions(prisma, projectId);
 
     const project = await prisma.project.findUniqueOrThrow({
@@ -1208,6 +1208,7 @@ async function supportPetitionAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await addPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, projectMembershipId: projectMembership.id });
+    await evaluateAndApplyPetition(prisma, petitionId);
   } finally {
     await prisma.$disconnect();
   }

@@ -17,9 +17,8 @@ export type OpenPetitionResult =
   | { ok: true; petitionId: string }
   | { ok: false; reason: "invalid_family" | "category_mismatch" | "creator_not_eligible" | "petition_already_open" };
 
-export type EvaluateResult =
-  | { outcome: "approved" | "rejected" | "blocked" }
-  | { outcome: "pending" };
+export type PetitionOutcome = "approved" | "rejected" | "blocked" | "pending";
+export type EvaluateResult = { outcome: PetitionOutcome; winnerId?: string };
 
 // ── Approved petition payload ─────────────────────────────────────────────────
 
@@ -41,7 +40,7 @@ type ApprovedPetitionPayload = {
  * All execution handlers must call this before executing category-specific side effects.
  */
 export async function requireApprovedPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
   expectedFamily: string,
 ): Promise<ApprovedPetitionPayload> {
@@ -87,7 +86,7 @@ export async function requireApprovedPetition(
 // ── openPetition ──────────────────────────────────────────────────────────────
 
 export async function openPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   {
     groupId,
     category,
@@ -191,7 +190,7 @@ export async function openPetition(
 }
 
 export async function openSystemGroupPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   input: {
     groupId: string;
     category: string;
@@ -203,7 +202,7 @@ export async function openSystemGroupPetition(
 }
 
 export async function openNodePetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   {
     nodeId,
     category,
@@ -485,7 +484,7 @@ export async function withdrawNodePetitionSupport(
 // ── evaluatePetition ──────────────────────────────────────────────────────────
 
 export async function evaluatePetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateResult> {
   const petition = await prisma.petition.findUnique({
@@ -513,15 +512,15 @@ export async function evaluatePetition(
       : await getActiveVoterCount(prisma, petition);
 
   if (eligible === 0) {
-    await prisma.petition.update({ where: { id: petitionId }, data: { status: "blocked", resolvedAt: new Date() } });
-    return { outcome: "blocked" };
+    const updated = await prisma.petition.updateMany({ where: { id: petitionId, status: "open" }, data: { status: "blocked", resolvedAt: new Date() } });
+    return updated.count > 0 ? { outcome: "blocked" } : { outcome: "pending" };
   }
 
   // Use scopeId for competing petition resolution; fall back to groupId for legacy records
   const resolutionScopeId = petition.scopeId;
 
   if (petition.competitionKey) {
-    return resolveCompetingPetitions(prisma, petition.competitionKey, resolutionScopeId, eligible, snapshot.threshold);
+    return resolveCompetingPetitions(prisma, petitionId, petition.competitionKey, resolutionScopeId, eligible, snapshot.threshold);
   }
 
   return resolveSinglePetition(prisma, petitionId, eligible, snapshot.threshold);
@@ -530,12 +529,12 @@ export async function evaluatePetition(
 // ── evaluateEmergencyPetition ─────────────────────────────────────────────────
 
 export async function evaluateEmergencyPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateResult> {
   const petition = await prisma.petition.findUnique({
     where: { id: petitionId },
-    select: { id: true, groupId: true, scopeId: true, status: true, category: true, subjectType: true, governanceSnapshot: true },
+    select: { id: true, groupId: true, scopeId: true, status: true, closesAt: true, category: true, subjectType: true, governanceSnapshot: true },
   });
 
   if (!petition || petition.status !== "open") return { outcome: "pending" };
@@ -553,15 +552,26 @@ export async function evaluateEmergencyPetition(
   const eligible = await getActiveParticipantCount(prisma, governingGroupId);
 
   if (eligible === 0) {
-    await prisma.petition.update({ where: { id: petitionId }, data: { status: "blocked", resolvedAt: new Date() } });
-    return { outcome: "blocked" };
+    const updated = await prisma.petition.updateMany({ where: { id: petitionId, status: "open" }, data: { status: "blocked", resolvedAt: new Date() } });
+    return updated.count > 0 ? { outcome: "blocked" } : { outcome: "pending" };
   }
 
   const supportCount = await getPetitionSupportCount(prisma, petitionId);
 
   if (supportCount / eligible >= snapshot.threshold) {
-    await prisma.petition.update({ where: { id: petitionId }, data: { status: "approved", resolvedAt: new Date() } });
-    return { outcome: "approved" };
+    const updated = await prisma.petition.updateMany({
+      where: { id: petitionId, status: "open" },
+      data: { status: "approved", resolvedAt: new Date() },
+    });
+    return updated.count > 0 ? { outcome: "approved" } : { outcome: "pending" };
+  }
+
+  if (new Date() >= petition.closesAt) {
+    const updated = await prisma.petition.updateMany({
+      where: { id: petitionId, status: "open" },
+      data: { status: "rejected", resolvedAt: new Date() },
+    });
+    return updated.count > 0 ? { outcome: "rejected" } : { outcome: "pending" };
   }
 
   return { outcome: "pending" };
@@ -628,81 +638,89 @@ export function petitionFilterWhere(filter: PetitionFilterValue): Prisma.Petitio
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 async function resolveSinglePetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
   eligible: number,
   threshold: number,
 ): Promise<EvaluateResult> {
   const supportCount = await getPetitionSupportCount(prisma, petitionId);
   const outcome: PetitionStatus = supportCount / eligible >= threshold ? "approved" : "rejected";
-  await prisma.petition.update({ where: { id: petitionId }, data: { status: outcome, resolvedAt: new Date() } });
-  return { outcome };
+  const updated = await prisma.petition.updateMany({ where: { id: petitionId, status: "open" }, data: { status: outcome, resolvedAt: new Date() } });
+  return updated.count > 0 ? { outcome } : { outcome: "pending" };
 }
 
+// Private; transaction-required: its `pg_advisory_xact_lock` is inert outside an
+// active transaction. Only reached via `evaluatePetition`, whose production
+// callers all run inside `evaluateAndApplyPetition`'s transaction, so this is
+// not throw-guarded (a guard here would make `evaluatePetition` transaction-
+// required for ~every family, since `deriveCompetitionKey`'s default returns a
+// non-null key).
 async function resolveCompetingPetitions(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
+  petitionId: string,
   competitionKey: string,
-  scopeId: string,           // was groupId; now scope-aware
+  scopeId: string,
   eligible: number,
   threshold: number,
 ): Promise<EvaluateResult> {
-  const now = new Date();
-  const resolvedAt = now;
+  const resolvedAt = new Date();
 
-  return prisma.$transaction(async (tx) => {
-    // If a winner already exists, reject all remaining competitors
-    const existingWinner = await tx.petition.findFirst({
-      where: { competitionKey, scopeId, status: "approved" },
-      select: { id: true },
-    });
+  await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${scopeId}:${competitionKey}`}, 0))`;
 
-    const closedPetitions = await tx.petition.findMany({
-      where: { competitionKey, scopeId, status: "open", closesAt: { lte: now } },
-      select: { id: true, scopeType: true },
-    });
+  const existingWinner = await prisma.petition.findFirst({
+    where: { competitionKey, scopeId, status: "approved" },
+    select: { id: true },
+  });
 
-    if (closedPetitions.length === 0) return { outcome: "pending" };
+  const closedPetitions = await prisma.petition.findMany({
+    where: { competitionKey, scopeId, status: "open", closesAt: { lte: resolvedAt } },
+    select: { id: true, scopeType: true },
+  });
 
-    const counts = await Promise.all(
-      closedPetitions.map(async (p) => ({
-        id: p.id,
-        count:
-          p.scopeType === "node"
-            ? await tx.nodePetitionSupport.count({ where: { petitionId: p.id } })
-            : await tx.petitionSupport.count({ where: { petitionId: p.id } }),
-      })),
-    );
+  let winnerId: string | undefined;
 
+  if (closedPetitions.length > 0) {
     if (existingWinner) {
-      await tx.petition.updateMany({
-        where: { id: { in: counts.map((c) => c.id) } },
+      await prisma.petition.updateMany({
+        where: { id: { in: closedPetitions.map((c) => c.id) } },
         data: { status: "rejected", resolvedAt },
       });
-      return { outcome: "rejected" };
-    }
+    } else {
+      const counts = await Promise.all(
+        closedPetitions.map(async (p) => ({
+          id: p.id,
+          count:
+            p.scopeType === "node"
+              ? await prisma.nodePetitionSupport.count({ where: { petitionId: p.id } })
+              : await prisma.petitionSupport.count({ where: { petitionId: p.id } }),
+        })),
+      );
 
-    const maxCount = Math.max(...counts.map((c) => c.count));
-    const winners = counts.filter((c) => c.count === maxCount && c.count / eligible >= threshold);
+      const maxCount = Math.max(...counts.map((c) => c.count));
+      const winners = counts.filter((c) => c.count === maxCount && c.count / eligible >= threshold);
 
-    if (winners.length === 1) {
-      const winnerId = winners[0].id;
-      const loserIds = counts.filter((c) => c.id !== winnerId).map((c) => c.id);
-      await tx.petition.update({ where: { id: winnerId }, data: { status: "approved", resolvedAt } });
-      if (loserIds.length > 0) {
-        await tx.petition.updateMany({ where: { id: { in: loserIds } }, data: { status: "rejected", resolvedAt } });
+      if (winners.length === 1) {
+        winnerId = winners[0].id;
+        const loserIds = counts.filter((c) => c.id !== winnerId).map((c) => c.id);
+        await prisma.petition.update({ where: { id: winnerId }, data: { status: "approved", resolvedAt } });
+        if (loserIds.length > 0) {
+          await prisma.petition.updateMany({ where: { id: { in: loserIds } }, data: { status: "rejected", resolvedAt } });
+        }
+      } else {
+        await prisma.petition.updateMany({
+          where: { id: { in: counts.map((c) => c.id) } },
+          data: { status: "rejected", resolvedAt },
+        });
       }
-      return { outcome: "approved" };
     }
+  }
 
-    await tx.petition.updateMany({
-      where: { id: { in: counts.map((c) => c.id) } },
-      data: { status: "rejected", resolvedAt },
-    });
-    return { outcome: "rejected" };
-  });
+  const final = await prisma.petition.findUnique({ where: { id: petitionId }, select: { status: true } });
+  const outcome = (!final || final.status === "open" ? "pending" : final.status) as PetitionOutcome;
+  return winnerId ? { outcome, winnerId } : { outcome };
 }
 
-async function getPetitionSupportCount(prisma: PrismaClient, petitionId: string): Promise<number> {
+async function getPetitionSupportCount(prisma: Prisma.TransactionClient, petitionId: string): Promise<number> {
   const petition = await prisma.petition.findUnique({
     where: { id: petitionId },
     select: { scopeType: true },

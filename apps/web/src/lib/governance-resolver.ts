@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { Prisma } from "../generated/prisma/client";
 import {
   type GovernanceCategory,
   type ResolvedCategoryParams,
@@ -8,7 +8,7 @@ import {
 import { computeAllParameterTemperatures } from "./governance-temperature";
 
 export async function resolveGovernanceParams(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   groupId: string,
   category: GovernanceCategory,
 ): Promise<ResolvedCategoryParams> {
@@ -22,7 +22,7 @@ export async function resolveGovernanceParams(
 // Convenience: resolves all parameters for a category and returns them as a
 // plain JSON-serializable snapshot suitable for Petition.governanceSnapshot.
 export async function snapshotGovernanceParams(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   groupId: string,
   category: GovernanceCategory,
 ): Promise<ResolvedCategoryParams> {

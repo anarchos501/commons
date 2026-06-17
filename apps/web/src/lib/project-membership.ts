@@ -17,12 +17,12 @@ function daysAgo(days: number): Date {
  * provenance and confers no ongoing standing once a group is no longer an
  * active host.
  */
-async function isProjectHosted(prisma: PrismaClient, projectId: string): Promise<boolean> {
+async function isProjectHosted(prisma: Prisma.TransactionClient, projectId: string): Promise<boolean> {
   const activeHostingCount = await prisma.projectHosting.count({ where: { projectId, endedAt: null } });
   return activeHostingCount > 0;
 }
 
-export async function assertProjectWritable(prisma: PrismaClient, projectId: string): Promise<void> {
+export async function assertProjectWritable(prisma: Prisma.TransactionClient, projectId: string): Promise<void> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { status: true, pendingClosureAt: true },
@@ -435,7 +435,7 @@ async function syncProjectStatus(prisma: PrismaClient, projectId: string): Promi
  * the historical record of when the grace period began (mirrors how
  * ProjectHosting.endedAt preserves history rather than deleting rows).
  */
-export async function syncProjectHostingLifecycle(prisma: PrismaClient, projectId: string): Promise<void> {
+export async function syncProjectHostingLifecycle(prisma: Prisma.TransactionClient, projectId: string): Promise<void> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { status: true, pendingClosureAt: true },
@@ -478,18 +478,16 @@ export async function syncProjectHostingLifecycle(prisma: PrismaClient, projectI
       projectMembershipIds: frozenMemberships.map((membership) => membership.id),
       accountIds: frozenMemberships.map((membership) => membership.accountId),
     };
-    await prisma.$transaction([
-      prisma.project.update({ where: { id: projectId }, data: { pendingClosureAt, pendingClosureElectorate } }),
-      prisma.petition.updateMany({
-        where: {
-          scopeType: "project",
-          scopeId: projectId,
-          status: "open",
-          subjectType: { not: "project_hosting_acceptance" },
-        },
-        data: { status: "superseded", resolvedAt: pendingClosureAt },
-      }),
-    ]);
+    await prisma.project.update({ where: { id: projectId }, data: { pendingClosureAt, pendingClosureElectorate } });
+    await prisma.petition.updateMany({
+      where: {
+        scopeType: "project",
+        scopeId: projectId,
+        status: "open",
+        subjectType: { not: "project_hosting_acceptance" },
+      },
+      data: { status: "superseded", resolvedAt: pendingClosureAt },
+    });
     await logAction(prisma, {
       action: "project_hosting.pending_closure_opened",
       targetType: "project",

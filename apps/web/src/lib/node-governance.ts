@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { GovernanceCategory } from "./governance-categories";
 import { CATEGORY_REGISTRY, isGovernanceCategory, isGovernanceParameter, resolveAllParametersWithIndividualTemps } from "./governance-categories";
 import { SIGNAL_CHANGE_COOLDOWN_HOURS } from "./governance-temperature";
@@ -50,7 +50,7 @@ function computeWeightedTemperature(
 }
 
 export async function getNodeGovernanceEligibility(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   nodeId: string,
 ): Promise<NodeGovernanceEligibility[]> {
   const memberships = await prisma.groupMembership.findMany({
@@ -90,13 +90,13 @@ export async function requireActiveNodeUser(
   if (status !== "active") throw new Error("Active node participation is required.");
 }
 
-export async function getActiveNodeVoterCount(prisma: PrismaClient, nodeId: string): Promise<number> {
+export async function getActiveNodeVoterCount(prisma: Prisma.TransactionClient, nodeId: string): Promise<number> {
   const eligibility = await getNodeGovernanceEligibility(prisma, nodeId);
   return eligibility.filter((entry) => entry.participationStatus === "active").length;
 }
 
 export async function activeNodeHostExists(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   nodeId: string,
   accountId: string,
 ): Promise<boolean> {
@@ -107,7 +107,7 @@ export async function activeNodeHostExists(
 }
 
 export async function requireActiveNodeHost(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   nodeId: string,
   accountId: string,
 ): Promise<void> {
@@ -153,7 +153,7 @@ export async function computeNodeTemperature(
 }
 
 export async function computeAllNodeParameterTemperatures(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   nodeId: string,
   category: GovernanceCategory,
 ): Promise<Map<string, number>> {
@@ -191,7 +191,7 @@ export async function computeAllNodeParameterTemperatures(
 }
 
 export async function resolveNodeGovernanceParams(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   nodeId: string,
   category: GovernanceCategory,
 ) {

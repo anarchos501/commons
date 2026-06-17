@@ -19,7 +19,7 @@ const ALLOWED_ABILITY_2 = PROPOSABLE_RESPONSIBILITY_ABILITIES[1].ability;
 
 async function approveAndApply(petitionId: string) {
   await prisma.petition.update({ where: { id: petitionId }, data: { status: "approved" } });
-  await createResponsibilityFromProposal(prisma, petitionId);
+  await prisma.$transaction((tx) => createResponsibilityFromProposal(tx, petitionId));
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ test("createResponsibilityFromProposal is idempotent across repeated application
 
     await approveAndApply(result.petitionId);
     // Re-evaluate the already-applied petition
-    await createResponsibilityFromProposal(prisma, result.petitionId);
+    await prisma.$transaction((tx) => createResponsibilityFromProposal(tx, result.petitionId));
 
     const responsibilities = await prisma.responsibility.findMany({ where: { groupId, type: "Greeter" } });
     assert.equal(responsibilities.length, 1);
@@ -280,7 +280,7 @@ test("createResponsibilityFromProposal rejects a petition whose draft belongs to
     await prisma.petition.update({ where: { id: forged.petitionId }, data: { status: "approved" } });
 
     await assert.rejects(
-      () => createResponsibilityFromProposal(prisma, forged.petitionId),
+      () => prisma.$transaction((tx) => createResponsibilityFromProposal(tx, forged.petitionId)),
       /scope does not match the draft group/,
     );
     assert.equal(await prisma.responsibility.count({ where: { groupId: groupA.groupId } }), 0);
@@ -311,7 +311,7 @@ test("createResponsibilityFromProposal rejects invalid abilities stored on a dra
     await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
 
     await assert.rejects(
-      () => createResponsibilityFromProposal(prisma, result.petitionId),
+      () => prisma.$transaction((tx) => createResponsibilityFromProposal(tx, result.petitionId)),
       /no valid abilities/,
     );
     assert.equal(await prisma.responsibility.count({ where: { groupId } }), 0);

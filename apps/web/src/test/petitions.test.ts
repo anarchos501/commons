@@ -15,6 +15,7 @@ import {
   PETITION_FILTER_VALUES,
 } from "../lib/petitions";
 import { isProposalFamily, categoryForFamily } from "../lib/governance-proposal-families";
+import { evaluateAndApplyPetition, resolveExpiredPetitions } from "../lib/petition-evaluation";
 
 const prisma = createPrismaClient();
 
@@ -831,6 +832,397 @@ test("petitionFilterWhere returns the expected where clause for each filter valu
   assert.deepEqual(petitionFilterWhere("rejected"), { status: "rejected", archivedAt: null });
   assert.deepEqual(petitionFilterWhere("archived"), { archivedAt: { not: null } });
   assert.equal(PETITION_FILTER_VALUES.length, 6);
+});
+
+// ---- evaluateAndApplyPetition / resolveExpiredPetitions ----
+
+test("evaluateAndApplyPetition: emergency petition activates early when threshold crossed", async () => {
+  const { group, memberships } = await createFixture("pet_eval_emer1", 5);
+  try {
+    const r = await openPetition(prisma, { groupId: group.id, category: "emergency", subjectType: "emergency_declaration", subjectId: group.id, createdByMembershipId: memberships[0].id });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    // 3 of 5 = 60% > 50% default threshold
+    for (let i = 0; i < 3; i++) {
+      await addPetitionSupport(prisma, { petitionId: r.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
+    }
+
+    // closesAt is NOT backdated — this tests early activation
+    const result = await evaluateAndApplyPetition(prisma, r.petitionId);
+    assert.equal(result.outcome, "approved");
+
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: r.petitionId } });
+    assert.equal(petition.status, "approved");
+
+    const periods = await prisma.emergencyPeriod.findMany({ where: { groupId: group.id } });
+    assert.equal(periods.length, 1);
+  } finally {
+    await prisma.emergencyPeriod.deleteMany({ where: { groupId: { startsWith: "pet_eval_emer1" } } });
+    await cleanupFixture("pet_eval_emer1");
+  }
+});
+
+test("evaluateAndApplyPetition: emergency petition rejects at closesAt when threshold not met", async () => {
+  const { group, memberships } = await createFixture("pet_eval_emer2", 5);
+  try {
+    const r = await openPetition(prisma, { groupId: group.id, category: "emergency", subjectType: "emergency_declaration", subjectId: group.id, createdByMembershipId: memberships[0].id });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    // Only 1 of 5 = 20% — below threshold
+    await addPetitionSupport(prisma, { petitionId: r.petitionId, actorAccountId: memberships[0].accountId, membershipId: memberships[0].id });
+
+    await prisma.petition.update({ where: { id: r.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
+
+    const result = await evaluateAndApplyPetition(prisma, r.petitionId);
+    assert.equal(result.outcome, "rejected");
+
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: r.petitionId } });
+    assert.equal(petition.status, "rejected");
+
+    const periods = await prisma.emergencyPeriod.findMany({ where: { groupId: group.id } });
+    assert.equal(periods.length, 0);
+  } finally {
+    await cleanupFixture("pet_eval_emer2");
+  }
+});
+
+test("evaluateAndApplyPetition: loser-first evaluation dispatches winner's side effect", async () => {
+  const { group, memberships } = await createFixture("pet_eval_compete", 5);
+  try {
+    const proposal = await prisma.proposal.create({
+      data: {
+        groupId: group.id,
+        title: "Compete Winner Project",
+        body: "",
+        createdByAccountId: memberships[0].accountId,
+        status: "open",
+      },
+    });
+
+    const snapshot = { threshold: 0.5 };
+    const closesAt = new Date(Date.now() - 1000);
+    const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+    const competitionKey = `${group.id}:project_proposal:compete_test_shared`;
+
+    const winnerPetition = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "project", subjectType: "project_proposal", subjectId: proposal.id,
+        competitionKey, status: "open",
+        governanceSnapshot: snapshot as object,
+        opensAt, closesAt,
+      },
+    });
+
+    const loserPetition = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "project", subjectType: "project_proposal", subjectId: "pet_ec_loser_noproposal",
+        competitionKey, status: "open",
+        governanceSnapshot: snapshot as object,
+        opensAt, closesAt,
+      },
+    });
+
+    // Winner: 4/5 support (80%); loser: 1/5 (20%)
+    for (let i = 0; i < 4; i++) {
+      await prisma.petitionSupport.create({ data: { petitionId: winnerPetition.id, membershipId: memberships[i].id } });
+    }
+    await prisma.petitionSupport.create({ data: { petitionId: loserPetition.id, membershipId: memberships[0].id } });
+
+    // Evaluate the LOSER — winner's side effect must be dispatched via result.winnerId
+    const result = await evaluateAndApplyPetition(prisma, loserPetition.id);
+    assert.equal(result.outcome, "rejected");
+
+    const winner = await prisma.petition.findUniqueOrThrow({ where: { id: winnerPetition.id } });
+    assert.equal(winner.status, "approved");
+
+    // Winner's side effect: Project was created from the Proposal
+    const project = await prisma.project.findFirst({ where: { foundingGroupId: group.id, name: "Compete Winner Project" } });
+    assert.ok(project, "Project should have been created for the winner");
+
+    const updatedProposal = await prisma.proposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    assert.equal(updatedProposal.status, "implemented");
+
+    // Re-evaluating the already-resolved winner returns "pending" (no-op)
+    const result2 = await evaluateAndApplyPetition(prisma, winnerPetition.id);
+    assert.equal(result2.outcome, "pending");
+  } finally {
+    await prisma.actionLog.deleteMany({ where: { groupId: { startsWith: "pet_eval_compete" } } });
+    await prisma.projectHosting.deleteMany({ where: { project: { foundingGroupId: { startsWith: "pet_eval_compete" } } } });
+    await prisma.proposal.deleteMany({ where: { groupId: { startsWith: "pet_eval_compete" } } });
+    await cleanupFixture("pet_eval_compete");
+  }
+});
+
+// Competing node_steward_appointment petitions: the loser is evaluated first,
+// and the winner's side effect must be dispatched through the SPECIALIZED
+// handler (evaluateNodeStewardProposalForPetition → applyProposal), not the
+// generic applyApprovedPetition dispatch. node_steward_appointment is the only
+// family that actually competes in production (deriveCompetitionKey returns
+// `${nodeId}:node_steward_appointment`, shared across candidates).
+test("evaluateAndApplyPetition: competing node-steward winner is dispatched via the specialized handler", async () => {
+  const prefix = "pet_eval_steward";
+  const { node, group, memberships } = await createFixture(prefix, 5);
+  try {
+    const snapshot = { threshold: 0.5, petitionDuration: 7 };
+    const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+    const closesAt = new Date(Date.now() - 1000);
+    const competitionKey = `${node.id}:node_steward_appointment`;
+
+    // A fresh node (stewardRevision 0, no steward) satisfies
+    // proposalContextStillValid for an appointment with a null/0 baseline.
+    async function makeAppointment() {
+      const proposal = await prisma.nodeStewardProposal.create({
+        data: {
+          nodeId: node.id,
+          action: "appointment",
+          origin: "group",
+          candidateGroupId: group.id,
+          initiatingGroupId: group.id,
+          initiatedByAccountId: memberships[0].accountId,
+          baselineStewardGroupId: null,
+          baselineStewardRevision: 0,
+          status: "awaiting_node_vote",
+          snapshot: { node: { id: node.id } },
+        },
+      });
+      const petition = await prisma.petition.create({
+        data: {
+          groupId: null,
+          scopeType: "node",
+          scopeId: node.id,
+          category: "node_stewardship",
+          subjectType: "node_steward_appointment",
+          subjectId: proposal.id,
+          competitionKey,
+          status: "open",
+          governanceSnapshot: snapshot as object,
+          opensAt,
+          closesAt,
+        },
+      });
+      await prisma.nodeStewardProposal.update({
+        where: { id: proposal.id },
+        data: { nodePetitionId: petition.id },
+      });
+      return { proposalId: proposal.id, petitionId: petition.id };
+    }
+
+    const winner = await makeAppointment();
+    const loser = await makeAppointment();
+
+    // Winner: 3/5 node votes (60% ≥ 0.5); loser: 1/5.
+    for (let i = 0; i < 3; i++) {
+      await prisma.nodePetitionSupport.create({ data: { petitionId: winner.petitionId, nodeId: node.id, accountId: memberships[i].accountId } });
+    }
+    await prisma.nodePetitionSupport.create({ data: { petitionId: loser.petitionId, nodeId: node.id, accountId: memberships[3].accountId } });
+
+    // Evaluate the LOSER — the winner's appointment must still be applied, via
+    // applyResolvedPetition(tx, result.winnerId) routing through the specialized
+    // node-steward handler rather than the generic dispatch.
+    const result = await evaluateAndApplyPetition(prisma, loser.petitionId);
+    assert.equal(result.outcome, "rejected");
+
+    const loserPetition = await prisma.petition.findUniqueOrThrow({ where: { id: loser.petitionId } });
+    const winnerPetition = await prisma.petition.findUniqueOrThrow({ where: { id: winner.petitionId } });
+    assert.equal(loserPetition.status, "rejected");
+    assert.equal(winnerPetition.status, "approved");
+
+    const winnerProposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: winner.proposalId } });
+    const loserProposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: loser.proposalId } });
+    assert.equal(winnerProposal.status, "succeeded", "winner proposal must advance via the specialized handler");
+    assert.equal(loserProposal.status, "failed-rejected", "loser proposal must be failed via failProposal");
+
+    const updatedNode = await prisma.node.findUniqueOrThrow({ where: { id: node.id } });
+    assert.equal(updatedNode.stewardRevision, 1, "applyProposal must have incremented stewardRevision");
+    assert.equal(updatedNode.stewardGroupId, group.id, "winner candidate group must be installed as steward");
+
+    // Re-evaluating the already-resolved winner is a no-op (non-open short-circuit).
+    const result2 = await evaluateAndApplyPetition(prisma, winner.petitionId);
+    assert.equal(result2.outcome, "pending");
+    const nodeAfter = await prisma.node.findUniqueOrThrow({ where: { id: node.id } });
+    assert.equal(nodeAfter.stewardRevision, 1, "re-evaluation must not re-apply the appointment");
+  } finally {
+    await prisma.nodePetitionSupport.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+    await prisma.petition.deleteMany({ where: { scopeId: { startsWith: prefix } } });
+    await prisma.nodeStewardProposal.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+    await prisma.actionLog.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+    await cleanupFixture(prefix);
+  }
+});
+
+test("resolveExpiredPetitions: failed petition stays open while successful one resolves", async () => {
+  const { group, memberships } = await createFixture("pet_eval_sweep", 3);
+  try {
+    // Drain any due petitions from prior runs before creating our test data
+    await resolveExpiredPetitions(prisma);
+
+    const closesAt = new Date(Date.now() - 1000);
+    const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+    const snapshot = { threshold: 0.5 };
+
+    // Petition A: no support → rejected (counts as resolved)
+    const petitionA = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "membership", subjectType: "membership_request", subjectId: "pet_es_fake_member",
+        competitionKey: `${group.id}:membership_request:pet_es_fake_member`,
+        status: "open", governanceSnapshot: snapshot as object, opensAt, closesAt,
+      },
+    });
+
+    // Petition B: 2/3 support but missing Proposal → would approve but throws at dispatch
+    const petitionB = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "project", subjectType: "project_proposal", subjectId: "pet_es_missing_proposal",
+        competitionKey: `${group.id}:project_proposal:pet_es_missing_proposal`,
+        status: "open", governanceSnapshot: snapshot as object, opensAt, closesAt,
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      await prisma.petitionSupport.create({ data: { petitionId: petitionB.id, membershipId: memberships[i].id } });
+    }
+
+    const stats = await resolveExpiredPetitions(prisma);
+
+    assert.equal(stats.attempted, 2);
+    assert.equal(stats.resolved, 1);
+    assert.equal(stats.failed, 1);
+
+    const afterA = await prisma.petition.findUniqueOrThrow({ where: { id: petitionA.id } });
+    const afterB = await prisma.petition.findUniqueOrThrow({ where: { id: petitionB.id } });
+    assert.equal(afterA.status, "rejected");
+    assert.equal(afterB.status, "open");
+    assert.equal(afterB.resolvedAt, null);
+  } finally {
+    await cleanupFixture("pet_eval_sweep");
+  }
+});
+
+test("evaluateAndApplyPetition: concurrent calls produce exactly one EmergencyPeriod", async () => {
+  const { group, memberships } = await createFixture("pet_eval_race", 5);
+  const prisma2 = createPrismaClient();
+  try {
+    const r = await openPetition(prisma, { groupId: group.id, category: "emergency", subjectType: "emergency_declaration", subjectId: group.id, createdByMembershipId: memberships[0].id });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    for (let i = 0; i < 3; i++) {
+      await addPetitionSupport(prisma, { petitionId: r.petitionId, actorAccountId: memberships[i].accountId, membershipId: memberships[i].id });
+    }
+
+    const [res1, res2] = await Promise.all([
+      evaluateAndApplyPetition(prisma, r.petitionId),
+      evaluateAndApplyPetition(prisma2, r.petitionId),
+    ]);
+
+    // One transaction wins the updateMany guard; the other serializes and finds status no longer "open"
+    const outcomes = [res1.outcome, res2.outcome].sort();
+    assert.deepEqual(outcomes, ["approved", "pending"]);
+
+    const periods = await prisma.emergencyPeriod.findMany({ where: { groupId: group.id } });
+    assert.equal(periods.length, 1);
+  } finally {
+    await prisma2.$disconnect();
+    await prisma.emergencyPeriod.deleteMany({ where: { groupId: { startsWith: "pet_eval_race" } } });
+    await cleanupFixture("pet_eval_race");
+  }
+});
+
+test("evaluateAndApplyPetition: side-effect failure rolls back the status transition", async () => {
+  const { group, memberships } = await createFixture("pet_eval_rollback", 3);
+  try {
+    const closesAt = new Date(Date.now() - 1000);
+    const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+
+    const petition = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "project", subjectType: "project_proposal", subjectId: "pet_er_missing_proposal",
+        competitionKey: `${group.id}:project_proposal:pet_er_missing_proposal`,
+        status: "open", governanceSnapshot: { threshold: 0.5 } as object, opensAt, closesAt,
+      },
+    });
+
+    // 2/3 support → would cross 50% threshold
+    for (let i = 0; i < 2; i++) {
+      await prisma.petitionSupport.create({ data: { petitionId: petition.id, membershipId: memberships[i].id } });
+    }
+
+    // Entire transaction rolls back when createProjectFromPetition throws for missing Proposal
+    await assert.rejects(
+      () => evaluateAndApplyPetition(prisma, petition.id),
+      /not found/,
+    );
+
+    const p = await prisma.petition.findUniqueOrThrow({ where: { id: petition.id } });
+    assert.equal(p.status, "open");
+    assert.equal(p.resolvedAt, null);
+
+    const project = await prisma.project.findFirst({ where: { foundingGroupId: group.id } });
+    assert.equal(project, null);
+  } finally {
+    await cleanupFixture("pet_eval_rollback");
+  }
+});
+
+test("evaluateAndApplyPetition: successful resolution commits status and side effect atomically", async () => {
+  const { group, memberships } = await createFixture("pet_eval_commit", 3);
+  try {
+    const proposal = await prisma.proposal.create({
+      data: {
+        groupId: group.id,
+        title: "Commit Test Project",
+        body: "",
+        createdByAccountId: memberships[0].accountId,
+        status: "open",
+      },
+    });
+
+    const closesAt = new Date(Date.now() - 1000);
+    const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+
+    const petition = await prisma.petition.create({
+      data: {
+        groupId: group.id, scopeType: "group", scopeId: group.id,
+        category: "project", subjectType: "project_proposal", subjectId: proposal.id,
+        competitionKey: `${group.id}:project_proposal:${proposal.id}`,
+        status: "open", governanceSnapshot: { threshold: 0.5 } as object, opensAt, closesAt,
+      },
+    });
+
+    // 2/3 support → approved
+    for (let i = 0; i < 2; i++) {
+      await prisma.petitionSupport.create({ data: { petitionId: petition.id, membershipId: memberships[i].id } });
+    }
+
+    const result = await evaluateAndApplyPetition(prisma, petition.id);
+    assert.equal(result.outcome, "approved");
+
+    const p = await prisma.petition.findUniqueOrThrow({ where: { id: petition.id } });
+    assert.equal(p.status, "approved");
+
+    const project = await prisma.project.findFirst({ where: { foundingGroupId: group.id, name: "Commit Test Project" } });
+    assert.ok(project, "Project should exist");
+
+    const hosting = await prisma.projectHosting.findFirst({ where: { projectId: project!.id } });
+    assert.ok(hosting, "ProjectHosting should exist");
+
+    const pm = await prisma.projectMembership.findFirst({ where: { projectId: project!.id } });
+    assert.ok(pm, "ProjectMembership should exist");
+
+    const updatedProposal = await prisma.proposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    assert.equal(updatedProposal.status, "implemented");
+  } finally {
+    await prisma.actionLog.deleteMany({ where: { groupId: { startsWith: "pet_eval_commit" } } });
+    await prisma.projectHosting.deleteMany({ where: { project: { foundingGroupId: { startsWith: "pet_eval_commit" } } } });
+    await prisma.proposal.deleteMany({ where: { groupId: { startsWith: "pet_eval_commit" } } });
+    await cleanupFixture("pet_eval_commit");
+  }
 });
 
 // ---- fixtures ----

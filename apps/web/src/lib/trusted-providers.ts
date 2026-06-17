@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { OfferingEntityType } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
 
@@ -117,7 +117,7 @@ export async function proposeTrustedProviderStatus(
 }
 
 export async function grantTrustedProviderStatusFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await prisma.petition.findUnique({
@@ -239,7 +239,7 @@ export async function proposeTrustedProviderRevocation(
 }
 
 export async function revokeTrustedProviderStatusFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await prisma.petition.findUnique({

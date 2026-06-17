@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import { proposeEvent, submitEvent } from "../lib/events";
+import { addPetitionSupport } from "../lib/petitions";
+import { evaluateAndApplyPetition, resolveExpiredPetitions } from "../lib/petition-evaluation";
 import { GOVERNANCE_CATEGORIES } from "../lib/governance-categories";
 import { categoryForFamily, isProposalFamily } from "../lib/governance-proposal-families";
 import {
@@ -106,7 +108,7 @@ test("a rejected petition produces no event and a failed proposal", async () => 
 
     await prisma.petition.update({ where: { id: result.petitionIds[0] }, data: { status: "rejected" } });
     const { evaluateEventProposalForPetition } = await import("../lib/events");
-    const outcome = await evaluateEventProposalForPetition(prisma, result.petitionIds[0]);
+    const outcome = await prisma.$transaction((tx) => evaluateEventProposalForPetition(tx, result.petitionIds[0]));
     assert.equal(outcome?.outcome, "failed-rejected");
 
     assert.equal(await prisma.calendarEvent.count({ where: { hostId: groupId } }), 0);
@@ -215,7 +217,7 @@ test("coalition meeting opens one petition per member group; event only when all
     // Approve only two of three → still no event, still pending
     await prisma.petition.updateMany({ where: { id: { in: result.petitionIds.slice(0, 2) } }, data: { status: "approved" } });
     const { evaluateEventProposalForPetition } = await import("../lib/events");
-    const partial = await evaluateEventProposalForPetition(prisma, result.petitionIds[0]);
+    const partial = await prisma.$transaction((tx) => evaluateEventProposalForPetition(tx, result.petitionIds[0]));
     assert.equal(partial?.outcome, "pending");
     assert.equal(await prisma.calendarEvent.count({ where: { hostId: coalition.coalitionId } }), 0);
 
@@ -241,9 +243,73 @@ test("coalition meeting fails if any member group rejects", async () => {
     await prisma.petition.updateMany({ where: { id: { in: result.petitionIds.slice(0, 2) } }, data: { status: "approved" } });
     await prisma.petition.update({ where: { id: result.petitionIds[2] }, data: { status: "rejected" } });
     const { evaluateEventProposalForPetition } = await import("../lib/events");
-    const outcome = await evaluateEventProposalForPetition(prisma, result.petitionIds[0]);
+    const outcome = await prisma.$transaction((tx) => evaluateEventProposalForPetition(tx, result.petitionIds[0]));
     assert.equal(outcome?.outcome, "failed-rejected");
     assert.equal(await prisma.calendarEvent.count({ where: { hostId: coalition.coalitionId } }), 0);
+  } finally {
+    await cleanupEventFixture(prisma, prefix);
+  }
+});
+
+// ── Regression: event petitions must apply through the generic resolution path ──
+// These guard the petition-resolution-fix integration: evaluateAndApplyPetition was
+// rewritten to run in one transaction, and the event-proposal handler must still be
+// dispatched from it (and run on that transaction without opening its own). Unlike the
+// tests above — which call evaluateEventProposalForPetition directly — these route a real
+// petition through evaluateAndApplyPetition / resolveExpiredPetitions, so they fail if the
+// events dispatch is dropped (no event created) or nests a transaction (the call throws).
+
+test("event petition resolved via evaluateAndApplyPetition creates the CalendarEvent", async () => {
+  const prefix = "ep_eval_apply";
+  await cleanupEventFixture(prisma, prefix);
+  try {
+    const { accountId, groupId, membershipId } = await createGroupFixture(prisma, prefix);
+    const result = await proposeEvent(prisma, meeting(accountId, "group", groupId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(await prisma.calendarEvent.count({ where: { hostId: groupId } }), 0);
+
+    // Drive a real approval: the sole member supports, the petition is past its close time.
+    await addPetitionSupport(prisma, { petitionId: result.petitionIds[0], actorAccountId: accountId, membershipId });
+    await prisma.petition.update({
+      where: { id: result.petitionIds[0] },
+      data: { closesAt: new Date(Date.now() - 1000) },
+    });
+
+    // Route through the generic resolver (NOT evaluateEventProposalForPetition directly).
+    await evaluateAndApplyPetition(prisma, result.petitionIds[0]);
+
+    const events = await prisma.calendarEvent.findMany({ where: { hostId: groupId } });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].authorizingPetitionId, result.petitionIds[0]);
+    const proposal = await prisma.eventProposal.findUniqueOrThrow({ where: { id: result.proposalId } });
+    assert.equal(proposal.status, "succeeded");
+  } finally {
+    await cleanupEventFixture(prisma, prefix);
+  }
+});
+
+test("expired event petition is resolved into a CalendarEvent by the background sweep", async () => {
+  const prefix = "ep_sweep";
+  await cleanupEventFixture(prisma, prefix);
+  try {
+    const { accountId, groupId, membershipId } = await createGroupFixture(prisma, prefix);
+    const result = await proposeEvent(prisma, meeting(accountId, "group", groupId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await addPetitionSupport(prisma, { petitionId: result.petitionIds[0], actorAccountId: accountId, membershipId });
+    await prisma.petition.update({
+      where: { id: result.petitionIds[0] },
+      data: { closesAt: new Date(Date.now() - 1000) },
+    });
+
+    // The sweep (what instrumentation.ts runs on a timer) must resolve it with no page visit.
+    const sweep = await resolveExpiredPetitions(prisma);
+    assert.ok(sweep.resolved >= 1);
+    assert.equal(sweep.failed, 0);
+
+    assert.equal(await prisma.calendarEvent.count({ where: { hostId: groupId } }), 1);
   } finally {
     await cleanupEventFixture(prisma, prefix);
   }

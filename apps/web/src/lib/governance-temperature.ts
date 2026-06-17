@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { GovernanceCategory } from "./governance-categories";
 import { CATEGORY_REGISTRY, isGovernanceCategory, isGovernanceParameter } from "./governance-categories";
 
@@ -176,7 +176,7 @@ export async function computeGroupTemperature(
 }
 
 export async function computeAllParameterTemperatures(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   groupId: string,
   category: GovernanceCategory,
 ): Promise<Map<string, number>> {

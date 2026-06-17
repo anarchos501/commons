@@ -1,7 +1,7 @@
 // D4: Publication lib -- create, add entries, archive, list.
 // A Publication remains the same Publication throughout its lifetime.
 // Adding entries never creates a new Publication -- only new PublicationEntry records.
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
@@ -150,7 +150,7 @@ export async function openProjectPublicationArchivalPetition(
 }
 
 /** Called after a Publication archival petition is approved. Fix 3: re-verifies ownership. */
-export async function onPublicationArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+export async function onPublicationArchivalPetitionApproved(prisma: Prisma.TransactionClient, petitionId: string): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "publication_archive");
   const accountId = petition.createdByMembershipId
     ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null
@@ -200,7 +200,7 @@ export async function openPublicationEntryArchivalPetition(
 }
 
 /** Called after a PublicationEntry archival petition is approved. Fix 3: re-verifies ownership. */
-export async function onPublicationEntryArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+export async function onPublicationEntryArchivalPetitionApproved(prisma: Prisma.TransactionClient, petitionId: string): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "publication_entry_archive");
   const accountId = petition.createdByMembershipId ? (await prisma.groupMembership.findUnique({ where: { id: petition.createdByMembershipId }, select: { accountId: true } }))?.accountId ?? null : null;
 

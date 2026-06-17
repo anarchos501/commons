@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { AssignmentEndReason } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { resolveGovernanceParams } from "./governance-resolver";
@@ -360,7 +360,7 @@ export async function volunteerForResponsibility(
  * For seed/admin/migration use, call createAssignment() directly (the internal primitive).
  */
 export async function confirmResponsibilityAssignment(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   // Fix 2: verify petition is approved and of the correct family

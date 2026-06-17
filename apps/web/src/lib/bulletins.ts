@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
@@ -95,7 +95,7 @@ export async function openProjectBulletinArchivalPetition(
  * Sets archivedAt and provenance fields. The petition subjectId is the bulletinId.
  * Fix 3: re-verifies target ownership against petition.groupId before mutating.
  */
-export async function onBulletinArchivalPetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+export async function onBulletinArchivalPetitionApproved(prisma: Prisma.TransactionClient, petitionId: string): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "bulletin_archive");
 
   const accountId = petition.createdByMembershipId

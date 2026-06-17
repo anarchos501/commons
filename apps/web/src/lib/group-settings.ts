@@ -112,7 +112,7 @@ export async function proposeGroupVisibility(
 // Called when a group_visibility_proposal petition is approved.
 // Idempotent: setting public→public is a no-op.
 export async function applyGroupVisibilityFromPetition(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "group_visibility_proposal");

@@ -2219,6 +2219,7 @@ async function supportPetitionAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await addPetitionSupport(prisma, { petitionId, actorAccountId: session.accountId, membershipId: membership.id });
+    await evaluateAndApplyPetition(prisma, petitionId);
   } finally {
     await prisma.$disconnect();
   }

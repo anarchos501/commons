@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { CoordinationSpaceType } from "../generated/prisma/enums";
 import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { openPetition, requireApprovedPetition } from "./petitions";
@@ -68,7 +68,7 @@ async function requireActiveProjectMembership(
 }
 
 async function assertDiscussionSpace(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   { spaceType, spaceId, groupId }: DiscussionSpace,
 ): Promise<void> {
   await assertSpaceBelongsToGroup(prisma, spaceType, spaceId, groupId);
@@ -431,7 +431,7 @@ export async function openThreadClosurePetition(
   });
 }
 
-export async function onThreadClosurePetitionApproved(prisma: PrismaClient, petitionId: string): Promise<void> {
+export async function onThreadClosurePetitionApproved(prisma: Prisma.TransactionClient, petitionId: string): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "discussion_thread_close");
   const thread = await prisma.discussionThread.findUniqueOrThrow({
     where: { id: petition.subjectId },

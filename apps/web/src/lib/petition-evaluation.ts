@@ -1,5 +1,5 @@
-import type { PrismaClient } from "../generated/prisma/client";
-import { evaluatePetition } from "./petitions";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
+import { evaluatePetition, evaluateEmergencyPetition, type EvaluateResult } from "./petitions";
 import {
   onRevisionPetitionApproved,
   onLivingDocumentArchivalPetitionApproved,
@@ -31,67 +31,135 @@ import { evaluateEventProposalForPetition } from "./events";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
 import { responsibilityTypeLabel } from "./concern-reviewer";
 
-export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string) {
-  const result = await evaluatePetition(prisma, petitionId);
-  const hostingProposalResult = await evaluateProjectHostingProposalForPetition(prisma, petitionId);
-  if (hostingProposalResult) return;
-  const coalitionProposalResult = await evaluateCoalitionProposalForPetition(prisma, petitionId);
-  if (coalitionProposalResult) return;
-  const eventProposalResult = await evaluateEventProposalForPetition(prisma, petitionId);
-  if (eventProposalResult) return;
-  const nodeStewardResult = await evaluateNodeStewardProposalForPetition(prisma, petitionId);
-  if (nodeStewardResult) return;
-  if (result.outcome !== "approved") return;
+// Must NOT be called from inside another $transaction — it opens its own.
+export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string): Promise<EvaluateResult> {
+  return prisma.$transaction(async (tx) => {
+    const petition = await tx.petition.findUnique({
+      where: { id: petitionId },
+      select: { category: true, subjectType: true },
+    });
+    if (!petition) return { outcome: "pending" };
 
-  const petition = await prisma.petition.findUnique({
+    const result =
+      petition.category === "emergency" && petition.subjectType === "emergency_declaration"
+        ? await evaluateEmergencyPetition(tx, petitionId)
+        : await evaluatePetition(tx, petitionId);
+
+    // Specialized proposal handlers (coalition, project-hosting, steward) must run on
+    // every evaluateAndApplyPetition call — they re-evaluate the *parent proposal*, not
+    // just the individual petition. A coalition petition may still be "open" (pending)
+    // but the proposal fails because participant snapshot changed; a withdrawn petition
+    // needs to fail the whole bundle. The generic approval handler is guarded by
+    // `justResolved` so it only runs when THIS transaction changed the status.
+    await applyResolvedPetition(tx, petitionId, result.outcome !== "pending");
+
+    // Competing-petition resolution can decide a winner OTHER than petitionId.
+    // That winner's status just flipped to "approved" in this same transaction,
+    // so apply its resolution now — a future evaluation of the winner's id will
+    // see status !== "open" and never get another chance.
+    if (result.winnerId && result.winnerId !== petitionId) {
+      await applyResolvedPetition(tx, result.winnerId, true);
+    }
+
+    return result;
+  }, { timeout: 15_000, maxWait: 5_000 });
+}
+
+// justResolved: true when this transaction changed the petition's status; false when the
+// petition was already non-open before this call (e.g. withdrawn by a prior action).
+// Specialized handlers always run; generic approval dispatch only fires on justResolved.
+async function applyResolvedPetition(
+  tx: Prisma.TransactionClient,
+  petitionId: string,
+  justResolved: boolean,
+): Promise<void> {
+  if (await evaluateProjectHostingProposalForPetition(tx, petitionId)) return;
+  if (await evaluateCoalitionProposalForPetition(tx, petitionId)) return;
+  if (await evaluateEventProposalForPetition(tx, petitionId)) return;
+  if (await evaluateNodeStewardProposalForPetition(tx, petitionId)) return;
+
+  if (!justResolved) return;
+
+  const petition = await tx.petition.findUnique({
     where: { id: petitionId },
-    select: { subjectType: true, subjectId: true },
+    select: { status: true, subjectType: true, subjectId: true },
   });
-  if (!petition) return;
-
-  if (petition.subjectType === "membership_request") {
-    await approveMembershipRequest(prisma, petition.subjectId);
-  } else if (petition.subjectType === "living_document_revision") {
-    await onRevisionPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "living_document_archive") {
-    await onLivingDocumentArchivalPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "discussion_thread_close") {
-    await onThreadClosurePetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "responsibility_proposal") {
-    await confirmResponsibilityAssignment(prisma, petitionId);
-  } else if (petition.subjectType === "responsibility_creation_proposal") {
-    await createResponsibilityFromProposal(prisma, petitionId);
-  } else if (petition.subjectType === "contribution_category_proposal") {
-    await createContributionCategoryFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "contribution_category_archive") {
-    await archiveContributionCategoryFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "trusted_provider_proposal") {
-    await grantTrustedProviderStatusFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "trusted_provider_revocation") {
-    await revokeTrustedProviderStatusFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "emergency_declaration") {
-    await onEmergencyPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "project_proposal") {
-    await createProjectFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "project_hosting_withdrawal") {
-    await onProjectHostingWithdrawalPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "bulletin_archive") {
-    await onBulletinArchivalPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "publication_archive") {
-    await onPublicationArchivalPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "publication_entry_archive") {
-    await onPublicationEntryArchivalPetitionApproved(prisma, petitionId);
-  } else if (petition.subjectType === "group_visibility_proposal") {
-    await applyGroupVisibilityFromPetition(prisma, petitionId);
-  } else if (petition.subjectType === "bulletin_creation") {
-    await applyContentCreationDraft(prisma, petitionId, "bulletin_creation");
-  } else if (petition.subjectType === "publication_creation") {
-    await applyContentCreationDraft(prisma, petitionId, "publication_creation");
-  } else if (petition.subjectType === "publication_entry_creation") {
-    await applyContentCreationDraft(prisma, petitionId, "publication_entry_creation");
-  } else if (petition.subjectType === "living_document_creation") {
-    await applyContentCreationDraft(prisma, petitionId, "living_document_creation");
+  if (petition?.status === "approved") {
+    await applyApprovedPetition(tx, petitionId, petition.subjectType, petition.subjectId);
   }
+}
+
+async function applyApprovedPetition(
+  tx: Prisma.TransactionClient,
+  petitionId: string,
+  subjectType: string,
+  subjectId: string,
+): Promise<void> {
+  if (subjectType === "membership_request") {
+    await approveMembershipRequest(tx, subjectId);
+  } else if (subjectType === "living_document_revision") {
+    await onRevisionPetitionApproved(tx, petitionId);
+  } else if (subjectType === "living_document_archive") {
+    await onLivingDocumentArchivalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "discussion_thread_close") {
+    await onThreadClosurePetitionApproved(tx, petitionId);
+  } else if (subjectType === "responsibility_proposal") {
+    await confirmResponsibilityAssignment(tx, petitionId);
+  } else if (subjectType === "responsibility_creation_proposal") {
+    await createResponsibilityFromProposal(tx, petitionId);
+  } else if (subjectType === "contribution_category_proposal") {
+    await createContributionCategoryFromPetition(tx, petitionId);
+  } else if (subjectType === "contribution_category_archive") {
+    await archiveContributionCategoryFromPetition(tx, petitionId);
+  } else if (subjectType === "trusted_provider_proposal") {
+    await grantTrustedProviderStatusFromPetition(tx, petitionId);
+  } else if (subjectType === "trusted_provider_revocation") {
+    await revokeTrustedProviderStatusFromPetition(tx, petitionId);
+  } else if (subjectType === "emergency_declaration") {
+    await onEmergencyPetitionApproved(tx, petitionId);
+  } else if (subjectType === "project_proposal") {
+    await createProjectFromPetition(tx, petitionId);
+  } else if (subjectType === "project_hosting_withdrawal") {
+    await onProjectHostingWithdrawalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "bulletin_archive") {
+    await onBulletinArchivalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "publication_archive") {
+    await onPublicationArchivalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "publication_entry_archive") {
+    await onPublicationEntryArchivalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "group_visibility_proposal") {
+    await applyGroupVisibilityFromPetition(tx, petitionId);
+  } else if (subjectType === "bulletin_creation") {
+    await applyContentCreationDraft(tx, petitionId, "bulletin_creation");
+  } else if (subjectType === "publication_creation") {
+    await applyContentCreationDraft(tx, petitionId, "publication_creation");
+  } else if (subjectType === "publication_entry_creation") {
+    await applyContentCreationDraft(tx, petitionId, "publication_entry_creation");
+  } else if (subjectType === "living_document_creation") {
+    await applyContentCreationDraft(tx, petitionId, "living_document_creation");
+  }
+}
+
+export async function resolveExpiredPetitions(
+  prisma: PrismaClient,
+): Promise<{ attempted: number; resolved: number; failed: number }> {
+  const due = await prisma.petition.findMany({
+    where: { status: "open", closesAt: { lte: new Date() } },
+    select: { id: true },
+  });
+
+  let resolved = 0;
+  let failed = 0;
+  for (const p of due) {
+    try {
+      const result = await evaluateAndApplyPetition(prisma, p.id);
+      if (result.outcome !== "pending") resolved++;
+    } catch (err) {
+      failed++;
+      console.error(`[petitions] failed to evaluate petition ${p.id}`, err);
+    }
+  }
+  return { attempted: due.length, resolved, failed };
 }
 
 export async function describePetitionSubject(prisma: PrismaClient, subjectType: string, subjectId: string) {

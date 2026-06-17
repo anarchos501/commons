@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { openPetition, evaluateEmergencyPetition, requireApprovedPetition } from "./petitions";
 import { resolveGovernanceParams } from "./governance-resolver";
 
@@ -48,7 +48,7 @@ export async function openEmergencyPetition(
  * Fix 2: verifies petition is approved and of the correct family before executing.
  */
 export async function onEmergencyPetitionApproved(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<void> {
   const petition = await requireApprovedPetition(prisma, petitionId, "emergency_declaration");

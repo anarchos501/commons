@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../generated/prisma/client";
+import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import type { ContentCreationType, CoordinationSpaceType } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
 import { requireApprovedPetition } from "./petitions";
@@ -6,6 +6,7 @@ import { assertSpaceBelongsToGroup } from "./governance-ownership";
 import { logAction } from "./action-log";
 import type { ProposalFamily } from "./governance-proposal-families";
 import { assertProjectWritable } from "./project-membership";
+import { assertWithinTransaction } from "./prisma";
 
 function contentTypeToFamily(contentType: ContentCreationType): ProposalFamily {
   switch (contentType) {
@@ -145,10 +146,11 @@ export async function proposeContentCreation(
 }
 
 export async function applyContentCreationDraft(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   petitionId: string,
   expectedFamily: ProposalFamily,
 ): Promise<void> {
+  assertWithinTransaction(prisma, "applyContentCreationDraft");
   const petition = await requireApprovedPetition(prisma, petitionId, expectedFamily);
 
   const draft = await prisma.contentCreationDraft.findUniqueOrThrow({
@@ -166,47 +168,44 @@ export async function applyContentCreationDraft(
   let createdNow = false;
   let appliedDraft = draft;
 
-  await prisma.$transaction(async (tx) => {
-    // Row-lock the draft to prevent concurrent application
-    await tx.$queryRaw`SELECT id FROM "ContentCreationDraft" WHERE id = ${draft.id} FOR UPDATE`;
+  // Row-lock the draft to prevent concurrent application
+  await prisma.$queryRaw`SELECT id FROM "ContentCreationDraft" WHERE id = ${draft.id} FOR UPDATE`;
 
-    // Re-read draft inside transaction for idempotency guard
-    const lockedDraft = await tx.contentCreationDraft.findUniqueOrThrow({ where: { id: draft.id } });
-    appliedDraft = lockedDraft;
+  // Re-read draft for idempotency guard
+  const lockedDraft = await prisma.contentCreationDraft.findUniqueOrThrow({ where: { id: draft.id } });
+  appliedDraft = lockedDraft;
 
-    if (contentTypeToFamily(lockedDraft.contentType) !== expectedFamily) {
-      throw new Error(`Draft content type "${lockedDraft.contentType}" does not match expected family "${expectedFamily}".`);
+  if (contentTypeToFamily(lockedDraft.contentType) !== expectedFamily) {
+    throw new Error(`Draft content type "${lockedDraft.contentType}" does not match expected family "${expectedFamily}".`);
+  }
+  if (lockedDraft.groupId !== petition.groupId) {
+    throw new Error(`Draft groupId "${lockedDraft.groupId}" does not match petition groupId "${petition.groupId}".`);
+  }
+  if (lockedDraft.spaceType === "project") {
+    await assertProjectWritable(prisma, lockedDraft.spaceId);
+    if (petition.scopeType !== "project" || petition.scopeId !== lockedDraft.spaceId) {
+      throw new Error("Project content petition scope does not match the draft project.");
     }
-    if (lockedDraft.groupId !== petition.groupId) {
-      throw new Error(`Draft groupId "${lockedDraft.groupId}" does not match petition groupId "${petition.groupId}".`);
-    }
-    if (lockedDraft.spaceType === "project") {
-      await assertProjectWritable(tx as unknown as PrismaClient, lockedDraft.spaceId);
-      if (petition.scopeType !== "project" || petition.scopeId !== lockedDraft.spaceId) {
-        throw new Error("Project content petition scope does not match the draft project.");
-      }
-    } else if (petition.scopeType !== "group" || petition.scopeId !== lockedDraft.groupId) {
-      throw new Error("Group-governed content petition scope does not match the draft group.");
-    }
+  } else if (petition.scopeType !== "group" || petition.scopeId !== lockedDraft.groupId) {
+    throw new Error("Group-governed content petition scope does not match the draft group.");
+  }
 
-    await assertSpaceBelongsToGroup(
-      tx,
-      lockedDraft.spaceType,
-      lockedDraft.spaceId,
-      lockedDraft.groupId,
-    );
+  await assertSpaceBelongsToGroup(
+    prisma,
+    lockedDraft.spaceType,
+    lockedDraft.spaceId,
+    lockedDraft.groupId,
+  );
 
-    if (lockedDraft.appliedAt !== null) {
-      createdContentId = lockedDraft.createdContentId!;
-      return;
-    }
-
+  if (lockedDraft.appliedAt !== null) {
+    createdContentId = lockedDraft.createdContentId!;
+  } else {
     const now = new Date();
     let newId: string;
 
     switch (lockedDraft.contentType) {
       case "bulletin": {
-        const record = await tx.bulletin.create({
+        const record = await prisma.bulletin.create({
           data: {
             spaceType: lockedDraft.spaceType,
             spaceId: lockedDraft.spaceId,
@@ -220,7 +219,7 @@ export async function applyContentCreationDraft(
         break;
       }
       case "publication": {
-        const record = await tx.publication.create({
+        const record = await prisma.publication.create({
           data: {
             spaceType: lockedDraft.spaceType,
             spaceId: lockedDraft.spaceId,
@@ -232,7 +231,7 @@ export async function applyContentCreationDraft(
         break;
       }
       case "publication_entry": {
-        const pub = await tx.publication.findUniqueOrThrow({
+        const pub = await prisma.publication.findUniqueOrThrow({
           where: { id: lockedDraft.publicationId! },
           select: { archivedAt: true, spaceType: true, spaceId: true },
         });
@@ -242,7 +241,7 @@ export async function applyContentCreationDraft(
         if (pub.spaceType !== lockedDraft.spaceType || pub.spaceId !== lockedDraft.spaceId) {
           throw new Error("Publication no longer belongs to the draft coordination space.");
         }
-        const record = await tx.publicationEntry.create({
+        const record = await prisma.publicationEntry.create({
           data: {
             publicationId: lockedDraft.publicationId!,
             authorId: lockedDraft.authorAccountId,
@@ -255,7 +254,7 @@ export async function applyContentCreationDraft(
         break;
       }
       case "living_document": {
-        const doc = await tx.livingDocument.create({
+        const doc = await prisma.livingDocument.create({
           data: {
             spaceType: lockedDraft.spaceType,
             spaceId: lockedDraft.spaceId,
@@ -263,7 +262,7 @@ export async function applyContentCreationDraft(
             currentBody: lockedDraft.body!,
           },
         });
-        await tx.livingDocumentRevision.create({
+        await prisma.livingDocumentRevision.create({
           data: {
             livingDocumentId: doc.id,
             authorId: lockedDraft.authorAccountId,
@@ -278,14 +277,14 @@ export async function applyContentCreationDraft(
       }
     }
 
-    await tx.contentCreationDraft.update({
+    await prisma.contentCreationDraft.update({
       where: { id: lockedDraft.id },
       data: { appliedAt: now, createdContentId: newId! },
     });
 
     createdContentId = newId!;
     createdNow = true;
-  });
+  }
 
   if (!createdNow) return;
 

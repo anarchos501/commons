@@ -1265,6 +1265,7 @@ model EmergencyPeriod {
 
   @@index([groupId])
   @@index([expiresAt])
+  @@unique([petitionId])
 }
 
 // --- RFC-006: Petition Infrastructure ---
@@ -1305,6 +1306,7 @@ model Petition {
   @@index([category])
   @@index([competitionKey])
   @@index([subjectType, subjectId])
+  @@index([status, closesAt])
 }
 
 model NodePetitionSupport {

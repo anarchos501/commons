@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "../generated/prisma/client";
 import { CoordinationAbility, AbilityAvailability } from "../generated/prisma/enums";
 import { openPetition, requireApprovedPetition } from "./petitions";
 import { logAction } from "./action-log";
+import { assertWithinTransaction } from "./prisma";
 
 const MAX_TYPE_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 500;
@@ -261,7 +262,8 @@ export async function proposeResponsibility(
  *
  * Idempotent: re-evaluating an already-applied petition is a no-op.
  */
-export async function createResponsibilityFromProposal(prisma: PrismaClient, petitionId: string): Promise<void> {
+export async function createResponsibilityFromProposal(prisma: Prisma.TransactionClient, petitionId: string): Promise<void> {
+  assertWithinTransaction(prisma, "createResponsibilityFromProposal");
   const petition = await requireApprovedPetition(prisma, petitionId, "responsibility_creation_proposal");
 
   const draft = await prisma.responsibilityProposalDraft.findUniqueOrThrow({
@@ -283,29 +285,26 @@ export async function createResponsibilityFromProposal(prisma: PrismaClient, pet
   let outcome: "created" | "augmented" = "created";
   let responsibilityId: string;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${groupId}:${normalizedType.toLowerCase()}`}, 0))`;
+  await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${groupId}:${normalizedType.toLowerCase()}`}, 0))`;
 
-    // Row-lock and re-read the draft to guard against duplicate application.
-    await tx.$queryRaw`SELECT id FROM "ResponsibilityProposalDraft" WHERE id = ${draft.id} FOR UPDATE`;
-    const lockedDraft = await tx.responsibilityProposalDraft.findUniqueOrThrow({ where: { id: draft.id } });
-    if (
-      lockedDraft.groupId !== groupId ||
-      lockedDraft.type !== normalizedType ||
-      lockedDraft.proposedByMembershipId !== petition.createdByMembershipId
-    ) {
-      throw new Error("Responsibility proposal draft no longer matches the approved petition.");
-    }
+  // Row-lock and re-read the draft to guard against duplicate application.
+  await prisma.$queryRaw`SELECT id FROM "ResponsibilityProposalDraft" WHERE id = ${draft.id} FOR UPDATE`;
+  const lockedDraft = await prisma.responsibilityProposalDraft.findUniqueOrThrow({ where: { id: draft.id } });
+  if (
+    lockedDraft.groupId !== groupId ||
+    lockedDraft.type !== normalizedType ||
+    lockedDraft.proposedByMembershipId !== petition.createdByMembershipId
+  ) {
+    throw new Error("Responsibility proposal draft no longer matches the approved petition.");
+  }
 
-    if (lockedDraft.appliedAt !== null) {
-      responsibilityId = lockedDraft.appliedResponsibilityId!;
-      return;
-    }
-
+  if (lockedDraft.appliedAt !== null) {
+    responsibilityId = lockedDraft.appliedResponsibilityId!;
+  } else {
     const now = new Date();
     const proposedAbilities = parseStoredProposedAbilities(lockedDraft.abilities);
 
-    const existingResponsibility = await tx.responsibility.findFirst({
+    const existingResponsibility = await prisma.responsibility.findFirst({
       where: { groupId, type: { equals: normalizedType, mode: "insensitive" } },
       select: { id: true, descriptionDocumentId: true },
     });
@@ -314,7 +313,7 @@ export async function createResponsibilityFromProposal(prisma: PrismaClient, pet
     let targetDescriptionDocumentId: string | null;
     if (!existingResponsibility) {
       outcome = "created";
-      const created = await tx.responsibility.create({
+      const created = await prisma.responsibility.create({
         data: { groupId, type: normalizedType },
       });
       targetResponsibilityId = created.id;
@@ -329,7 +328,7 @@ export async function createResponsibilityFromProposal(prisma: PrismaClient, pet
     // First purpose wins. Sibling proposals never revise an existing Purpose,
     // but an approved proposal may seed one on a bare responsibility created
     // concurrently through the legacy volunteer path.
-    await ensurePurposeDocument(tx, {
+    await ensurePurposeDocument(prisma, {
       responsibilityId: targetResponsibilityId,
       descriptionDocumentId: targetDescriptionDocumentId,
       description: lockedDraft.description,
@@ -343,28 +342,28 @@ export async function createResponsibilityFromProposal(prisma: PrismaClient, pet
     // apply unilaterally, narrowing an affirmative "works outside emergencies
     // too" decision back down is not.
     for (const incoming of proposedAbilities) {
-      const existingAbility = await tx.responsibilityAbility.findUnique({
+      const existingAbility = await prisma.responsibilityAbility.findUnique({
         where: { responsibilityId_ability: { responsibilityId: targetResponsibilityId, ability: incoming.ability } },
       });
       const finalAvailability: AbilityAvailability =
         existingAbility?.availability === "always_available" || incoming.availability === "always_available"
           ? "always_available"
           : "available_during_emergency";
-      await tx.responsibilityAbility.upsert({
+      await prisma.responsibilityAbility.upsert({
         where: { responsibilityId_ability: { responsibilityId: targetResponsibilityId, ability: incoming.ability } },
         update: { availability: finalAvailability },
         create: { responsibilityId: targetResponsibilityId, ability: incoming.ability, availability: finalAvailability },
       });
     }
 
-    await tx.responsibilityProposalDraft.update({
+    await prisma.responsibilityProposalDraft.update({
       where: { id: lockedDraft.id },
       data: { appliedAt: now, appliedResponsibilityId: targetResponsibilityId },
     });
 
     responsibilityId = targetResponsibilityId;
     appliedNow = true;
-  });
+  }
 
   if (!appliedNow) return;
 
