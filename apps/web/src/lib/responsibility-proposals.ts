@@ -34,6 +34,18 @@ const PROPOSABLE_ABILITY_SET = new Set<CoordinationAbility>(
   PROPOSABLE_RESPONSIBILITY_ABILITIES.map((entry) => entry.ability),
 );
 
+// Abilities that may be GRANTED when applying an already-approved draft: everything currently
+// proposable, PLUS the two abilities that were proposable before F1.4 removed them from the form
+// (issue_support_requests / issue_contribution_offers, which are inert/non-gating). This grandfathers
+// drafts the community legitimately approved before the allowlist shrank, while still refusing to
+// grant accountability/gatekeeping abilities (review_concerns, approve_membership, …) — those were
+// never proposable and DO gate real behavior, so they must not be acquirable via an arbitrary draft.
+const APPLICABLE_ABILITY_SET = new Set<CoordinationAbility>([
+  ...PROPOSABLE_ABILITY_SET,
+  CoordinationAbility.issue_support_requests,
+  CoordinationAbility.issue_contribution_offers,
+]);
+
 const AVAILABILITY_VALUES = new Set<string>(Object.values(AbilityAvailability));
 
 export type ProposedAbility = { ability: CoordinationAbility; availability: AbilityAvailability };
@@ -80,15 +92,27 @@ function normalizeProposedAbilities(abilities: { ability: string; availability: 
   return normalizedAbilities;
 }
 
-function parseStoredProposedAbilities(value: unknown): ProposedAbility[] {
-  if (!Array.isArray(value) || !value.every(isProposedAbility)) {
-    throw new Error("Responsibility proposal draft has invalid abilities.");
+/**
+ * Reads abilities from an already-approved draft at APPLY time. Unlike the proposal-time normalizer,
+ * this validates against APPLICABLE_ABILITY_SET (grandfathered grantable abilities), not the current
+ * proposable allowlist, and it is tolerant rather than fail-closed: malformed or non-grantable
+ * entries are skipped instead of thrown. Throwing here would roll back the petition's approval
+ * transaction and permanently jam the petition (and 500 anyone who supports it), so a
+ * community-approved decision must always resolve — granting whatever grantable abilities it carried.
+ */
+function parseStoredAbilitiesForApply(value: unknown): ProposedAbility[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<CoordinationAbility>();
+  const result: ProposedAbility[] = [];
+  for (const raw of value) {
+    if (!isProposedAbility(raw)) continue;
+    if (!APPLICABLE_ABILITY_SET.has(raw.ability as CoordinationAbility) || !AVAILABILITY_VALUES.has(raw.availability)) continue;
+    const ability = raw.ability as CoordinationAbility;
+    if (seen.has(ability)) continue;
+    seen.add(ability);
+    result.push({ ability, availability: raw.availability as AbilityAvailability });
   }
-  const normalized = normalizeProposedAbilities(value);
-  if (!normalized || normalized.length === 0) {
-    throw new Error("Responsibility proposal draft has no valid abilities.");
-  }
-  return normalized;
+  return result;
 }
 
 async function ensurePurposeDocument(
@@ -282,7 +306,6 @@ export async function createResponsibilityFromProposal(prisma: Prisma.Transactio
   const actorAccountId = draft.membership.accountId;
   const groupId = petition.groupId;
   const normalizedType = draft.type;
-  parseStoredProposedAbilities(draft.abilities);
 
   let appliedNow = false;
   let outcome: "created" | "augmented" = "created";
@@ -305,7 +328,7 @@ export async function createResponsibilityFromProposal(prisma: Prisma.Transactio
     responsibilityId = lockedDraft.appliedResponsibilityId!;
   } else {
     const now = new Date();
-    const proposedAbilities = parseStoredProposedAbilities(lockedDraft.abilities);
+    const proposedAbilities = parseStoredAbilitiesForApply(lockedDraft.abilities);
 
     const existingResponsibility = await prisma.responsibility.findFirst({
       where: { groupId, type: { equals: normalizedType, mode: "insensitive" } },

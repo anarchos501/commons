@@ -291,7 +291,7 @@ test("createResponsibilityFromProposal rejects a petition whose draft belongs to
   }
 });
 
-test("createResponsibilityFromProposal rejects invalid abilities stored on a draft", async () => {
+test("createResponsibilityFromProposal drops non-grantable abilities instead of throwing/jamming", async () => {
   const { groupId, membershipId } = await createFixture("rp_stored_ability");
   try {
     const result = await proposeResponsibility(prisma, {
@@ -304,19 +304,60 @@ test("createResponsibilityFromProposal rejects invalid abilities stored on a dra
     assert.equal(result.ok, true);
     if (!result.ok) return;
 
+    // Inject an accountability ability (never proposable, and it gates real behavior). Applying must
+    // NOT throw — throwing rolls back the approval and permanently jams the petition — and must NOT
+    // grant the ability.
     await prisma.responsibilityProposalDraft.update({
       where: { id: result.draftId },
-      data: { abilities: [{ ability: "approve_membership", availability: "always_available" }] },
+      data: { abilities: [{ ability: "review_concerns", availability: "always_available" }] },
     });
     await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
 
-    await assert.rejects(
-      () => prisma.$transaction((tx) => createResponsibilityFromProposal(tx, result.petitionId)),
-      /no valid abilities/,
-    );
-    assert.equal(await prisma.responsibility.count({ where: { groupId } }), 0);
+    await prisma.$transaction((tx) => createResponsibilityFromProposal(tx, result.petitionId)); // resolves cleanly
+    const responsibility = await prisma.responsibility.findFirstOrThrow({
+      where: { groupId, type: "Greeter" },
+      include: { abilities: true },
+    });
+    assert.equal(responsibility.abilities.length, 0, "the non-grantable ability must not be granted");
   } finally {
     await cleanupFixture("rp_stored_ability");
+  }
+});
+
+test("createResponsibilityFromProposal grants grandfathered abilities removed from the proposable form (regression)", async () => {
+  const { groupId, membershipId } = await createFixture("rp_grandfather");
+  try {
+    const result = await proposeResponsibility(prisma, {
+      groupId,
+      createdByMembershipId: membershipId,
+      type: "Emergency Team",
+      description: "Acts during emergencies",
+      abilities: [{ ability: ALLOWED_ABILITY, availability: "always_available" }],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    // Simulate a draft approved before issue_support_requests was removed from the proposable form
+    // (the real cause of a stuck seed petition). It must still resolve and grant the grandfathered ability.
+    await prisma.responsibilityProposalDraft.update({
+      where: { id: result.draftId },
+      data: {
+        abilities: [
+          { ability: "create_bulletins", availability: "always_available" },
+          { ability: "issue_support_requests", availability: "available_during_emergency" },
+        ],
+      },
+    });
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { status: "approved" } });
+    await prisma.$transaction((tx) => createResponsibilityFromProposal(tx, result.petitionId));
+
+    const responsibility = await prisma.responsibility.findFirstOrThrow({
+      where: { groupId, type: "Emergency Team" },
+      include: { abilities: true },
+    });
+    assert.deepEqual(responsibility.abilities.map((a) => a.ability).sort(), ["create_bulletins", "issue_support_requests"]);
+  } finally {
+    await cleanupFixture("rp_grandfather");
   }
 });
 
