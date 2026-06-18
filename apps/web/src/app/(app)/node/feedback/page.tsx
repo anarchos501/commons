@@ -8,8 +8,10 @@ import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { LocalTime } from "../../../../components/shared/LocalTime";
 import {
   FEEDBACK_STATUSES,
+  compileFeedbackDigest,
   exportFeedbackToGithub,
   githubFeedbackConfigured,
+  listFeedbackDigests,
   updateFeedbackReview,
 } from "../../../../lib/feedback";
 import { activeNodeHostExists } from "../../../../lib/node-governance";
@@ -28,11 +30,13 @@ export default async function FeedbackInboxPage() {
     const node = await resolveCurrentNode(prisma);
     if (!node || !(await activeNodeHostExists(prisma, node.id, session.accountId))) redirect("/dashboard");
     const reports = await prisma.feedbackReport.findMany({
-      where: { nodeId: node.id },
+      where: { nodeId: node.id, status: { not: "archived" } },
       include: { account: { select: { displayName: true } } },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
+    const digests = await listFeedbackDigests(prisma, node.id);
+    const reviewedCount = reports.filter((r) => r.status !== "new").length;
     const exportConfigured = githubFeedbackConfigured();
 
     return (
@@ -45,7 +49,34 @@ export default async function FeedbackInboxPage() {
             <p className="mt-2 text-sm text-[var(--soft-text)]">
               Preserve the local report, prepare a redacted export draft, and only then submit suitable reports upstream.
             </p>
+            <FormWithNotice action={compileAction} className="mt-4">
+              <input type="hidden" name="nodeId" value={node.id} />
+              <SubmitButton variant="secondary" disabled={reviewedCount === 0}>
+                Compile {reviewedCount} reviewed report{reviewedCount === 1 ? "" : "s"} into a document
+              </SubmitButton>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Compiling moves reviewed reports into a saved digest (below) and clears them from this inbox. Unreviewed reports stay.
+              </p>
+            </FormWithNotice>
           </div>
+
+          {digests.length > 0 && (
+            <details className="mt-4 border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
+                Saved digests ({digests.length})
+              </summary>
+              <div className="mt-3 space-y-3">
+                {digests.map((digest) => (
+                  <details key={digest.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <summary className="cursor-pointer text-sm text-[var(--text)]">
+                      {digest.title} · <LocalTime value={digest.compiledAt.toISOString()} />
+                    </summary>
+                    <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-[var(--soft-text)]">{digest.body}</pre>
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
           <div className="mt-4 space-y-4">
             {reports.length === 0 && <EmptyState text="No feedback reports have been submitted." />}
             {reports.map((report) => (
@@ -78,7 +109,7 @@ export default async function FeedbackInboxPage() {
                   <label className="block">
                     <span className="field-label">Status</span>
                     <select name="status" defaultValue={report.status} className="field-input">
-                      {FEEDBACK_STATUSES.filter((status) => status !== "exported_to_github").map((status) => (
+                      {FEEDBACK_STATUSES.filter((status) => status !== "exported_to_github" && status !== "archived").map((status) => (
                         <option key={status} value={status}>{status.replaceAll("_", " ")}</option>
                       ))}
                     </select>
@@ -155,6 +186,26 @@ async function saveReviewAction(_prev: FormState, formData: FormData): Promise<F
     return { kind: "success", message: "Review saved." };
   } catch {
     return { kind: "error", message: "The review could not be saved." };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function compileAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const prisma = createPrismaClient();
+  try {
+    const result = await compileFeedbackDigest(prisma, {
+      nodeId: requiredString(formData, "nodeId"),
+      hostAccountId: session.accountId,
+    });
+    revalidatePath("/node/feedback");
+    if (!result.ok) return { kind: "error", message: "No reviewed reports to compile." };
+    return { kind: "success", message: `Compiled ${result.reportCount} report${result.reportCount === 1 ? "" : "s"} into a digest.` };
+  } catch {
+    return { kind: "error", message: "The digest could not be compiled." };
   } finally {
     await prisma.$disconnect();
   }

@@ -258,6 +258,59 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
       continue;
     }
 
+    // Custom (free-text) request path: no category, no capability. Route to the group's active
+    // members — only for PUBLIC groups that opted in to accepting custom requests.
+    if (requestedService.serviceType === "custom") {
+      if (!supportRequest.group.acceptsCustomRequests || supportRequest.group.visibility !== "public") {
+        continue;
+      }
+      const members = await prisma.groupMembership.findMany({
+        where: {
+          groupId: supportRequest.groupId,
+          status: "active",
+          participationStatus: "active",
+          accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
+        },
+        select: { accountId: true },
+        orderBy: { accountId: "asc" },
+      });
+      for (const member of members) {
+        const routeKey = {
+          supportRequestId_contributorAccountId_serviceType_trustRequirement: {
+            supportRequestId: supportRequest.id,
+            contributorAccountId: member.accountId,
+            serviceType: "custom",
+            trustRequirement: requestedService.trustRequirement,
+          },
+        };
+        const existingRoute = await prisma.requestRoute.findUnique({ where: routeKey });
+        if (existingRoute?.status === "declined") continue;
+        const route = await prisma.requestRoute.upsert({
+          where: routeKey,
+          update: existingRoute ? {} : { status: "notified" },
+          create: {
+            supportRequestId: supportRequest.id,
+            contributorAccountId: member.accountId,
+            serviceCapabilityId: null,
+            serviceType: "custom",
+            trustRequirement: requestedService.trustRequirement,
+            status: "notified",
+          },
+        });
+        if (!existingRoute) {
+          await logAction(prisma, {
+            groupId: supportRequest.groupId,
+            action: "request.routed",
+            targetType: "request_route",
+            targetId: route.id,
+            metadata: { supportRequestId: supportRequest.id, serviceType: "custom" },
+          });
+        }
+        routes.push({ ...route, notificationPayload: buildRouteNotificationPayload(routePayloadRequest, privacyResolution) });
+      }
+      continue;
+    }
+
     // String-based routing path (legacy / backward-compatible)
     const offering = await prisma.groupServiceOffering.findUnique({
       where: { groupId_serviceType: { groupId: supportRequest.groupId, serviceType: requestedService.serviceType } },

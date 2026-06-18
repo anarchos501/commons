@@ -3,7 +3,11 @@ import type { PrismaClient } from "../generated/prisma/client";
 import { requireActiveNodeHost } from "./node-governance";
 
 export const FEEDBACK_TYPES = ["bug", "ux_confusion", "feature_request", "safety_privacy"] as const;
-export const FEEDBACK_STATUSES = ["new", "reviewed", "dismissed", "resolved_locally", "exported_to_github"] as const;
+// "archived" is set only by compileFeedbackDigest (never chosen manually); it clears a report from
+// the active inbox into a saved digest.
+export const FEEDBACK_STATUSES = ["new", "reviewed", "dismissed", "resolved_locally", "exported_to_github", "archived"] as const;
+// Reports a host has acted on are eligible to be compiled into a digest; "new" stays for review.
+const ARCHIVABLE_STATUSES = ["reviewed", "dismissed", "resolved_locally", "exported_to_github"] as const;
 export const ANONYMOUS_FEEDBACK_LIMIT = 3;
 export const ANONYMOUS_FEEDBACK_WINDOW_MS = 60 * 60 * 1000;
 
@@ -150,7 +154,12 @@ export async function updateFeedbackReview(
   },
 ): Promise<void> {
   await requireActiveNodeHost(prisma, input.nodeId, input.hostAccountId);
-  if (!FEEDBACK_STATUSES.includes(input.status as FeedbackStatus) || input.status === "exported_to_github") {
+  // exported/archived are set by their own flows, never via the review form.
+  if (
+    !FEEDBACK_STATUSES.includes(input.status as FeedbackStatus) ||
+    input.status === "exported_to_github" ||
+    input.status === "archived"
+  ) {
     throw new Error("Invalid feedback status.");
   }
   const now = new Date();
@@ -266,6 +275,62 @@ function buildGithubIssueBody(report: {
     "",
     `Internal feedback report: ${report.id}`,
   ].join("\n");
+}
+
+type DigestReportRow = Parameters<typeof buildGithubIssueBody>[0] & { title: string; redactedTitle: string | null };
+
+function buildDigestMarkdown(title: string, reports: DigestReportRow[]): string {
+  const sections = reports.flatMap((r, i) => [
+    `## ${i + 1}. ${(r.redactedTitle?.trim() || r.title)} (${r.type.replaceAll("_", " ")})`,
+    "",
+    buildGithubIssueBody(r),
+    "",
+    "---",
+    "",
+  ]);
+  return [`# ${title}`, "", ...sections].join("\n");
+}
+
+/**
+ * Compiles every host-reviewed (non-"new", not-yet-archived) report for a node into one saved
+ * markdown digest, then marks those reports "archived" so the inbox clears for new reports. Uses
+ * the reports' redacted fields — the shareable export draft. "new" reports are left for review.
+ */
+export async function compileFeedbackDigest(
+  prisma: PrismaClient,
+  input: { nodeId: string; hostAccountId: string; now?: Date },
+): Promise<{ ok: true; digestId: string; reportCount: number } | { ok: false; reason: "nothing_to_compile" }> {
+  await requireActiveNodeHost(prisma, input.nodeId, input.hostAccountId);
+  const reports = await prisma.feedbackReport.findMany({
+    where: { nodeId: input.nodeId, digestId: null, status: { in: [...ARCHIVABLE_STATUSES] } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (reports.length === 0) return { ok: false, reason: "nothing_to_compile" };
+
+  const now = input.now ?? new Date();
+  const title = `Feedback digest — ${reports.length} report${reports.length === 1 ? "" : "s"}`;
+  const body = buildDigestMarkdown(title, reports);
+
+  const digest = await prisma.$transaction(async (tx) => {
+    const created = await tx.feedbackDigest.create({
+      data: { nodeId: input.nodeId, title, body, reportCount: reports.length, compiledAt: now },
+      select: { id: true },
+    });
+    await tx.feedbackReport.updateMany({
+      where: { id: { in: reports.map((r) => r.id) } },
+      data: { status: "archived", digestId: created.id },
+    });
+    return created;
+  });
+  return { ok: true, digestId: digest.id, reportCount: reports.length };
+}
+
+export async function listFeedbackDigests(prisma: PrismaClient, nodeId: string) {
+  return prisma.feedbackDigest.findMany({
+    where: { nodeId },
+    orderBy: { compiledAt: "desc" },
+    select: { id: true, title: true, body: true, reportCount: true, compiledAt: true },
+  });
 }
 
 function cleanOptional(value: string | null | undefined, maxLength: number): string | null {

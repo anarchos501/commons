@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import {
+  compileFeedbackDigest,
   exportFeedbackToGithub,
   feedbackFingerprint,
   githubFeedbackConfigured,
+  listFeedbackDigests,
   submitFeedback,
   updateFeedbackReview,
 } from "../lib/feedback";
@@ -215,6 +217,49 @@ test("GitHub export configuration and mocked export update the report", async ()
   }
 });
 
+test("compileFeedbackDigest archives reviewed reports into a saved digest and clears the inbox (P3.1)", async () => {
+  const fixture = await createFixture("feedback_digest");
+  try {
+    // One reviewed (redacted) report and one still-new report.
+    const reviewed = await submitFeedback(prisma, { nodeId: fixture.node.id, accountId: fixture.member.id, type: "bug", title: "Reviewed bug", body: "Secret repro details" });
+    const fresh = await submitFeedback(prisma, { nodeId: fixture.node.id, accountId: fixture.member.id, type: "feature_request", title: "Shiny idea", body: "Unreviewed" });
+    assert.ok(reviewed.ok && fresh.ok);
+    if (!reviewed.ok || !fresh.ok) return;
+    await updateFeedbackReview(prisma, {
+      nodeId: fixture.node.id, hostAccountId: fixture.host.id, reportId: reviewed.reportId,
+      status: "reviewed", redactedTitle: "Safe bug", redactedBody: "Redacted repro",
+    });
+
+    // Only a host may compile.
+    await assert.rejects(() => compileFeedbackDigest(prisma, { nodeId: fixture.node.id, hostAccountId: fixture.member.id }), /node host/);
+
+    const result = await compileFeedbackDigest(prisma, { nodeId: fixture.node.id, hostAccountId: fixture.host.id });
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.equal(result.reportCount, 1);
+
+    // Reviewed report is archived + linked; the new one is untouched.
+    const reviewedRow = await prisma.feedbackReport.findUniqueOrThrow({ where: { id: reviewed.reportId } });
+    assert.equal(reviewedRow.status, "archived");
+    assert.equal(reviewedRow.digestId, result.digestId);
+    const freshRow = await prisma.feedbackReport.findUniqueOrThrow({ where: { id: fresh.reportId } });
+    assert.equal(freshRow.status, "new");
+    assert.equal(freshRow.digestId, null);
+
+    // The digest exists, lists newest-first, and contains the REDACTED text (not the raw secret).
+    const digests = await listFeedbackDigests(prisma, fixture.node.id);
+    assert.equal(digests.length, 1);
+    assert.match(digests[0].body, /Redacted repro/);
+    assert.doesNotMatch(digests[0].body, /Secret repro details/);
+
+    // Re-compiling with nothing new returns nothing_to_compile.
+    const again = await compileFeedbackDigest(prisma, { nodeId: fixture.node.id, hostAccountId: fixture.host.id });
+    assert.equal(again.ok, false);
+  } finally {
+    await cleanup("feedback_digest");
+  }
+});
+
 async function createFixture(prefix: string) {
   await cleanup(prefix);
   const node = await prisma.node.create({
@@ -232,6 +277,7 @@ async function createFixture(prefix: string) {
 
 async function cleanup(prefix: string) {
   await prisma.feedbackReport.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+  await prisma.feedbackDigest.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.nodeHost.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   await prisma.account.deleteMany({ where: { id: { startsWith: prefix } } });
   await prisma.node.deleteMany({ where: { id: { startsWith: prefix } } });

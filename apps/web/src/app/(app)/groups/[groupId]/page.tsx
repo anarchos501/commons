@@ -1170,6 +1170,25 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               </div>
             )}
 
+            {/* Custom support requests — public groups may opt in to free-text requests */}
+            {data.group.visibility === "public" && isActive && (
+              <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                <p className="text-sm font-medium text-[var(--text)]">Custom support requests</p>
+                <p className="mt-1 text-xs text-[var(--soft-text)]">
+                  {data.group.acceptsCustomRequests
+                    ? "Requesters can send free-text custom requests even when no categories are offered; they are routed to active members."
+                    : "Only your defined contribution categories can be requested. Enable custom requests to also accept free-text asks."}
+                </p>
+                <form action={toggleCustomRequestsAction} className="mt-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <input type="hidden" name="accepts" value={data.group.acceptsCustomRequests ? "false" : "true"} />
+                  <SubmitButton variant="secondary">
+                    {data.group.acceptsCustomRequests ? "Stop accepting custom requests" : "Accept custom requests"}
+                  </SubmitButton>
+                </form>
+              </div>
+            )}
+
             {/* Emergency period status + declaration */}
             {data.activeEmergency ? (
               <div className="border border-amber-400 bg-amber-50 p-3">
@@ -1721,6 +1740,22 @@ async function declareEmergencyAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function toggleCustomRequestsAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const accepts = formData.get("accepts") === "true";
+  await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await prisma.group.update({ where: { id: groupId }, data: { acceptsCustomRequests: accepts } });
   } finally {
     await prisma.$disconnect();
   }

@@ -30,7 +30,67 @@ async function cleanupAllFixtures() {
   await cleanupFixture("caproute_privacy_route");
   await cleanupFixture("caproute_project_inherit");
   await cleanupFixture("caproute_diff_group");
+  await cleanupFixture("caproute_custom");
+  await cleanupFixture("caproute_custom_off");
 }
+
+async function createCustomFixture(prefix: string, opts: { acceptsCustomRequests: boolean }) {
+  await cleanupFixture(prefix);
+  const node = await prisma.node.create({ data: { id: `${prefix}_node`, name: "Custom", domain: `${prefix}.localhost`, federationPolicy: "disabled", pluginPolicy: "disabled" } });
+  const group = await prisma.group.create({ data: { id: `${prefix}_group`, nodeId: node.id, name: "Custom Group", membershipPolicy: "open", visibility: "public", acceptsCustomRequests: opts.acceptsCustomRequests } });
+  const requester = await prisma.account.create({ data: { id: `${prefix}_req`, homeNodeId: node.id, displayName: "Req", accountType: "participant", profileVisibility: "private" } });
+  const helper = await prisma.account.create({ data: { id: `${prefix}_helper`, homeNodeId: node.id, displayName: "Helper", accountType: "participant", profileVisibility: "private" } });
+  await prisma.groupMembership.createMany({
+    data: [
+      { accountId: requester.id, groupId: group.id, status: "active", participationStatus: "active" },
+      { accountId: helper.id, groupId: group.id, status: "active", participationStatus: "active" },
+    ],
+  });
+  return { node, group, requester, helper };
+}
+
+test("custom request routes to active members of a public opted-in group (P3.2)", async () => {
+  const prefix = "caproute_custom";
+  try {
+    const { group, requester, helper } = await createCustomFixture(prefix, { acceptsCustomRequests: true });
+    const request = await createSupportRequest(prisma, {
+      id: `${prefix}_request`,
+      submittedByAccountId: requester.id,
+      groupId: group.id,
+      requestType: "custom",
+      requestedServices: [{ serviceType: "custom", trustRequirement: "lightweight" }],
+      description: "I need help moving a couch.",
+      expiresAt: futureDate(),
+    });
+    const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+    // Routes to the active member (helper), never the requester.
+    assert.equal(routes.length, 1);
+    assert.equal(routes[0].contributorAccountId, helper.id);
+    assert.equal(routes[0].serviceType, "custom");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("custom request to a group that has NOT opted in routes to nobody (P3.2)", async () => {
+  const prefix = "caproute_custom_off";
+  try {
+    const { group, requester } = await createCustomFixture(prefix, { acceptsCustomRequests: false });
+    const request = await createSupportRequest(prisma, {
+      id: `${prefix}_request`,
+      submittedByAccountId: requester.id,
+      groupId: group.id,
+      requestType: "custom",
+      requestedServices: [{ serviceType: "custom", trustRequirement: "lightweight" }],
+      description: "Anyone around?",
+      expiresAt: futureDate(),
+    });
+    const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+    assert.equal(routes.length, 0);
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
 
 test("low-risk food dropoff routes without trust petition", async () => {
   const fixture = await createFixture("food");

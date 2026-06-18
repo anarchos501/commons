@@ -35,6 +35,15 @@ The current alpha has enough of that loop implemented to test on one local node:
 - Plugin runtime and permission enforcement.
 - End-to-end encryption and stronger local-first storage.
 - Full security review, rate limiting, and deployment hardening.
+- **Screenshot attachments on bug reports.** There is no file-upload/storage infrastructure yet;
+  attachments await a storage-strategy decision (Postgres bytes vs object storage) before implementation.
+- **Defunct-group hard deletion.** Groups with no active members are now hidden and soft-archived
+  (`Group.archivedAt`), and the immediate/grace-period hard delete is intended — but `Group` has ~40 child
+  relations without DB-level cascade, so destructive purge needs cascade rules (or a transactional
+  multi-table cleanup) of its own. Until then, defunct groups are hidden, not deleted.
+- **Custom support requests on the node-wide form.** The opt-in flag + group-scoped `/request/[groupId]`
+  form + routing-to-members ship now; surfacing custom requests on the public node-wide `/request` form and
+  a group-level "trusted for custom" designation are follow-ons.
 
 ## Scope Boundary: Resource Coordination
 

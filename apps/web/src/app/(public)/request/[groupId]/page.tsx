@@ -43,7 +43,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       resolveCurrentNode(prisma),
       prisma.group.findUnique({
         where: { id: groupId },
-        select: { id: true, name: true, nodeId: true, visibility: true },
+        select: { id: true, name: true, nodeId: true, visibility: true, acceptsCustomRequests: true },
       }),
     ]);
 
@@ -166,11 +166,17 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           redirect("/request");
         }
 
-        const description = buildRequestDescription({
+        const customNeed = formData.get("customNeed");
+        const baseDescription = buildRequestDescription({
           contact: contact.trim(),
           location: location && typeof location === "string" && location.trim() ? location.trim() : undefined,
           language: language && typeof language === "string" && language.trim() ? language.trim() : undefined,
         });
+        // For a custom request, the free-text need leads the description.
+        const description =
+          resolvedServiceType === "custom" && typeof customNeed === "string" && customNeed.trim()
+            ? `${customNeed.trim()}\n\n${baseDescription}`
+            : baseDescription;
 
         const expiresAt = new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000);
 
@@ -248,6 +254,21 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
                     ))}
                   </select>
                   <input type="hidden" name="serviceType" value="" />
+                </>
+              ) : group.acceptsCustomRequests ? (
+                <>
+                  <p className="text-sm text-[var(--muted)]">
+                    This group has no set categories but accepts custom requests. Describe what you need.
+                  </p>
+                  <textarea
+                    name="customNeed"
+                    required
+                    maxLength={1000}
+                    rows={3}
+                    className="field-input resize-y"
+                    placeholder="Briefly describe the help you are looking for."
+                  />
+                  <input type="hidden" name="serviceType" value="custom" />
                 </>
               ) : (
                 <p className="text-sm text-[var(--muted)]">
