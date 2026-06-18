@@ -167,6 +167,44 @@ export function isGovernanceParameter(category: GovernanceCategory, parameter: s
   return parameter === "_" || parameter in CATEGORY_REGISTRY[category];
 }
 
+// Human noun for each tunable parameter, used to build truthful signal labels.
+const PARAM_NOUNS: Record<string, string> = {
+  threshold: "threshold",
+  petitionDuration: "petition duration",
+  reconfirmationPeriod: "term length",
+  duration: "emergency duration",
+  messageRetentionDays: "message retention",
+  threadInactivityDays: "thread inactivity window",
+  quietThresholdDays: "quiet threshold",
+  dormantThresholdDays: "dormant threshold",
+  noConfidenceThreshold: "no-confidence threshold",
+};
+
+function humanizeParameter(parameter: string): string {
+  return PARAM_NOUNS[parameter]
+    ?? parameter.replace(/Days$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+/**
+ * Signal-button labels for [−1, 0, +1]. The category-wide signal ("_") keeps the blanket
+ * "more careful / easier to act" framing; a specific parameter gets a truthful, direction-aware
+ * label ("Increase threshold" vs "Decrease threshold") derived from its anchors, since −1 always
+ * moves toward the restrictive anchor and +1 toward the permissive anchor — which can be a higher
+ * OR lower number depending on the parameter.
+ */
+export function governanceSignalLabels(category: GovernanceCategory, parameter: string): [string, string, string] {
+  if (parameter === "_") return ["More careful", "Neutral", "Easier to act"];
+  const def = CATEGORY_REGISTRY[category]?.[parameter];
+  if (!def) return ["More careful", "Neutral", "Easier to act"];
+  const noun = humanizeParameter(parameter);
+  const [restrictive, , permissive] = def.anchors;
+  // −1 → restrictive anchor, +1 → permissive anchor.
+  const negativeIncreases = restrictive > permissive;
+  const negative = `${negativeIncreases ? "Increase" : "Decrease"} ${noun}`;
+  const positive = `${negativeIncreases ? "Decrease" : "Increase"} ${noun}`;
+  return [negative, "Neutral", positive];
+}
+
 export type ResolvedCategoryParams = {
   threshold: number;
   petitionDuration: number;

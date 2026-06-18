@@ -440,6 +440,9 @@ model Group {
   visibility            GroupVisibility @default(private)
   governancePreferences Json?
   privacyPreferences    Json?
+  // Set when a group loses its last active member. An archived group is hidden everywhere and is
+  // eligible for hard deletion after a grace period (deletion itself is deferred — see roadmap).
+  archivedAt            DateTime?
   createdAt             DateTime @default(now())
 
   node             Node                       @relation(fields: [nodeId], references: [id])
@@ -480,6 +483,7 @@ model Group {
 
   @@unique([nodeId, name])
   @@index([nodeId])
+  @@index([archivedAt])
 }
 
 model NodeHost {

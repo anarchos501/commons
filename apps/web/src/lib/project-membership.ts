@@ -186,6 +186,22 @@ export async function dismissProjectJoinRequest(
   return updated.count === 1 ? { ok: true } : { ok: false, reason: "request_not_found" };
 }
 
+/**
+ * An applicant withdraws their own pending project join request. Project membership is
+ * member-approved (not petition-based), so this simply deactivates the pending row.
+ */
+export async function withdrawProjectJoinRequest(
+  prisma: PrismaClient,
+  accountId: string,
+  projectId: string,
+): Promise<{ ok: boolean }> {
+  const updated = await prisma.projectMembership.updateMany({
+    where: { accountId, projectId, status: "pending" },
+    data: { status: "inactive", applicationNote: null },
+  });
+  return { ok: updated.count === 1 };
+}
+
 async function findModeratableProjectJoinRequest(
   prisma: PrismaClient,
   pendingMembershipId: string,

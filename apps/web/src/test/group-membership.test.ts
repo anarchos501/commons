@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import bcrypt from "bcryptjs";
 import { createPrismaClient } from "../lib/prisma";
-import { joinOpenGroup, leaveGroup, requireGroupMembership, applyForGroupMembership } from "../lib/group-membership";
+import { joinOpenGroup, leaveGroup, requireGroupMembership, applyForGroupMembership, withdrawGroupApplication } from "../lib/group-membership";
 import { loginAccount } from "../lib/auth";
 
 const prisma = createPrismaClient();
@@ -94,6 +94,85 @@ test("applyForGroupMembership rejects a duplicate application from a pending app
     if (!result.ok) assert.equal(result.reason, "already_applied");
   } finally {
     await cleanupFixture("gm_reapply_pending");
+  }
+});
+
+test("leaving as the last active member archives the group (P2.5)", async () => {
+  const { account, group } = await createFixture("gm_archive");
+  try {
+    await joinOpenGroup(prisma, account.id, group.id);
+    await leaveGroup(prisma, account.id, group.id);
+    const g = await prisma.group.findUniqueOrThrow({ where: { id: group.id }, select: { archivedAt: true } });
+    assert.ok(g.archivedAt, "expected the defunct group to be archived");
+  } finally {
+    await cleanupFixture("gm_archive");
+  }
+});
+
+test("an open group is revived (un-archived) when a new member joins (P2.5)", async () => {
+  const { account, group } = await createFixture("gm_revive");
+  try {
+    await prisma.group.update({ where: { id: group.id }, data: { archivedAt: new Date() } });
+    await joinOpenGroup(prisma, account.id, group.id);
+    const g = await prisma.group.findUniqueOrThrow({ where: { id: group.id }, select: { archivedAt: true } });
+    assert.equal(g.archivedAt, null);
+  } finally {
+    await cleanupFixture("gm_revive");
+  }
+});
+
+test("leaving does not archive a group that still has another active member (P2.5)", async () => {
+  const { account, group, node } = await createFixture("gm_keep");
+  try {
+    await joinOpenGroup(prisma, account.id, group.id);
+    const other = await prisma.account.create({
+      data: { id: "gm_keep_other", homeNodeId: node.id, displayName: "Other", accountType: "participant", profileVisibility: "private" },
+    });
+    await joinOpenGroup(prisma, other.id, group.id);
+
+    await leaveGroup(prisma, account.id, group.id);
+    const g = await prisma.group.findUniqueOrThrow({ where: { id: group.id }, select: { archivedAt: true } });
+    assert.equal(g.archivedAt, null);
+  } finally {
+    await cleanupFixture("gm_keep");
+  }
+});
+
+test("withdrawGroupApplication deactivates a pending application (P2.3)", async () => {
+  const { account, group } = await createFixture("gm_withdraw_app");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "pending", applicationNote: "Please." },
+    });
+
+    const result = await withdrawGroupApplication(prisma, account.id, group.id);
+    assert.equal(result.ok, true);
+
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true },
+    });
+    assert.equal(membership?.status, "inactive");
+  } finally {
+    await cleanupFixture("gm_withdraw_app");
+  }
+});
+
+test("withdrawGroupApplication is a no-op for a non-pending membership (P2.3)", async () => {
+  const { account, group } = await createFixture("gm_withdraw_active");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "active" },
+    });
+    const result = await withdrawGroupApplication(prisma, account.id, group.id);
+    assert.equal(result.ok, false);
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true },
+    });
+    assert.equal(membership?.status, "active");
+  } finally {
+    await cleanupFixture("gm_withdraw_active");
   }
 });
 

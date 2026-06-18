@@ -48,6 +48,7 @@ import {
   CATEGORY_REGISTRY,
   GOVERNANCE_CATEGORIES,
   governanceCategoryDescription,
+  governanceSignalLabels,
   resolveParameter,
   type GovernanceCategory,
 } from "../../../../lib/governance-categories";
@@ -735,7 +736,28 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection id="node-stewardship" title="Node Stewardship" eyebrow="Collective consent" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
+        <CollapsibleSection id="node-stewardship" title="Node Governance" eyebrow="This node" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {(() => {
+            const publicGroups = data.nodeGroupOptions.filter((g) => !g.isPrivate);
+            const privateCount = data.nodeGroupOptions.length - publicGroups.length;
+            const stewardLabel = data.nodeState.stewardGroupId
+              ? (data.nodeGroupOptions.find((g) => g.id === data.nodeState.stewardGroupId)?.label ?? "a collective")
+              : null;
+            return (
+              <div className="mb-4 space-y-2 border-b border-[var(--border)] pb-4">
+                <p className="text-xs text-[var(--soft-text)]">
+                  Steward: {stewardLabel
+                    ? <span className="font-medium text-[var(--text)]">{stewardLabel}</span>
+                    : <span className="text-[var(--muted)]">none yet</span>}
+                </p>
+                <p className="text-xs text-[var(--soft-text)]">
+                  Collectives on this node: {publicGroups.length > 0 ? publicGroups.map((g) => g.label).join(", ") : "none public"}
+                  {privateCount > 0 ? ` · +${privateCount} private` : ""}
+                </p>
+                <a href="/node" className="inline-block text-xs text-[var(--accent)] hover:underline">Open node governance →</a>
+              </div>
+            );
+          })()}
           <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
             This collective may open stewardship questions. Node users decide appointments and no-confidence votes.
           </p>
@@ -1192,6 +1214,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                     category={setting.category}
                     parameter="_"
                     currentSignal={setting.categorySignal}
+                    labels={governanceSignalLabels(setting.category as GovernanceCategory, "_")}
                     size="md"
                   />
                 </div>
@@ -1199,9 +1222,9 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--text)] select-none">
                     Characteristics
                   </summary>
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-2 space-y-3 border-l border-[var(--border)] pl-3">
                     {setting.parameters.map((parameter) => (
-                      <div key={parameter.name} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div key={parameter.name} className="flex flex-col gap-1.5">
                         <span className="text-xs text-[var(--soft-text)]">
                           {PARAM_LABELS[parameter.name] ?? parameter.name} · {formatParamValue(parameter.name, parameter.value)}
                           {!parameter.hasOwnSignal && setting.categorySignal !== 0 ? " · using bulk vote" : ""}
@@ -1212,6 +1235,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                           category={setting.category}
                           parameter={parameter.name}
                           currentSignal={parameter.signal}
+                          labels={governanceSignalLabels(setting.category as GovernanceCategory, parameter.name)}
                         />
                       </div>
                     ))}

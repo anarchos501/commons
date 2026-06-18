@@ -39,13 +39,27 @@ test("coalition candidate filtering: private non-member groups are excluded, pub
     const myPrivate = await prisma.group.create({
       data: { id: `${PREFIX}_priv_mine`, nodeId: node.id, name: "My Private Group", membershipPolicy: "request_required", visibility: "private" },
     });
-    // Actor is an active member of only the "mine" private group.
-    await prisma.groupMembership.create({
-      data: { id: `${PREFIX}_mem`, accountId: actor.id, groupId: myPrivate.id, status: "active", participationStatus: "active" },
+    // A defunct (no active members) group — must be excluded from candidate lists (P2.5).
+    const defunct = await prisma.group.create({
+      data: { id: `${PREFIX}_defunct`, nodeId: node.id, name: "Defunct Group", membershipPolicy: "open", visibility: "public" },
+    });
+    // Candidate groups must be viable: give the public and other-private groups an active member.
+    const other = await prisma.account.create({
+      data: { id: `${PREFIX}_other`, homeNodeId: node.id, displayName: "Other", accountType: "member", profileVisibility: "private" },
+    });
+    await prisma.groupMembership.createMany({
+      data: [
+        { accountId: actor.id, groupId: myPrivate.id, status: "active", participationStatus: "active" },
+        { accountId: other.id, groupId: publicGroup.id, status: "active", participationStatus: "active" },
+        { accountId: other.id, groupId: otherPrivate.id, status: "active", participationStatus: "active" },
+      ],
     });
 
     const labels = await listNodeGroupLabelsForAccount(prisma, node.id, actor.id);
     const byId = new Map(labels.map((l) => [l.id, l]));
+
+    // Defunct group never appears as a candidate.
+    assert.equal(byId.has(defunct.id), false, "defunct group must be excluded");
 
     // Public group: visible, not private.
     assert.equal(byId.get(publicGroup.id)?.isPrivate, false);

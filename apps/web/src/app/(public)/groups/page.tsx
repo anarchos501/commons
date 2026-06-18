@@ -45,7 +45,8 @@ export default async function FindGroupsPage() {
     if (node) {
       const [groupRows, memberships] = await Promise.all([
         prisma.group.findMany({
-          where: { nodeId: node.id, visibility: "public" },
+          // Hide defunct collectives: public, not archived, and with at least one active member.
+          where: { nodeId: node.id, visibility: "public", archivedAt: null, memberships: { some: { status: "active" } } },
           select: {
             id: true,
             name: true,

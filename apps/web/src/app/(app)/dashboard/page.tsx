@@ -17,7 +17,8 @@ import {
   declareServiceCapability,
   routeSupportRequest,
 } from "../../../lib/capability-routing";
-import { leaveGroup, requireGroupMembership } from "../../../lib/group-membership";
+import { leaveGroup, requireGroupMembership, withdrawGroupApplication } from "../../../lib/group-membership";
+import { withdrawProjectJoinRequest } from "../../../lib/project-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString } from "../../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
 import { addNodePetitionSupport, addPetitionSupport } from "../../../lib/petitions";
@@ -341,6 +342,35 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               </CollapsibleSection>
             )}
 
+            {/* My Pending Applications */}
+            {data.pendingApplications.length > 0 && (
+              <CollapsibleSection id="my-applications" title="My Pending Applications" eyebrow="Membership requests you submitted" storageKey="dashboard:my-applications" className="bg-[var(--surface)] p-5 sm:p-6">
+                <ul className="space-y-3">
+                  {data.pendingApplications.map((app) => (
+                    <li key={`${app.kind}:${app.id}`} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <a
+                          href={app.kind === "group" ? `/groups/${app.id}` : `/projects/${app.id}`}
+                          className="text-sm font-medium text-[var(--text)] hover:text-[var(--accent)]"
+                        >
+                          {app.name}
+                        </a>
+                        <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{app.kind === "group" ? "Collective" : "Project"}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        Applied <LocalTime value={app.appliedIso} options={{ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }} /> · pending review
+                      </p>
+                      <form action={withdrawApplicationAction} className="mt-2">
+                        <input type="hidden" name="kind" value={app.kind} />
+                        <input type="hidden" name="id" value={app.id} />
+                        <button type="submit" className="text-xs text-amber-700 hover:text-amber-600 transition">Withdraw application</button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              </CollapsibleSection>
+            )}
+
           </div>
         </div>
       </div>
@@ -541,6 +571,24 @@ async function getDashboardData(
     // Distinct category names across all member groups — for the Offer Support checkboxes
     const allServices = [...new Set(groupCategories.map((c) => c.name))].sort();
 
+    // Pending applications the user submitted (group + project) — so they can track and withdraw them.
+    const [pendingGroupApps, pendingProjectApps] = await Promise.all([
+      prisma.groupMembership.findMany({
+        where: { accountId, status: "pending" },
+        orderBy: { joinedAt: "desc" },
+        select: { groupId: true, joinedAt: true, group: { select: { name: true } } },
+      }),
+      prisma.projectMembership.findMany({
+        where: { accountId, status: "pending" },
+        orderBy: { joinedAt: "desc" },
+        select: { projectId: true, joinedAt: true, project: { select: { name: true } } },
+      }),
+    ]);
+    const pendingApplications = [
+      ...pendingGroupApps.map((m) => ({ kind: "group" as const, id: m.groupId, name: m.group.name, appliedIso: m.joinedAt.toISOString() })),
+      ...pendingProjectApps.map((m) => ({ kind: "project" as const, id: m.projectId, name: m.project.name, appliedIso: m.joinedAt.toISOString() })),
+    ];
+
     return {
       account,
       myGroups: myGroupMemberships.map((m) => ({
@@ -552,6 +600,7 @@ async function getDashboardData(
       groupOptions,
       notifications,
       myRequests,
+      pendingApplications,
     };
   } finally {
     await prisma.$disconnect();
@@ -560,6 +609,22 @@ async function getDashboardData(
 
 // ── Server Actions ────────────────────────────────────────────────────────────
 
+
+async function withdrawApplicationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const kind = formData.get("kind");
+  const id = requiredString(formData, "id");
+  const prisma = createPrismaClient();
+  try {
+    if (kind === "group") await withdrawGroupApplication(prisma, session.accountId, id);
+    else if (kind === "project") await withdrawProjectJoinRequest(prisma, session.accountId, id);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+}
 
 async function leaveGroupAction(formData: FormData) {
   "use server";

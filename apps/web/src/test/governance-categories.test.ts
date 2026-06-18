@@ -8,7 +8,31 @@ import {
   resolveParameter,
   resolveAllParameters,
   validateGovernanceSnapshot,
+  governanceSignalLabels,
 } from "../lib/governance-categories";
+
+test("governanceSignalLabels are direction-accurate per parameter (P2.1)", () => {
+  // threshold anchors [0.95, 0.50, 0.05]: restrictive is HIGHER, so −1 increases the threshold.
+  assert.deepEqual(governanceSignalLabels("membership", "threshold"), [
+    "Increase threshold",
+    "Neutral",
+    "Decrease threshold",
+  ]);
+  // petitionDuration anchors [7, 3, 1]: restrictive is LONGER, so −1 increases the duration.
+  assert.deepEqual(governanceSignalLabels("membership", "petitionDuration"), [
+    "Increase petition duration",
+    "Neutral",
+    "Decrease petition duration",
+  ]);
+  // reconfirmationPeriod anchors [7, 14, 30]: restrictive is SHORTER, so −1 decreases the term.
+  assert.deepEqual(governanceSignalLabels("responsibility", "reconfirmationPeriod"), [
+    "Decrease term length",
+    "Neutral",
+    "Increase term length",
+  ]);
+  // Category-wide signal keeps the blanket lean framing.
+  assert.deepEqual(governanceSignalLabels("membership", "_"), ["More careful", "Neutral", "Easier to act"]);
+});
 
 test("all 17 categories are registered", () => {
   assert.equal(GOVERNANCE_CATEGORIES.length, 17);

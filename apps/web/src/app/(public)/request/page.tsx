@@ -85,11 +85,11 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
   try {
     const node = await resolveCurrentNode(prisma);
     if (node) {
-      // Only PUBLIC groups are discoverable for support requests. Private groups must never
-      // appear on this public form (after the F2 decoupling, offering categories no longer
-      // implies public, so this filter is load-bearing).
+      // Only PUBLIC, non-defunct groups are discoverable for support requests. Private groups must
+      // never appear on this public form (after the F2 decoupling, offering categories no longer
+      // implies public, so this filter is load-bearing); defunct (no active members) groups are hidden too.
       const groups = await prisma.group.findMany({
-        where: { nodeId: node.id, visibility: "public" },
+        where: { nodeId: node.id, visibility: "public", archivedAt: null, memberships: { some: { status: "active" } } },
         select: { id: true, name: true },
         orderBy: { createdAt: "asc" },
       });

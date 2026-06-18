@@ -36,7 +36,8 @@ export async function listNodeGroupLabelsForAccount(
   accountId: string,
 ): Promise<NodeGroupLabel[]> {
   const groups = await prisma.group.findMany({
-    where: { nodeId },
+    // Exclude defunct groups (archived or no active members) from node-wide candidate lists.
+    where: { nodeId, archivedAt: null, memberships: { some: { status: "active" } } },
     orderBy: { name: "asc" },
     select: {
       id: true,

@@ -18,17 +18,17 @@ type Props = {
 const TIME_OPTS: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
 
 function CategoryBadge({ category }: { category: string }) {
-  const isMeeting = category === "meeting";
+  // Personal (self-only) events were previously mislabeled "Workshop"; distinguish all three.
+  const label = category === "meeting" ? "Meeting" : category === "personal" ? "Personal" : "Workshop";
+  const tone =
+    category === "meeting"
+      ? "bg-[var(--accent)] text-[var(--accent-text)]"
+      : category === "personal"
+        ? "border border-dashed border-[var(--border-strong)] text-[var(--soft-text)]"
+        : "border border-[var(--border-strong)] text-[var(--muted)]";
   return (
-    <span
-      className={
-        "inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
-        (isMeeting
-          ? "bg-[var(--accent)] text-[var(--accent-text)]"
-          : "border border-[var(--border-strong)] text-[var(--muted)]")
-      }
-    >
-      {isMeeting ? "Meeting" : "Workshop"}
+    <span className={"inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide " + tone}>
+      {label}
     </span>
   );
 }

@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { logAction } from "./action-log";
-import { openPetition } from "./petitions";
+import { openPetition, withdrawPetitionBySubject } from "./petitions";
 
 export async function requireGroupMembership(
   prisma: PrismaClient,
@@ -49,6 +49,9 @@ export async function joinOpenGroup(
       update: { status: "active" },
       create: { accountId, groupId, status: "active" },
     });
+
+    // A new active member revives a previously-defunct (archived) group.
+    await prisma.group.updateMany({ where: { id: groupId, archivedAt: { not: null } }, data: { archivedAt: null } });
 
     await logAction(prisma, {
       actorAccountId: accountId,
@@ -207,6 +210,33 @@ export async function dismissMembershipApplication(
   });
 }
 
+/**
+ * An applicant withdraws their own pending group application: deactivates the pending row and
+ * withdraws any open membership_request petition a member may have opened to sponsor it.
+ */
+export async function withdrawGroupApplication(
+  prisma: PrismaClient,
+  accountId: string,
+  groupId: string,
+): Promise<{ ok: boolean }> {
+  const membership = await prisma.groupMembership.findUnique({
+    where: { accountId_groupId: { accountId, groupId } },
+    select: { id: true, status: true },
+  });
+  if (!membership || membership.status !== "pending") return { ok: false };
+
+  await withdrawPetitionBySubject(prisma, { subjectType: "membership_request", subjectId: membership.id });
+  await prisma.groupMembership.update({ where: { id: membership.id }, data: { status: "inactive" } });
+  await logAction(prisma, {
+    actorAccountId: accountId,
+    groupId,
+    action: "membership.application_withdrawn",
+    targetType: "group_membership",
+    targetId: membership.id,
+  });
+  return { ok: true };
+}
+
 export async function leaveGroup(
   prisma: PrismaClient,
   accountId: string,
@@ -224,4 +254,19 @@ export async function leaveGroup(
     targetType: "group_membership",
     targetId: membership.id,
   });
+
+  await archiveGroupIfDefunct(prisma, groupId);
+}
+
+/**
+ * Marks a group archived once it has no active members left. Archived groups are hidden everywhere
+ * (find-collectives, support, steward/coalition candidate lists). The archivedAt timestamp starts a
+ * grace window for eventual hard deletion (deletion itself is deferred — see roadmap — because Group
+ * has ~40 child relations without DB-level cascade, so a destructive purge is its own piece of work).
+ */
+export async function archiveGroupIfDefunct(prisma: PrismaClient, groupId: string): Promise<void> {
+  const activeCount = await prisma.groupMembership.count({ where: { groupId, status: "active" } });
+  if (activeCount === 0) {
+    await prisma.group.updateMany({ where: { id: groupId, archivedAt: null }, data: { archivedAt: new Date() } });
+  }
 }
