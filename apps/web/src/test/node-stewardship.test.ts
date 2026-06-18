@@ -278,6 +278,8 @@ test("node group labels do not expose private group names to hosts", async () =>
   const fixture = await createFixture("node_private_labels", 2);
   try {
     await makeHost(fixture, 0);
+    // Make group 1 private; the host is not a member of it, so its name must be obscured.
+    await prisma.group.update({ where: { id: fixture.groups[1].id }, data: { visibility: "private" } });
     const publicLabel = await labelNodeGroupForAccount(prisma, fixture.groups[0].id, fixture.accounts[0].id);
     const privateLabel = await labelNodeGroupForAccount(prisma, fixture.groups[1].id, fixture.accounts[0].id);
     assert.equal(publicLabel?.label, fixture.groups[0].name);
@@ -285,6 +287,23 @@ test("node group labels do not expose private group names to hosts", async () =>
     assert.equal(privateLabel?.isPrivate, true);
   } finally {
     await cleanup("node_private_labels");
+  }
+});
+
+test("a private group cannot be nominated as node steward (transparency guard)", async () => {
+  const fixture = await createFixture("node_private_candidate", 2);
+  try {
+    await makeHost(fixture, 0);
+    await prisma.group.update({ where: { id: fixture.groups[1].id }, data: { visibility: "private" } });
+    const opened = await openHostStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      candidateGroupId: fixture.groups[1].id,
+      hostAccountId: fixture.accounts[0].id,
+    });
+    assert.equal(opened.ok, false);
+    if (!opened.ok) assert.equal(opened.reason, "candidate_not_public");
+  } finally {
+    await cleanup("node_private_candidate");
   }
 });
 
@@ -321,7 +340,9 @@ async function createFixture(prefix: string, groupCount: number) {
         nodeId: bare.node.id,
         name: `Group ${index}`,
         membershipPolicy: "open",
-        visibility: index === 0 ? "public" : "private",
+        // Steward candidates must be public (transparency guard), so the default fixture is all-public.
+        // Tests that need a private group (e.g. label obfuscation) set it explicitly.
+        visibility: "public",
       },
     }));
     memberships.push(await prisma.groupMembership.create({

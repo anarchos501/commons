@@ -85,8 +85,11 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
   try {
     const node = await resolveCurrentNode(prisma);
     if (node) {
+      // Only PUBLIC groups are discoverable for support requests. Private groups must never
+      // appear on this public form (after the F2 decoupling, offering categories no longer
+      // implies public, so this filter is load-bearing).
       const groups = await prisma.group.findMany({
-        where: { nodeId: node.id },
+        where: { nodeId: node.id, visibility: "public" },
         select: { id: true, name: true },
         orderBy: { createdAt: "asc" },
       });
@@ -112,12 +115,16 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
 
       const trustedGroupIds = new Set(trustedGroups.map((t) => t.groupId));
 
-      groupOptions = groups.map((g) => ({
-        groupId: g.id,
-        groupName: g.name,
-        services: categories.filter((c) => c.groupId === g.id).map((c) => c.name),
-        hasTrustedProviders: trustedGroupIds.has(g.id),
-      }));
+      groupOptions = groups
+        .map((g) => ({
+          groupId: g.id,
+          groupName: g.name,
+          services: categories.filter((c) => c.groupId === g.id).map((c) => c.name),
+          hasTrustedProviders: trustedGroupIds.has(g.id),
+        }))
+        // A group with no active contribution categories can't receive a request yet.
+        // (Phase 3.2 will also admit public groups that opt into custom requests.)
+        .filter((g) => g.services.length > 0);
 
       allServices = [...new Set(categories.map((c) => c.name))].sort();
     }

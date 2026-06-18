@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import bcrypt from "bcryptjs";
 import { createPrismaClient } from "../lib/prisma";
-import { joinOpenGroup, leaveGroup, requireGroupMembership } from "../lib/group-membership";
+import { joinOpenGroup, leaveGroup, requireGroupMembership, applyForGroupMembership } from "../lib/group-membership";
 import { loginAccount } from "../lib/auth";
 
 const prisma = createPrismaClient();
@@ -58,6 +58,42 @@ test("joinOpenGroup reactivates an inactive membership", async () => {
     assert.equal(membership?.status, "active");
   } finally {
     await cleanupFixture("gm_rejoin_inactive");
+  }
+});
+
+test("applyForGroupMembership reactivates an inactive membership to pending (re-apply after leaving)", async () => {
+  const { account, group } = await createFixture("gm_reapply");
+  try {
+    // Simulate a prior member who left: an inactive row already exists.
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "inactive" },
+    });
+
+    const result = await applyForGroupMembership(prisma, account.id, group.id, "Back again, please.");
+    assert.equal(result.ok, true);
+
+    const membership = await prisma.groupMembership.findUnique({
+      where: { accountId_groupId: { accountId: account.id, groupId: group.id } },
+      select: { status: true, applicationNote: true },
+    });
+    assert.equal(membership?.status, "pending");
+    assert.equal(membership?.applicationNote, "Back again, please.");
+  } finally {
+    await cleanupFixture("gm_reapply");
+  }
+});
+
+test("applyForGroupMembership rejects a duplicate application from a pending applicant", async () => {
+  const { account, group } = await createFixture("gm_reapply_pending");
+  try {
+    await prisma.groupMembership.create({
+      data: { accountId: account.id, groupId: group.id, status: "pending" },
+    });
+    const result = await applyForGroupMembership(prisma, account.id, group.id);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "already_applied");
+  } finally {
+    await cleanupFixture("gm_reapply_pending");
   }
 });
 

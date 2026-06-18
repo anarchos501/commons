@@ -94,13 +94,13 @@ export async function applyForGroupMembership(
   if (existing?.status === "pending") return { ok: false, reason: "already_applied" };
   if (existing?.status === "revoked") return { ok: false, reason: "revoked" };
 
-  const membership = await prisma.groupMembership.create({
-    data: {
-      accountId,
-      groupId,
-      status: "pending",
-      ...(note ? { applicationNote: note } : {}),
-    },
+  // existing is "inactive" (a previous member who left) or no row at all. Upsert to "pending"
+  // so re-applying after leaving reactivates the row instead of hitting the
+  // @@unique([accountId, groupId]) constraint on create.
+  const membership = await prisma.groupMembership.upsert({
+    where: { accountId_groupId: { accountId, groupId } },
+    update: { status: "pending", applicationNote: note ?? null },
+    create: { accountId, groupId, status: "pending", ...(note ? { applicationNote: note } : {}) },
   });
 
   return { ok: true, membershipId: membership.id };

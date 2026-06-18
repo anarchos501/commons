@@ -43,11 +43,12 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       resolveCurrentNode(prisma),
       prisma.group.findUnique({
         where: { id: groupId },
-        select: { id: true, name: true, nodeId: true },
+        select: { id: true, name: true, nodeId: true, visibility: true },
       }),
     ]);
 
-    if (!group || !node || group.nodeId !== node.id) {
+    // Private groups are not discoverable: never render a public request form for them.
+    if (!group || !node || group.nodeId !== node.id || group.visibility !== "public") {
       notFound();
     }
 

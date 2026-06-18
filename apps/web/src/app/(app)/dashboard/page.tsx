@@ -25,6 +25,7 @@ import { evaluateAndApplyPetition } from "../../../lib/petition-evaluation";
 import { resolveCurrentNode } from "../../../lib/node-context";
 import { getNodeParticipationStatus } from "../../../lib/node-governance";
 import { CollapsibleSection } from "../../../components/shared/CollapsibleSection";
+import { LocalTime } from "../../../components/shared/LocalTime";
 import { SubmitButton } from "../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../components/shared/Notice";
@@ -357,7 +358,7 @@ type RouteNotif = {
   serviceType: string;
   status: string;
   urgencyLabel: string;
-  createdAtLabel: string;
+  createdAtIso: string;
   isUnread: boolean;
   createdAt: Date;
 };
@@ -393,7 +394,7 @@ async function getDashboardData(
     const myGroupMemberships = await prisma.groupMembership.findMany({
       where: { accountId, status: "active" },
       orderBy: { joinedAt: "asc" },
-      select: { id: true, groupId: true, group: { select: { name: true, description: true } } },
+      select: { id: true, groupId: true, group: { select: { name: true, description: true, visibility: true } } },
     });
     const memberGroupIds = myGroupMemberships.map((m) => m.groupId);
     const membershipIdByGroup = Object.fromEntries(myGroupMemberships.map((m) => [m.groupId, m.id]));
@@ -473,7 +474,7 @@ async function getDashboardData(
       serviceType: r.serviceType,
       status: r.status,
       urgencyLabel: urgencyLabel(r.supportRequest.urgency),
-      createdAtLabel: formatRelativeDate(r.createdAt),
+      createdAtIso: r.createdAt.toISOString(),
       isUnread: r.status === "notified",
       createdAt: r.createdAt,
     }));
@@ -526,12 +527,16 @@ async function getDashboardData(
       });
 
     const trustedGroupIds = new Set(trustedProviderGroups.map((t) => t.groupId));
-    const groupOptions: GroupOption[] = myGroupMemberships.map((m) => ({
-      groupId: m.groupId,
-      groupName: m.group.name,
-      services: groupCategories.filter((c) => c.groupId === m.groupId).map((c) => c.name),
-      hasTrustedProviders: trustedGroupIds.has(m.groupId),
-    }));
+    // Support requests target PUBLIC groups only — private groups (even ones the user belongs to)
+    // must not appear as request targets. "My Collectives" below still lists all member groups.
+    const groupOptions: GroupOption[] = myGroupMemberships
+      .filter((m) => m.group.visibility === "public")
+      .map((m) => ({
+        groupId: m.groupId,
+        groupName: m.group.name,
+        services: groupCategories.filter((c) => c.groupId === m.groupId).map((c) => c.name),
+        hasTrustedProviders: trustedGroupIds.has(m.groupId),
+      }));
 
     // Distinct category names across all member groups — for the Offer Support checkboxes
     const allServices = [...new Set(groupCategories.map((c) => c.name))].sort();
@@ -736,7 +741,7 @@ function RouteCard({ route }: { route: RouteNotif }) {
         </div>
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4" />
-          <span>Created {route.createdAtLabel}</span>
+          <span>Created <LocalTime value={route.createdAtIso} options={{ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }} /></span>
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -821,8 +826,4 @@ function urgencyLabel(urgency: string) {
   if (urgency === "urgent") return "Time-sensitive, but not broadcast publicly.";
   if (urgency === "high") return "Today if possible.";
   return "Shared without pressure.";
-}
-
-function formatRelativeDate(date: Date) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }

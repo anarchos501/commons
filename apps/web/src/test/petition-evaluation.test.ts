@@ -19,6 +19,7 @@ type Fixture = {
   applicantName: string;
   proposalId: string;
   reviewerDraftId: string;
+  contentDraftId: string;
 };
 
 async function setup(): Promise<Fixture> {
@@ -57,6 +58,19 @@ async function setup(): Promise<Fixture> {
       proposedByMembershipId: creatorMembership.id,
     },
   });
+  const contentDraft = await prisma.contentCreationDraft.create({
+    data: {
+      id: `${PREFIX}_content`,
+      contentType: "bulletin",
+      groupId: group.id,
+      spaceType: "group",
+      spaceId: group.id,
+      authorAccountId: creator.id,
+      createdByMembershipId: creatorMembership.id,
+      title: "Pantry hours",
+      body: "The food pantry is open Saturdays 9am to noon.",
+    },
+  });
   return {
     groupId: group.id,
     creatorMembershipId: creatorMembership.id,
@@ -65,10 +79,12 @@ async function setup(): Promise<Fixture> {
     applicantName: applicant.displayName,
     proposalId: proposal.id,
     reviewerDraftId: reviewerDraft.id,
+    contentDraftId: contentDraft.id,
   };
 }
 
 async function cleanup() {
+  await prisma.contentCreationDraft.deleteMany({ where: { group: { nodeId: { startsWith: PREFIX } } } });
   await prisma.responsibilityProposalDraft.deleteMany({ where: { group: { nodeId: { startsWith: PREFIX } } } });
   await prisma.proposal.deleteMany({ where: { group: { nodeId: { startsWith: PREFIX } } } });
   await prisma.groupMembership.deleteMany({ where: { group: { nodeId: { startsWith: PREFIX } } } });
@@ -159,6 +175,26 @@ test("getPetitionDetail: project, responsibility, and generic-fallback details",
     assert.equal(generic.proposer, null);
     assert.equal(generic.summary, "Coalition formation");
     assert.ok(generic.outcome.startsWith("If approved:"));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("getPetitionDetail: a content-creation petition surfaces the proposed body text (P1.4)", async () => {
+  const f = await setup();
+  try {
+    const detail = await getPetitionDetail(prisma, {
+      subjectType: "bulletin_creation",
+      subjectId: f.contentDraftId,
+      status: "open",
+      createdByMembershipId: f.creatorMembershipId,
+      createdByAccountId: null,
+    });
+    const titleField = detail.fields.find((x) => x.label === "Title");
+    const bodyField = detail.fields.find((x) => x.label === "Proposed text");
+    assert.equal(titleField?.value, "Pantry hours");
+    assert.ok(bodyField, "expected a 'Proposed text' field");
+    assert.match(bodyField!.value, /food pantry is open/i);
   } finally {
     await cleanup();
   }

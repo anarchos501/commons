@@ -68,7 +68,7 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                   <label className="block">
                     <span className="field-label">Nominate steward group</span>
                     <select name="candidateGroupId" className="field-input" required>
-                      {data.groupOptions.map((group) => (
+                      {data.groupOptions.filter((group) => !group.isPrivate).map((group) => (
                         <option key={group.id} value={group.id}>{group.label}</option>
                       ))}
                     </select>
@@ -90,7 +90,7 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                   <label className="block">
                     <span className="field-label">Candidate group</span>
                     <select name="candidateGroupId" className="field-input" required>
-                      {data.groupOptions.map((group) => (
+                      {data.groupOptions.filter((group) => !group.isPrivate).map((group) => (
                         <option key={group.id} value={group.id}>{group.label}</option>
                       ))}
                     </select>

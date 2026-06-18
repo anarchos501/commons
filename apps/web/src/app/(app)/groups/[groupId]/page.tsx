@@ -78,6 +78,7 @@ import {
 } from "../../../../lib/trusted-providers";
 import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
+import { LocalTime } from "../../../../components/shared/LocalTime";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../../components/shared/Notice";
@@ -266,7 +267,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                           <div key={msg.id} className="bg-[var(--subtle)] px-3 py-2">
                             <p className="text-sm leading-6 text-[var(--soft-text)]">{msg.body}</p>
                             <p className="mt-1 text-xs text-[var(--muted)]">
-                              {msg.author.displayName} &middot; {formatRelativeDate(msg.createdAt)}
+                              {msg.author.displayName} &middot; <LocalTime value={msg.createdAt.toISOString()} options={COMPACT_DATE} />
                             </p>
                           </div>
                         ))}
@@ -334,7 +335,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-3">{b.body}</p>
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <p className="text-xs text-[var(--muted)]">
-                      {b.author.displayName} &middot; {formatRelativeDate(b.publishedAt)}
+                      {b.author.displayName} &middot; <LocalTime value={b.publishedAt.toISOString()} options={COMPACT_DATE} />
                     </p>
                     {isActive && (
                       <form action={archiveBulletinAction}>
@@ -454,7 +455,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                 <div key={doc.id} className="border border-[var(--border)] p-3 space-y-2">
                   <p className="text-sm font-semibold text-[var(--text)]">{doc.title}</p>
                   <p className="text-xs leading-5 text-[var(--soft-text)] line-clamp-3">{doc.currentBody}</p>
-                  <p className="text-xs text-[var(--muted)]">Last revised {formatRelativeDate(doc.lastRevisedAt)}</p>
+                  <p className="text-xs text-[var(--muted)]">Last revised <LocalTime value={doc.lastRevisedAt.toISOString()} options={COMPACT_DATE} /></p>
                   {isActive && (
                     <details className="mt-2">
                       <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a revision</summary>
@@ -745,7 +746,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <label className="block">
                 <span className="field-label">Candidate collective</span>
                 <select name="candidateGroupId" className="field-input" required>
-                  {data.nodeGroupOptions.map((candidate) => (
+                  {data.nodeGroupOptions.filter((candidate) => !candidate.isPrivate).map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
                   ))}
                 </select>
@@ -819,7 +820,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                   {app.applicationNote && (
                     <p className="mt-1 text-xs text-[var(--soft-text)]">{app.applicationNote}</p>
                   )}
-                  <p className="mt-1 text-xs text-[var(--muted)]">Applied {formatRelativeDate(app.joinedAt)}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">Applied <LocalTime value={app.joinedAt.toISOString()} options={COMPACT_DATE} /></p>
                   <div className="mt-3 flex gap-2">
                     {app.hasOpenSponsorship ? (
                       <p className="text-xs text-[var(--soft-text)]">Sponsorship petition open</p>
@@ -1152,7 +1153,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <div className="border border-amber-400 bg-amber-50 p-3">
                 <p className="text-sm font-medium text-amber-900">Emergency period active</p>
                 <p className="mt-0.5 text-xs text-amber-700">
-                  Expires {formatRelativeDate(data.activeEmergency.expiresAt)}
+                  Expires <LocalTime value={data.activeEmergency.expiresAt.toISOString()} options={COMPACT_DATE} />
                 </p>
               </div>
             ) : isActive && (
@@ -2594,7 +2595,15 @@ function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { 
       <div className="mt-3 grid gap-2 text-xs text-[var(--muted)] sm:grid-cols-3">
         <p>{petition.supportCount} supporting</p>
         <p>{petition.requiredSupport} needed</p>
-        <p>{isOpen ? `Closes ${formatRelativeDate(petition.closesAt)}` : `Resolved ${petition.resolvedAt ? formatRelativeDate(petition.resolvedAt) : "later"}`}</p>
+        <p>
+          {isOpen ? (
+            <>Closes <LocalTime value={petition.closesAt.toISOString()} options={COMPACT_DATE} /></>
+          ) : petition.resolvedAt ? (
+            <>Resolved <LocalTime value={petition.resolvedAt.toISOString()} options={COMPACT_DATE} /></>
+          ) : (
+            "Resolved later"
+          )}
+        </p>
       </div>
       {isOpen && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -2651,8 +2660,11 @@ function formatParamValue(param: string, value: number): string {
   return `${Math.round(value * 10) / 10}d`;
 }
 
+// Compact timestamp options shared with <LocalTime> so client-rendered times match the old look.
+const COMPACT_DATE: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+
 function formatRelativeDate(date: Date) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("en", COMPACT_DATE).format(date);
 }
 
 function formatPercent(value: number) {

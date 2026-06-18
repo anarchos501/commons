@@ -34,6 +34,7 @@ import { openProjectHostingProposal } from "../../../../lib/project-hosting";
 import { requiredString } from "../../../../lib/support-form";
 import { visibleProjectRosterAffiliations } from "../../../../lib/federation-legibility";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
+import { LocalTime } from "../../../../components/shared/LocalTime";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { type FormState } from "../../../../components/shared/form-state";
@@ -520,7 +521,7 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                       </p>
                     )}
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      Requested {formatRelativeDate(request.joinedAt)}
+                      Requested <LocalTime value={request.joinedAt.toISOString()} options={{ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }} />
                     </p>
                     <div className="mt-3 flex gap-2">
                       <FormWithNotice action={approveProjectJoinRequestAction}>
@@ -1251,15 +1252,6 @@ async function proposeCategoryAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/projects/${projectId}`);
-}
-
-function formatRelativeDate(date: Date) {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────

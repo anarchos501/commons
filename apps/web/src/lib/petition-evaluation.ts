@@ -387,6 +387,12 @@ function frameOutcome(status: string, effect: string): string {
  * model has no free-text body); the subject is fetched once per petition. Unhandled families
  * degrade to a family-label summary + a generic outcome.
  */
+// Proposed bodies can be long; cap them in the petition card so the detail stays scannable.
+function truncateBody(body: string, max = 2000): string {
+  const trimmed = body.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
 export async function getPetitionDetail(prisma: PrismaClient, petition: PetitionDetailInput): Promise<PetitionDetail> {
   const proposer = await resolvePetitionProposer(prisma, petition);
   const { subjectType, subjectId, status } = petition;
@@ -485,6 +491,37 @@ export async function getPetitionDetail(prisma: PrismaClient, petition: Petition
     if (thread) fields.push({ label: "Thread", value: thread.title });
     const summary = thread ? `Close "${thread.title}"` : familyLabel;
     return { summary, proposer, outcome: frameOutcome(status, "this discussion thread is closed to new replies"), fields };
+  }
+
+  if (
+    subjectType === "bulletin_creation" ||
+    subjectType === "publication_creation" ||
+    subjectType === "publication_entry_creation" ||
+    subjectType === "living_document_creation"
+  ) {
+    const draft = await prisma.contentCreationDraft.findUnique({
+      where: { id: subjectId },
+      select: { contentType: true, title: true, body: true },
+    });
+    const typeLabel = (draft?.contentType ?? "").replace(/_/g, " ");
+    const title = draft?.title?.trim() || "(untitled)";
+    if (draft?.title) fields.push({ label: "Title", value: title });
+    if (draft?.body) fields.push({ label: "Proposed text", value: truncateBody(draft.body) });
+    const summary = draft ? `Propose ${typeLabel}: ${title}` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `this ${typeLabel} is published`), fields };
+  }
+
+  if (subjectType === "living_document_revision") {
+    const revision = await prisma.livingDocumentRevision.findUnique({
+      where: { id: subjectId },
+      select: { body: true, livingDocument: { select: { title: true } }, author: { select: { displayName: true } } },
+    });
+    const docTitle = revision?.livingDocument.title ?? "the document";
+    fields.push({ label: "Document", value: docTitle });
+    if (revision?.author?.displayName) fields.push({ label: "Author", value: revision.author.displayName });
+    if (revision?.body) fields.push({ label: "Proposed text", value: truncateBody(revision.body) });
+    const summary = revision ? `${docTitle} revision` : familyLabel;
+    return { summary, proposer, outcome: frameOutcome(status, `this revision to "${docTitle}" is adopted`), fields };
   }
 
   // Other families: delegate the one-line summary to describePetitionSubject (its single

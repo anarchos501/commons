@@ -49,11 +49,13 @@ export async function listNodeGroupLabelsForAccount(
       },
     },
   });
-  return groups.map((group, index) => {
+  return groups.map((group) => {
     const canSee = group.visibility === "public" || group.memberships.length > 0;
+    // Unseen private groups are labeled uniformly — never numbered. A per-group index would leak
+    // the count and relative position of private groups the viewer can't otherwise see.
     return {
       id: group.id,
-      label: canSee ? group.name : `Private group ${index + 1}`,
+      label: canSee ? group.name : "Private group",
       isPrivate: !canSee,
     };
   });

@@ -26,6 +26,7 @@ export type OpenNodeStewardProposalResult =
         | "not_found"
         | "wrong_node"
         | "steward_already_set"
+        | "candidate_not_public"
         | "no_current_steward"
         | "proposal_already_open"
         | "petition_error";
@@ -535,14 +536,16 @@ async function validateAppointmentContext(
   candidateGroupId: string,
 ): Promise<
   | { ok: true; nodeName: string; candidateName: string; stewardRevision: number }
-  | { ok: false; reason: "not_found" | "wrong_node" | "steward_already_set" }
+  | { ok: false; reason: "not_found" | "wrong_node" | "steward_already_set" | "candidate_not_public" }
 > {
   const [node, candidate] = await Promise.all([
     prisma.node.findUnique({ where: { id: nodeId }, select: { name: true, stewardGroupId: true, stewardRevision: true } }),
-    prisma.group.findUnique({ where: { id: candidateGroupId }, select: { name: true, nodeId: true } }),
+    prisma.group.findUnique({ where: { id: candidateGroupId }, select: { name: true, nodeId: true, visibility: true } }),
   ]);
   if (!node || !candidate) return { ok: false, reason: "not_found" };
   if (candidate.nodeId !== nodeId) return { ok: false, reason: "wrong_node" };
+  // A private group must never become node steward — the steward is a transparency-bearing role.
+  if (candidate.visibility !== "public") return { ok: false, reason: "candidate_not_public" };
   if (node.stewardGroupId) return { ok: false, reason: "steward_already_set" };
   return { ok: true, nodeName: node.name, candidateName: candidate.name, stewardRevision: node.stewardRevision };
 }

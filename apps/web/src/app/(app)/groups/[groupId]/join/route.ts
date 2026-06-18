@@ -1,9 +1,15 @@
-import { NextResponse } from "next/server";
 import { getSession } from "../../../../../lib/session";
 import { createPrismaClient } from "../../../../../lib/prisma";
 import { joinOpenGroup, applyForGroupMembership } from "../../../../../lib/group-membership";
 import { routeSupportRequest } from "../../../../../lib/capability-routing";
 import { resolveGroupInviteToken } from "../../../../../lib/group-invites";
+
+// Redirect with a RELATIVE Location. The browser resolves it against the URL it actually
+// requested, so this never inherits the server's bind host (e.g. 0.0.0.0:3000) the way
+// `new URL(path, request.url)` did — that bug surfaced as an iOS "download" prompt / ERR_ADDRESS_INVALID.
+function redirectTo(path: string): Response {
+  return new Response(null, { status: 303, headers: { Location: path } });
+}
 
 export async function GET(
   request: Request,
@@ -14,9 +20,7 @@ export async function GET(
   const url = new URL(request.url);
 
   if (!session.accountId) {
-    return NextResponse.redirect(
-      new URL(`/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}`, request.url),
-    );
+    return redirectTo(`/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}`);
   }
 
   const inviteToken = url.searchParams.get("invite");
@@ -29,18 +33,16 @@ export async function GET(
     });
 
     if (!group) {
-      return NextResponse.redirect(new URL("/groups", request.url));
+      return redirectTo("/groups");
     }
 
     if (group.visibility !== "public") {
       if (!inviteToken) {
-        return NextResponse.redirect(new URL("/groups", request.url));
+        return redirectTo("/groups");
       }
       const resolved = await resolveGroupInviteToken(prisma, inviteToken);
       if (!resolved.ok || resolved.groupId !== groupId) {
-        return NextResponse.redirect(
-          new URL(`/invite/${encodeURIComponent(inviteToken)}`, request.url),
-        );
+        return redirectTo(`/invite/${encodeURIComponent(inviteToken)}`);
       }
     }
 
@@ -69,17 +71,17 @@ export async function GET(
       } catch (error) {
         console.error("join: failed to route open support requests after join", error);
       }
-      return NextResponse.redirect(new URL(`/groups/${groupId}`, request.url));
+      return redirectTo(`/groups/${groupId}`);
     }
 
     // Public request_required group (no invite needed) or private group with valid invite:
     // create a pending application
     const result = await applyForGroupMembership(prisma, session.accountId, groupId);
     if (result.ok) {
-      return NextResponse.redirect(new URL(`/groups?applied=${groupId}`, request.url));
+      return redirectTo(`/groups?applied=${groupId}`);
     } else {
       // Already applied or already a member
-      return NextResponse.redirect(new URL("/groups", request.url));
+      return redirectTo("/groups");
     }
   } finally {
     await prisma.$disconnect();
