@@ -342,6 +342,7 @@ model Node {
   governanceSignals   NodeGovernanceSignal[]
   petitionSupport     NodePetitionSupport[]
   stewardProposals    NodeStewardProposal[]
+  nodeNameProposals   NodeNameProposal[]
   actionLogs          ActionLog[]
   linkedNodePresences LinkedNodePresence[]
   signedEvents        SignedEvent[]
@@ -459,6 +460,7 @@ model Group {
   stewardForNodes            Node[] @relation("NodeStewardGroup")
   nodeStewardCandidates      NodeStewardProposal[] @relation("NodeStewardCandidate")
   nodeStewardInitiations     NodeStewardProposal[] @relation("NodeStewardInitiatingGroup")
+  nodeNameInitiations        NodeNameProposal[]    @relation("NodeNameInitiatingGroup")
   trustApprovals   TrustedServiceCapability[]
   supportRequests  SupportRequest[]
   offers           Offer[]
@@ -604,6 +606,26 @@ model NodeStewardProposal {
   @@index([candidateGroupId])
   @@index([initiatingGroupId])
   @@index([initiatedByAccountId])
+}
+
+// A group internally petitions a proposed node name; on group approval it escalates to a node-wide
+// vote, and on node approval the node is renamed. Mirrors the NodeStewardProposal escalation.
+model NodeNameProposal {
+  id                String    @id @default(cuid())
+  nodeId            String
+  initiatingGroupId String
+  proposedName      String
+  groupPetitionId   String?   @unique
+  nodePetitionId    String?   @unique
+  status            String    @default("awaiting_group") // awaiting_group | awaiting_node_vote | succeeded | failed-rejected | failed-withdrawn
+  createdAt         DateTime  @default(now())
+  resolvedAt        DateTime?
+
+  node            Node  @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  initiatingGroup Group @relation("NodeNameInitiatingGroup", fields: [initiatingGroupId], references: [id])
+
+  @@index([nodeId, status])
+  @@index([initiatingGroupId])
 }
 
 model Coalition {

@@ -43,6 +43,7 @@ import {
   openGroupStewardNomination,
   openStewardResignation,
 } from "../../../../lib/node-stewardship";
+import { openNodeNameProposal } from "../../../../lib/node-name";
 import { proposeResponsibility, PROPOSABLE_RESPONSIBILITY_ABILITIES } from "../../../../lib/responsibility-proposals";
 import {
   CATEGORY_REGISTRY,
@@ -790,6 +791,23 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               <input type="hidden" name="nodeId" value={group.nodeId} />
               <SubmitButton variant="secondary">Open steward resignation petition</SubmitButton>
             </form>
+          )}
+          {isActive && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a node name</summary>
+              <form action={proposeNodeNameAction} className="mt-3 space-y-3">
+                <input type="hidden" name="groupId" value={groupId} />
+                <input type="hidden" name="nodeId" value={group.nodeId} />
+                <label className="block">
+                  <span className="field-label">Proposed node name</span>
+                  <input name="proposedName" type="text" required maxLength={100} className="field-input" placeholder="e.g. Northside Commons" />
+                  <span className="mt-1 block text-xs text-[var(--muted)]">
+                    If this collective approves, it escalates to a node-wide vote to rename the node.
+                  </span>
+                </label>
+                <SubmitButton variant="secondary">Open node name petition</SubmitButton>
+              </form>
+            </details>
           )}
           <a href="/node" className="mt-4 inline-block text-xs font-medium text-[var(--accent)] hover:underline">
             Open node governance
@@ -1740,6 +1758,23 @@ async function declareEmergencyAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+async function proposeNodeNameAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const nodeId = formData.get("nodeId") as string;
+  const proposedName = (formData.get("proposedName") as string) ?? "";
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await openNodeNameProposal(prisma, { nodeId, initiatingGroupId: groupId, proposedName, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }

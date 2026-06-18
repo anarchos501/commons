@@ -29,6 +29,7 @@ import {
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
 import { evaluateEventProposalForPetition } from "./events";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
+import { evaluateNodeNameProposalForPetition } from "./node-name";
 import { responsibilityTypeLabel } from "./concern-reviewer";
 
 // Must NOT be called from inside another $transaction — it opens its own.
@@ -77,6 +78,7 @@ async function applyResolvedPetition(
   if (await evaluateCoalitionProposalForPetition(tx, petitionId)) return;
   if (await evaluateEventProposalForPetition(tx, petitionId)) return;
   if (await evaluateNodeStewardProposalForPetition(tx, petitionId)) return;
+  if (await evaluateNodeNameProposalForPetition(tx, petitionId)) return;
 
   if (!justResolved) return;
 
@@ -319,6 +321,14 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     });
     if (!proposal) return subjectId;
     return `Authorize ${proposal.category}: ${proposal.title}`;
+  }
+
+  if (subjectType === "node_name_change_proposal" || subjectType === "node_name_change") {
+    const proposal = await prisma.nodeNameProposal.findUnique({ where: { id: subjectId }, select: { proposedName: true } });
+    if (!proposal) return proposalFamilyLabel(subjectType);
+    return subjectType === "node_name_change"
+      ? `Rename node to "${proposal.proposedName}"`
+      : `Propose node name: "${proposal.proposedName}"`;
   }
 
   // Never surface a raw identity code: fall back to the human-readable family label.
@@ -585,6 +595,8 @@ export function proposalFamilyLabel(subjectType: string) {
     case "node_steward_no_confidence_initiation": return "Node steward no-confidence initiation";
     case "node_steward_no_confidence": return "Node steward no confidence";
     case "node_steward_resignation": return "Node steward resignation";
+    case "node_name_change_proposal": return "Node name proposal";
+    case "node_name_change": return "Node rename vote";
     case "event_authorization": return "Event authorization";
     default: return subjectType.replace(/_/g, " ");
   }

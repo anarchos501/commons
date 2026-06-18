@@ -16,6 +16,8 @@ export type ProposalFamily =
   | "node_steward_no_confidence_initiation"
   | "node_steward_no_confidence"
   | "node_steward_resignation"
+  | "node_name_change_proposal"
+  | "node_name_change"
   | "responsibility_proposal"
   | "responsibility_creation_proposal"
   | "responsibility_recall"
@@ -62,6 +64,8 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   node_steward_no_confidence_initiation: "node_stewardship",
   node_steward_no_confidence: "node_stewardship",
   node_steward_resignation: "node_stewardship",
+  node_name_change_proposal: "node_stewardship",
+  node_name_change: "node_stewardship",
   responsibility_proposal: "responsibility",
   responsibility_creation_proposal: "responsibility",
   responsibility_recall: "responsibility",
@@ -124,6 +128,8 @@ export function deriveCompetitionKey(
     case "node_steward_candidate_consent":
     case "node_steward_no_confidence_initiation":
     case "node_steward_resignation":
+    // Non-competing: any group may internally propose a node name; they escalate independently.
+    case "node_name_change_proposal":
     // Non-competing: making a group public is idempotent; multiple concurrent proposals are allowed
     case "group_visibility_proposal":
     // Non-competing: each event proposal is independent; coalition events open one petition
@@ -132,6 +138,9 @@ export function deriveCompetitionKey(
       return null;
     case "node_steward_appointment":
       return `${groupId}:node_steward_appointment`;
+    // One node-wide rename vote at a time (groupId carries the nodeId for node-scoped petitions).
+    case "node_name_change":
+      return `${groupId}:node_name_change`;
     case "node_steward_no_confidence":
       return `${groupId}:node_steward_no_confidence:${subjectId}`;
     // All others: groupId:family:subjectId is unique per decision within a group
