@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { requireMembership, requireGroupMembershipStatus } from "./_modules/_shared/guards";
+import { ProjectsModule } from "./_modules/projects";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
@@ -34,8 +35,6 @@ import {
   type PetitionFilterValue,
 } from "../../../../lib/petitions";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
-import { proposeProject } from "../../../../lib/projects";
-import { openProjectHostingWithdrawalPetition } from "../../../../lib/project-hosting";
 import { openCoalitionFormationProposal, openCoalitionJoinProposal } from "../../../../lib/coalitions";
 import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
@@ -602,59 +601,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         </CollapsibleSection>
 
         {/* ── Projects ──────────────────────────────────────────────── */}
-        <CollapsibleSection id="projects" title="Hosted Projects" eyebrow="Federated coordination" storageKey={`group:${groupId}:section:projects`} className="bg-[var(--surface)] p-5 sm:p-6">
-          <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
-            Hosting is this collective&apos;s endorsement and support. It does not give the collective ownership of a project.
-          </p>
-          {data.projects.length > 0 ? (
-            <div className="space-y-3">
-              {data.projects.map((project) => (
-                <div key={project.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
-                  <a href={`/projects/${project.id}`} className="block hover:bg-[var(--hover)] transition">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-medium text-[var(--text)]">{project.name}</p>
-                      <span className="shrink-0 border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--muted)]">
-                        Hosted here
-                      </span>
-                    </div>
-                    {project.description && <p className="mt-1 text-xs text-[var(--soft-text)] line-clamp-2">{project.description}</p>}
-                    <p className="mt-2 text-xs text-[var(--muted)]">
-                      <span className="capitalize">{project.status}</span>
-                      <span aria-hidden="true"> &middot; </span>
-                      {project._count.hostings} {project._count.hostings === 1 ? "host collective" : "host collectives"}
-                    </p>
-                  </a>
-                  {isActive && (
-                    <form action={openProjectHostingWithdrawalAction} className="mt-3">
-                      <input type="hidden" name="groupId" value={groupId} />
-                      <input type="hidden" name="projectId" value={project.id} />
-                      <SubmitButton variant="secondary">Open host-withdrawal petition</SubmitButton>
-                    </form>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="This collective does not currently host any projects." />
-          )}
-          {isActive && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a new project</summary>
-              <form action={proposeProjectAction} className="mt-3 space-y-3">
-                <input type="hidden" name="groupId" value={groupId} />
-                <label className="block">
-                  <span className="field-label">Project name</span>
-                  <input name="name" type="text" required className="field-input" placeholder="e.g. Community Garden" />
-                </label>
-                <label className="block">
-                  <span className="field-label">Description</span>
-                  <textarea name="description" rows={2} className="field-input resize-none" placeholder="What will this project do?" />
-                </label>
-                <SubmitButton variant="secondary">Open proposal petition</SubmitButton>
-              </form>
-            </details>
-          )}
-        </CollapsibleSection>
+        <ProjectsModule projects={data.projects} isActive={isActive} groupId={groupId} />
 
         <CollapsibleSection id="coalitions" title="Coalitions" eyebrow="Collective-to-collective coordination" storageKey={`group:${groupId}:section:coalitions`} className="bg-[var(--surface)] p-5 sm:p-6">
           {data.coalitions.length > 0 ? (
@@ -1873,57 +1820,6 @@ async function archivePublicationAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-}
-
-async function proposeProjectAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = formData.get("groupId") as string;
-  const name = (formData.get("name") as string)?.trim();
-  const description = (formData.get("description") as string)?.trim() || "";
-  if (!name) return;
-  const prisma = createPrismaClient();
-  try {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { accountId_groupId: { accountId: session.accountId, groupId } },
-      select: { id: true },
-    });
-    if (!membership) redirect("/dashboard");
-    await proposeProject(prisma, {
-      groupId,
-      createdByMembershipId: membership.id,
-      accountId: session.accountId,
-      name,
-      description,
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
-async function openProjectHostingWithdrawalAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const projectId = requiredString(formData, "projectId");
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  let notice = "Could not open host-withdrawal petition.";
-  try {
-    const result = await openProjectHostingWithdrawalPetition(prisma, {
-      projectId,
-      groupId,
-      createdByMembershipId: membership.id,
-    });
-    if (result.ok) notice = "Host-withdrawal petition opened.";
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-  redirect(`/groups/${groupId}?notice=${encodeURIComponent(notice)}#projects`);
 }
 
 async function proposeCoalitionFormationAction(
