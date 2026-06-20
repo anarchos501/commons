@@ -6,6 +6,7 @@ import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import type { FormState } from "../../../../components/shared/form-state";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { LocalTime } from "../../../../components/shared/LocalTime";
+import { CopyTextButton } from "../../../../components/shared/CopyTextButton";
 import {
   FEEDBACK_STATUSES,
   compileFeedbackDigest,
@@ -67,11 +68,14 @@ export default async function FeedbackInboxPage() {
               </summary>
               <div className="mt-3 space-y-3">
                 {digests.map((digest) => (
-                  <details key={digest.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                  <details key={digest.id} className="min-w-0 border border-[var(--border)] bg-[var(--subtle)] p-3">
                     <summary className="cursor-pointer text-sm text-[var(--text)]">
                       {digest.title} · <LocalTime value={digest.compiledAt.toISOString()} />
                     </summary>
-                    <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-[var(--soft-text)]">{digest.body}</pre>
+                    <div className="mt-2 flex justify-end">
+                      <CopyTextButton text={digest.body} label="Copy all" />
+                    </div>
+                    <pre className="mt-2 overflow-x-hidden whitespace-pre-wrap [overflow-wrap:anywhere] text-xs leading-5 text-[var(--soft-text)]">{digest.body}</pre>
                   </details>
                 ))}
               </div>

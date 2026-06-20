@@ -3,7 +3,12 @@ import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
 import { proposeEvent, submitEvent } from "../lib/events";
 import { addPetitionSupport } from "../lib/petitions";
-import { evaluateAndApplyPetition, resolveExpiredPetitions } from "../lib/petition-evaluation";
+import {
+  evaluateAndApplyPetition,
+  resolveExpiredPetitions,
+  resolveDuePetitionsForGroup,
+  getPetitionDetail,
+} from "../lib/petition-evaluation";
 import { GOVERNANCE_CATEGORIES } from "../lib/governance-categories";
 import { categoryForFamily, isProposalFamily } from "../lib/governance-proposal-families";
 import {
@@ -311,6 +316,68 @@ test("expired event petition is resolved into a CalendarEvent by the background 
     // petition). The scoped CalendarEvent count below proves OUR petition resolved successfully.
 
     assert.equal(await prisma.calendarEvent.count({ where: { hostId: groupId } }), 1);
+  } finally {
+    await cleanupEventFixture(prisma, prefix);
+  }
+});
+
+// ── Feedback bug 2: petitions resolve on page load (no "Check outcome" button) ──
+
+test("resolveDuePetitionsForGroup resolves an expired group event petition on load", async () => {
+  const prefix = "ep_due_group";
+  await cleanupEventFixture(prisma, prefix);
+  try {
+    const { accountId, groupId, membershipId } = await createGroupFixture(prisma, prefix);
+    const result = await proposeEvent(prisma, meeting(accountId, "group", groupId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await addPetitionSupport(prisma, { petitionId: result.petitionIds[0], actorAccountId: accountId, membershipId });
+    await prisma.petition.update({
+      where: { id: result.petitionIds[0] },
+      data: { closesAt: new Date(Date.now() - 1000) },
+    });
+
+    // What the group page now runs in its maintenance pass instead of a button press.
+    await resolveDuePetitionsForGroup(prisma, groupId);
+
+    assert.equal(await prisma.calendarEvent.count({ where: { hostId: groupId } }), 1);
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionIds[0] } });
+    assert.equal(petition.status, "approved");
+  } finally {
+    await cleanupEventFixture(prisma, prefix);
+  }
+});
+
+// ── Feedback bug 1: event petition card surfaces date/time and location ─────────
+
+test("event petition detail includes a When (date/time) and Location field", async () => {
+  const prefix = "ep_detail";
+  await cleanupEventFixture(prisma, prefix);
+  try {
+    const { accountId, groupId } = await createGroupFixture(prisma, prefix);
+    const result = await proposeEvent(prisma, {
+      ...meeting(accountId, "group", groupId),
+      location: "Library, Room 2",
+      description: "Monthly planning",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const petition = await prisma.petition.findUniqueOrThrow({ where: { id: result.petitionIds[0] } });
+    const detail = await getPetitionDetail(prisma, {
+      subjectType: petition.subjectType,
+      subjectId: petition.subjectId,
+      status: petition.status,
+      createdByMembershipId: petition.createdByMembershipId,
+      createdByAccountId: petition.createdByAccountId,
+    });
+
+    const fieldByLabel = Object.fromEntries(detail.fields.map((f) => [f.label, f.value]));
+    assert.ok("When" in fieldByLabel, "detail should include a When field");
+    assert.match(fieldByLabel["When"], /2026/); // formatted range carries the year
+    assert.equal(fieldByLabel["Location"], "Library, Room 2");
+    assert.equal(fieldByLabel["Description"], "Monthly planning");
   } finally {
     await cleanupEventFixture(prisma, prefix);
   }

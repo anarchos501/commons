@@ -166,6 +166,32 @@ export async function resolveExpiredPetitions(
   return { attempted: due.length, resolved, failed };
 }
 
+// Resolves a single scope's due petitions. Called on page load so petitions
+// transition purely by expiry time (no manual "check outcome" button); the 60s
+// sweep in instrumentation.ts remains the unattended backstop. Per-petition
+// try/catch ensures one bad petition can't break rendering the page.
+async function resolveDuePetitions(prisma: PrismaClient, where: Prisma.PetitionWhereInput): Promise<void> {
+  const due = await prisma.petition.findMany({
+    where: { ...where, status: "open", closesAt: { lte: new Date() } },
+    select: { id: true },
+  });
+  for (const p of due) {
+    try {
+      await evaluateAndApplyPetition(prisma, p.id);
+    } catch (err) {
+      console.error(`[petitions] failed to evaluate petition ${p.id} on load`, err);
+    }
+  }
+}
+
+export async function resolveDuePetitionsForGroup(prisma: PrismaClient, groupId: string): Promise<void> {
+  await resolveDuePetitions(prisma, { groupId });
+}
+
+export async function resolveDuePetitionsForProject(prisma: PrismaClient, projectId: string): Promise<void> {
+  await resolveDuePetitions(prisma, { scopeType: "project", scopeId: projectId });
+}
+
 export async function describePetitionSubject(prisma: PrismaClient, subjectType: string, subjectId: string) {
   if (subjectType === "membership_request") {
     const membership = await prisma.groupMembership.findUnique({
@@ -403,6 +429,34 @@ function truncateBody(body: string, max = 2000): string {
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 }
 
+/**
+ * Formats a proposed event's start–end range in the event's own stored IANA timezone.
+ * Rendering in the scheduled zone (rather than the viewer's) is deterministic server-side
+ * (no hydration mismatch) and shows everyone the same canonical time — the right framing
+ * for a proposal. The live event view renders in viewer-local time separately.
+ */
+function formatEventWhen(start: Date, end: Date, timeZone: string): string {
+  // Explicit component options (not dateStyle/timeStyle) so timeZoneName is allowed —
+  // Intl.DateTimeFormat throws if dateStyle/timeStyle are mixed with component fields.
+  const startOpts: Intl.DateTimeFormatOptions = {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  };
+  const endOpts: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  const tz = (() => {
+    try {
+      // Probe the zone; an invalid IANA id throws here.
+      new Intl.DateTimeFormat("en-US", { timeZone });
+      return timeZone;
+    } catch {
+      return "UTC";
+    }
+  })();
+  const startFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, ...startOpts });
+  const endFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, ...endOpts });
+  return `${startFmt.format(start)} – ${endFmt.format(end)}`;
+}
+
 export async function getPetitionDetail(prisma: PrismaClient, petition: PetitionDetailInput): Promise<PetitionDetail> {
   const proposer = await resolvePetitionProposer(prisma, petition);
   const { subjectType, subjectId, status } = petition;
@@ -532,6 +586,24 @@ export async function getPetitionDetail(prisma: PrismaClient, petition: Petition
     if (revision?.body) fields.push({ label: "Proposed text", value: truncateBody(revision.body) });
     const summary = revision ? `${docTitle} revision` : familyLabel;
     return { summary, proposer, outcome: frameOutcome(status, `this revision to "${docTitle}" is adopted`), fields };
+  }
+
+  if (subjectType === "event_authorization") {
+    const proposal = await prisma.eventProposal.findUnique({
+      where: { id: subjectId },
+      select: { category: true, title: true, description: true, startTime: true, endTime: true, timezone: true, location: true },
+    });
+    if (proposal) {
+      fields.push({ label: "When", value: formatEventWhen(proposal.startTime, proposal.endTime, proposal.timezone) });
+      if (proposal.location) fields.push({ label: "Location", value: proposal.location });
+      if (proposal.description) fields.push({ label: "Description", value: truncateBody(proposal.description) });
+      return {
+        summary: `Authorize ${proposal.category}: ${proposal.title}`,
+        proposer,
+        outcome: frameOutcome(status, `the ${proposal.category} "${proposal.title}" is scheduled`),
+        fields,
+      };
+    }
   }
 
   // Other families: delegate the one-line summary to describePetitionSubject (its single

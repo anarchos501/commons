@@ -63,6 +63,7 @@ import {
 import { computeAllParameterTemperatures, upsertGovernanceSignal } from "../../../../lib/governance-temperature";
 import {
   evaluateAndApplyPetition,
+  resolveDuePetitionsForGroup,
   getPetitionDetail,
   proposalFamilyLabel,
   governanceCategoryLabel,
@@ -907,10 +908,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <CollapsibleSection id="petitions" title="Petitions" eyebrow="Community decisions" storageKey={`group:${groupId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
             <PetitionFilter currentFilter={petitionFilter} />
-            <form action={evaluateClosedPetitionsAction}>
-              <input type="hidden" name="groupId" value={groupId} />
-              <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
-            </form>
             {data.petitions.length > 0 ? (
               <div className="space-y-3">
                 {data.petitions.map((petition) => (
@@ -1309,6 +1306,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     await recordGroupPresence(prisma, accountId, groupId);
     await applyParticipationTransitions(prisma, groupId);
     await expireStaleAssignments(prisma, groupId);
+    await resolveDuePetitionsForGroup(prisma, groupId);
     await archiveStalePetitions(prisma, groupId);
     await autoCloseStaleWithdrawnConcerns(prisma, groupId);
     await expireStaleContentDrafts(prisma, groupId);
@@ -2390,21 +2388,6 @@ async function withdrawPetitionSupportAction(formData: FormData) {
   revalidatePath(`/groups/${groupId}`);
 }
 
-async function evaluatePetitionAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const petitionId = requiredString(formData, "petitionId");
-  const prisma = createPrismaClient();
-  try {
-    await evaluateAndApplyPetition(prisma, petitionId);
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
 async function withdrawPetitionAction(
   _prev: FormState,
   formData: FormData,
@@ -2428,26 +2411,6 @@ async function withdrawPetitionAction(
   }
   revalidatePath(`/groups/${groupId}`);
   return { kind: "success", message: "Petition withdrawn." };
-}
-
-async function evaluateClosedPetitionsAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const prisma = createPrismaClient();
-  try {
-    const closed = await prisma.petition.findMany({
-      where: { groupId, status: "open", closesAt: { lte: new Date() } },
-      select: { id: true },
-    });
-    for (const p of closed) {
-      await evaluateAndApplyPetition(prisma, p.id);
-    }
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
 }
 
 async function volunteerForResponsibilityAction(formData: FormData) {
@@ -2718,11 +2681,6 @@ function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { 
           ) : (
             <p className="text-xs text-[var(--muted)]">Only active members may support petitions.</p>
           )}
-          <form action={evaluatePetitionAction}>
-            <input type="hidden" name="groupId" value={groupId} />
-            <input type="hidden" name="petitionId" value={petition.id} />
-            <SubmitButton variant="secondary">Check outcome</SubmitButton>
-          </form>
           {canWithdraw && (
             <FormWithNotice action={withdrawPetitionAction}>
               <input type="hidden" name="groupId" value={groupId} />

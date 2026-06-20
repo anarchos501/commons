@@ -21,6 +21,11 @@ const defaultTz = () => {
   }
 };
 
+// The full IANA timezone list, so members pick from a dropdown rather than free-typing.
+// Node 22 / modern browsers support Intl.supportedValuesOf; fall back to an empty list
+// (the form then shows just the detected default) if the API is ever unavailable.
+const TIMEZONES: string[] = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+
 const FIELD = "field-input w-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm";
 
 export function EventForm({ action, allowMeeting, audiences }: Props) {
@@ -84,7 +89,11 @@ export function EventForm({ action, allowMeeting, audiences }: Props) {
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="field-label text-xs text-[var(--muted)]">Timezone</span>
-            <input name="timezone" type="text" value={timezone} onChange={(e) => setTimezone(e.target.value)} className={FIELD} />
+            <select name="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} className={FIELD}>
+              {(TIMEZONES.length ? TIMEZONES : [timezone]).map((tz) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="field-label text-xs text-[var(--muted)]">Location (optional)</span>

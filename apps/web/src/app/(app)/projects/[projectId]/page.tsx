@@ -25,7 +25,7 @@ import {
   postProjectDiscussionMessage,
 } from "../../../../lib/discussions";
 import { addPetitionSupport, withdrawPetitionSupport } from "../../../../lib/petitions";
-import { evaluateAndApplyPetition } from "../../../../lib/petition-evaluation";
+import { evaluateAndApplyPetition, resolveDuePetitionsForProject } from "../../../../lib/petition-evaluation";
 import {
   proposeProjectContributionCategory,
   getAvailableCategoriesForScope,
@@ -548,10 +548,6 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           {isActive && (
           <CollapsibleSection id="petitions" title="Petitions" eyebrow="Project decisions" storageKey={`project:${projectId}:section:petitions`} className="bg-[var(--surface)] p-5 sm:p-6">
             <div className="space-y-4">
-              <form action={evaluateClosedPetitionsAction}>
-                <input type="hidden" name="projectId" value={projectId} />
-                <SubmitButton variant="secondary">Check petition outcomes</SubmitButton>
-              </form>
               {data.petitions.length > 0 ? (
                 <div className="space-y-3">
                   {data.petitions.map((petition) => (
@@ -642,6 +638,7 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     // electorate freeze for hostless projects.
     await prisma.$transaction((tx) => syncProjectHostingLifecycle(tx, projectId));
     await applyProjectParticipationTransitions(prisma, projectId);
+    await resolveDuePetitionsForProject(prisma, projectId);
 
     const project = await prisma.project.findUniqueOrThrow({
       where: { id: projectId },
@@ -1175,24 +1172,6 @@ async function proposeLivingDocumentRevisionAction(formData: FormData) {
   try {
     const draft = await draftLivingDocumentRevision(prisma, { livingDocumentId, body, authorId: session.accountId });
     await openProjectRevisionPetition(prisma, { livingDocumentId, revisionId: draft.id, createdByProjectMembershipId: projectMembership.id, projectId });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/projects/${projectId}`);
-}
-
-async function evaluateClosedPetitionsAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const projectId = formData.get("projectId") as string;
-  const prisma = createPrismaClient();
-  try {
-    const petitions = await prisma.petition.findMany({
-      where: { scopeType: "project", scopeId: projectId, status: "open", closesAt: { lte: new Date() } },
-      select: { id: true },
-    });
-    for (const p of petitions) await evaluateAndApplyPetition(prisma, p.id);
   } finally {
     await prisma.$disconnect();
   }
