@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
+import { requireMembership, requireGroupMembershipStatus } from "./_modules/_shared/guards";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
@@ -2096,31 +2097,6 @@ async function revokeInviteLinkAction(
 }
 
 // Full active participation required — for content creation, petitions, governance signals.
-async function requireMembership(accountId: string, groupId: string) {
-  const prisma = createPrismaClient();
-  const membership = await prisma.groupMembership.findUnique({
-    where: { accountId_groupId: { accountId, groupId } },
-    select: { id: true, status: true, participationStatus: true },
-  });
-  await prisma.$disconnect();
-  if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
-    throw new Error("Active group membership required.");
-  }
-  return membership;
-}
-
-// Status-only check — for concern submission, which is available to all active-status members.
-async function requireGroupMembershipStatus(accountId: string, groupId: string) {
-  const prisma = createPrismaClient();
-  const membership = await prisma.groupMembership.findUnique({
-    where: { accountId_groupId: { accountId, groupId } },
-    select: { id: true, status: true },
-  });
-  await prisma.$disconnect();
-  if (!membership || membership.status !== "active") throw new Error("Group membership required.");
-  return membership;
-}
-
 async function createDiscussionThreadAction(
   _prev: ThreadFormState,
   formData: FormData,
