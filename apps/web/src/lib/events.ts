@@ -660,7 +660,7 @@ async function failEventProposal(
 
 // ── Viewer space context + visibility ─────────────────────────────────────────
 
-type ViewerSpaces = {
+export type ViewerSpaces = {
   accountId: string | null;
   groupIds: Set<string>;
   projectIds: Set<string>;
@@ -674,7 +674,7 @@ type ViewerSpaces = {
  * read the viewer's OWN memberships, no query can reveal another private group's
  * existence or membership.
  */
-async function getViewerSpaces(prisma: PrismaClient, accountId: string | null): Promise<ViewerSpaces> {
+export async function getViewerSpaces(prisma: PrismaClient, accountId: string | null): Promise<ViewerSpaces> {
   if (!accountId) {
     return { accountId: null, groupIds: new Set(), projectIds: new Set(), coalitionIds: new Set(), responsibilityIds: new Set() };
   }

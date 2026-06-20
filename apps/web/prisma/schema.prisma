@@ -435,6 +435,7 @@ model Account {
   calendarEventsCreated    CalendarEvent[] @relation("CalendarEventCreator")
   eventInterests           EventInterest[] @relation("EventInterestAccount")
   calendarFilterPreference CalendarFilterPreference? @relation("CalendarFilterPrefs")
+  notificationPreference   NotificationPreference?   @relation("NotificationPrefs")
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -721,6 +722,7 @@ model GroupMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
   applicationNote     String?             // optional note submitted with a pending membership application
+  decidedAt           DateTime?           // set when a pending application is approved/declined — drives applicant outcome notifications
   // Per-collective consent to receive free-text "custom" support requests. Membership is already
   // group-scoped, so opting in here applies only to THIS collective (not account-wide). When true,
   // this member is offered custom requests routed to the group. `customAvailability` mirrors
@@ -745,6 +747,7 @@ model GroupMembership {
   @@index([accountId])
   @@index([groupId])
   @@index([groupId, participationStatus])
+  @@index([accountId, decidedAt])
 }
 
 model GroupServiceOffering {
@@ -838,6 +841,7 @@ model ProjectMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
   applicationNote     String?             // optional note submitted with a pending project join request
+  decidedAt           DateTime?           // set when a pending join request is approved/declined — drives applicant outcome notifications
 
   account          Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -849,6 +853,7 @@ model ProjectMembership {
   @@index([accountId])
   @@index([projectId])
   @@index([projectId, participationStatus])
+  @@index([accountId, decidedAt])
 }
 
 // RFC-007: links a candidate group's "should we host?" petition with a pending-closure
@@ -1890,6 +1895,30 @@ model CalendarFilterPreference {
   updatedAt                DateTime @updatedAt
 
   account Account @relation("CalendarFilterPrefs", fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// Per-account notification settings + read-state watermarks. One row per account (like
+// CalendarFilterPreference). Broadcast categories are muteable via enable* flags + mutedSpaces;
+// the person-targeting "About you" class has NO enable flag and ignores mutedSpaces (non-muteable).
+// Watermarks give per-category "N new" + "mark read" without per-event rows (store-less-data).
+model NotificationPreference {
+  id              String    @id @default(cuid())
+  accountId       String    @unique
+  enableRequests  Boolean   @default(true)
+  enablePetitions Boolean   @default(true)
+  enableOutcomes  Boolean   @default(true)
+  enableSafety    Boolean   @default(true)
+  enableUpdates   Boolean   @default(true)
+  rollUpUpdates   Boolean   @default(true)
+  mutedSpaces     Json?     // { group: [...], project: [...], responsibility: [...], coalition: [...] }
+  outcomesSeenAt  DateTime?
+  safetySeenAt    DateTime?
+  updatesSeenAt   DateTime?
+  aboutYouSeenAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  account Account @relation("NotificationPrefs", fields: [accountId], references: [id], onDelete: Cascade)
 }
 
 // An event awaiting collective authorization (Meeting, or cross-space Workshop).

@@ -171,7 +171,7 @@ export async function approveMembershipRequest(
 
   await prisma.groupMembership.update({
     where: { id: pendingMembershipId },
-    data: { status: "active" },
+    data: { status: "active", decidedAt: new Date() },
   });
 
   await logAction(prisma, {
@@ -206,7 +206,7 @@ export async function dismissMembershipApplication(
 
   await prisma.groupMembership.update({
     where: { id: pendingMembershipId },
-    data: { status: "inactive" },
+    data: { status: "inactive", decidedAt: new Date() },
   });
 }
 

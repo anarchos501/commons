@@ -34,6 +34,15 @@ import { RequestHelpForm, CUSTOM_REQUEST_LABEL } from "../../../components/share
 import type { GroupOption } from "../../../components/shared/RequestHelpForm";
 import { getGroupsAvailableSupport } from "../../../lib/contribution-categories";
 import { CONTACT_VIEWED_ACTION } from "../../../lib/request-access";
+import {
+  getNotificationPreferences,
+  getDerivedNotifications,
+  markCategoryRead,
+  setNotificationPreferences,
+  type DerivedNotif,
+  type WatermarkCategory,
+} from "../../../lib/notifications";
+import { NotificationPreferencesForm } from "../../../components/shared/NotificationPreferencesForm";
 import { NotificationFilters } from "../../../components/shared/NotificationFilters";
 import { DashboardCalendar } from "../../../components/shared/DashboardCalendar";
 import { loadDashboardCalendarData } from "../../../lib/calendar-data";
@@ -281,20 +290,62 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             {/* Notifications */}
             <CollapsibleSection id="routes" title="Notifications" eyebrow="Requests and updates" storageKey="dashboard:routes" className="bg-[var(--surface)] p-5 sm:p-6">
               <NotificationFilters groups={data.myGroups.map((g) => ({ id: g.groupId, name: g.groupName }))} />
+
+              {/* Per-category "N new · Mark read" for the read-state categories */}
+              {(["aboutYou", "outcomes", "safety", "updates"] as const).some((c) => data.notifCounts[c] > 0) && (
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  {(["aboutYou", "outcomes", "safety", "updates"] as const)
+                    .filter((c) => data.notifCounts[c] > 0)
+                    .map((c) => (
+                      <span key={c} className="inline-flex items-center gap-1.5 border border-[var(--border)] bg-[var(--subtle)] px-2 py-0.5 text-xs text-[var(--soft-text)]">
+                        {WATERMARK_CATEGORY_LABELS[c]} ({data.notifCounts[c]})
+                        <form action={markCategoryReadAction}>
+                          <input type="hidden" name="category" value={c} />
+                          <button type="submit" className="text-[var(--accent)] hover:underline">Mark read</button>
+                        </form>
+                      </span>
+                    ))}
+                </div>
+              )}
+
               <form action={routeOpenRequestsAction} className="mb-4">
                 <SubmitButton variant="secondary">Check for matching requests</SubmitButton>
               </form>
               {data.notifications.length > 0 ? (
                 <div className="space-y-4">
                   {data.notifications.map((notif) =>
-                    notif.kind === "route"
-                      ? <RouteCard key={notif.id} route={notif} />
-                      : <PetitionNotifCard key={notif.id} petition={notif} />
+                    notif.kind === "route" ? (
+                      <RouteCard key={notif.id} route={notif} />
+                    ) : notif.kind === "petition" ? (
+                      <PetitionNotifCard key={notif.id} petition={notif} />
+                    ) : (
+                      <DerivedCard key={notif.id} notif={notif} />
+                    ),
                   )}
                 </div>
               ) : (
                 <EmptyState text="No notifications." />
               )}
+
+              {/* Durable settings — what you receive */}
+              <details className="mt-5 border-t border-[var(--border)] pt-3">
+                <summary className="cursor-pointer text-sm font-medium text-[var(--muted)] hover:text-[var(--text)] select-none">Notification settings</summary>
+                <div className="mt-3">
+                  <NotificationPreferencesForm
+                    prefs={{
+                      enableRequests: data.notifPrefs.enableRequests,
+                      enablePetitions: data.notifPrefs.enablePetitions,
+                      enableOutcomes: data.notifPrefs.enableOutcomes,
+                      enableSafety: data.notifPrefs.enableSafety,
+                      enableUpdates: data.notifPrefs.enableUpdates,
+                      rollUpUpdates: data.notifPrefs.rollUpUpdates,
+                      mutedGroupIds: data.notifPrefs.mutedSpaces.group ?? [],
+                    }}
+                    groups={data.myGroups.map((g) => ({ id: g.groupId, name: g.groupName }))}
+                    action={setNotificationPreferencesAction}
+                  />
+                </div>
+              </details>
             </CollapsibleSection>
 
             {/* My Requests */}
@@ -506,6 +557,13 @@ type PetitionNotif = {
 
 type NotifItem = RouteNotif | PetitionNotif;
 
+// Unified render item across the existing self-clearing categories (route/petition) and the
+// derived watermark categories (outcomes/safety/updates/aboutYou).
+type RenderNotif =
+  | ({ category: "requests" } & RouteNotif)
+  | ({ category: "petitions" } & PetitionNotif)
+  | ({ kind: "derived" } & DerivedNotif);
+
 // ── Data Loading ──────────────────────────────────────────────────────────────
 
 async function getDashboardData(
@@ -681,20 +739,30 @@ async function getDashboardData(
       createdAt: p.opensAt,
     }));
 
-    const combined: NotifItem[] = [
-      ...(notifFilters.type === "all" || notifFilters.type === "route" ? routeNotifs : []),
-      ...(notifFilters.type === "all" || notifFilters.type === "petition" ? [...petitionNotifs, ...nodePetitionNotifs] : []),
+    // Notification preferences + derived (non-self-clearing) notifications.
+    const notifPrefs = await getNotificationPreferences(prisma, accountId);
+    const derived = await getDerivedNotifications(prisma, accountId, notifPrefs);
+
+    const merged: RenderNotif[] = [
+      ...(notifPrefs.enableRequests ? routeNotifs.map((n) => ({ ...n, category: "requests" as const })) : []),
+      ...(notifPrefs.enablePetitions ? [...petitionNotifs, ...nodePetitionNotifs].map((n) => ({ ...n, category: "petitions" as const })) : []),
+      ...derived.items.map((n) => ({ kind: "derived" as const, ...n })),
     ];
 
-    const notifications = combined
+    const cat = notifFilters.type;
+    const notifications = merged
       .filter((n) => {
+        if (cat !== "all" && n.category !== cat) return false;
         if (notifFilters.unreadOnly && !n.isUnread) return false;
         if (notifFilters.groupId && n.groupId !== notifFilters.groupId) return false;
         return true;
       })
       .sort((a, b) => {
-        if (a.isUnread && !b.isUnread) return -1;
-        if (!a.isUnread && b.isUnread) return 1;
+        // Person-targeting "About you" pinned above broadcasts; then unread-first, then recent.
+        const aAbout = a.category === "aboutYou" ? 1 : 0;
+        const bAbout = b.category === "aboutYou" ? 1 : 0;
+        if (aAbout !== bAbout) return bAbout - aAbout;
+        if (a.isUnread !== b.isUnread) return a.isUnread ? -1 : 1;
         return b.createdAt.getTime() - a.createdAt.getTime();
       });
 
@@ -765,6 +833,8 @@ async function getDashboardData(
       acceptedRequests,
       contactAccessByRequest,
       notifications,
+      notifCounts: derived.counts,
+      notifPrefs,
       myRequests,
       pendingApplications,
     };
@@ -973,6 +1043,44 @@ async function routeOpenRequestsAction() {
   revalidatePath("/dashboard");
 }
 
+async function markCategoryReadAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const category = requiredString(formData, "category");
+  if (!["outcomes", "safety", "updates", "aboutYou"].includes(category)) return;
+  const prisma = createPrismaClient();
+  try {
+    await markCategoryRead(prisma, session.accountId, category as WatermarkCategory);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+}
+
+async function setNotificationPreferencesAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const flag = (name: string) => formData.get(name) === "on";
+  const mutedGroupIds = formData.getAll("mutedGroup").map(String).filter(Boolean);
+  const prisma = createPrismaClient();
+  try {
+    await setNotificationPreferences(prisma, session.accountId, {
+      enableRequests: flag("enableRequests"),
+      enablePetitions: flag("enablePetitions"),
+      enableOutcomes: flag("enableOutcomes"),
+      enableSafety: flag("enableSafety"),
+      enableUpdates: flag("enableUpdates"),
+      rollUpUpdates: flag("rollUpUpdates"),
+      mutedSpaces: mutedGroupIds.length ? { group: mutedGroupIds } : {},
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+}
+
 async function decideRouteAction(formData: FormData) {
   "use server";
   const session = await getSession();
@@ -1122,6 +1230,41 @@ function PetitionNotifCard({ petition }: { petition: PetitionNotif }) {
         </a>
       </div>
       {!petition.isUnread && <p className="mt-3 text-sm text-[var(--muted)]">You have already supported this petition.</p>}
+    </article>
+  );
+}
+
+const WATERMARK_CATEGORY_LABELS: Record<WatermarkCategory, string> = {
+  aboutYou: "About you",
+  outcomes: "Outcomes",
+  safety: "Safety",
+  updates: "Updates",
+};
+
+function DerivedCard({ notif }: { notif: DerivedNotif }) {
+  const isAbout = notif.category === "aboutYou";
+  return (
+    <article className={`border p-4 ${isAbout ? "border-amber-400" : notif.isUnread ? "border-[var(--accent)]" : "border-[var(--border)]"} bg-[var(--surface)]`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {notif.isUnread && <span className="mr-2 text-xs font-semibold text-[var(--accent)]">New</span>}
+          <h3 className="inline font-semibold">{notif.title}</h3>
+          {notif.detail && <p className="mt-1 text-sm text-[var(--soft-text)]">{notif.detail}</p>}
+        </div>
+        <span className={`shrink-0 border px-2 py-1 text-xs font-medium ${isAbout ? "border-amber-400 text-amber-800" : "border-[var(--border)] bg-[var(--subtle)] text-[var(--soft-text)]"}`}>
+          {WATERMARK_CATEGORY_LABELS[notif.category]}
+        </span>
+      </div>
+      {notif.href && (
+        <div className="mt-3">
+          <a
+            href={notif.href}
+            className="inline-flex min-h-11 items-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+          >
+            View <span aria-hidden="true">-&gt;</span>
+          </a>
+        </div>
+      )}
     </article>
   );
 }

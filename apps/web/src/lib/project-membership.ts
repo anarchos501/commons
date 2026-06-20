@@ -155,6 +155,7 @@ export async function approveProjectJoinRequest(
       participationStatus: "active",
       lastSeenAt: new Date(),
       applicationNote: null,
+      decidedAt: new Date(),
     },
   });
   if (updated.count !== 1) return { ok: false, reason: "request_not_found" };
@@ -181,7 +182,7 @@ export async function dismissProjectJoinRequest(
 
   const updated = await prisma.projectMembership.updateMany({
     where: { id: pendingMembershipId, projectId: request.projectId, status: "pending" },
-    data: { status: "inactive", applicationNote: null },
+    data: { status: "inactive", applicationNote: null, decidedAt: new Date() },
   });
   return updated.count === 1 ? { ok: true } : { ok: false, reason: "request_not_found" };
 }

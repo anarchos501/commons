@@ -44,8 +44,12 @@ export function NotificationFilters({ groups }: Props) {
         className="text-xs border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[var(--soft-text)]"
       >
         <option value="all">All types</option>
-        <option value="route">Support requests</option>
-        <option value="petition">Petitions</option>
+        <option value="requests">Support requests</option>
+        <option value="petitions">Petitions</option>
+        <option value="outcomes">Outcomes</option>
+        <option value="safety">Safety</option>
+        <option value="updates">Updates</option>
+        <option value="aboutYou">About you</option>
       </select>
 
       {groups.length > 1 && (
