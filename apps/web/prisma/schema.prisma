@@ -436,6 +436,7 @@ model Account {
   eventInterests           EventInterest[] @relation("EventInterestAccount")
   calendarFilterPreference CalendarFilterPreference? @relation("CalendarFilterPrefs")
   notificationPreference   NotificationPreference?   @relation("NotificationPrefs")
+  uiDisclosurePreference   UiDisclosurePreference?   @relation("UiDisclosurePrefs")
 
   @@index([homeNodeId])
   @@index([portableIdentityId])
@@ -1919,6 +1920,22 @@ model NotificationPreference {
   updatedAt       DateTime  @updatedAt
 
   account Account @relation("NotificationPrefs", fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+// Per-account progressive-disclosure switches for capability cards within a space. `revealAll`
+// is the master "reveal everything" toggle; `overrides` is a per-scope show/hide map keyed by
+// "global" + "<groupId>", values per moduleId. Defaults (no row) = automatic foreground behavior.
+// The system never hides the doors to power — only the user can, and a hidden card always stays
+// listed in the RoomsMap (one switch from returning).
+model UiDisclosurePreference {
+  id        String   @id @default(cuid())
+  accountId String   @unique
+  revealAll Boolean  @default(false)
+  overrides Json?    // { "global": { "<moduleId>": "show"|"hide" }, "<groupId>": { "<moduleId>": "show"|"hide" } }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account Account @relation("UiDisclosurePrefs", fields: [accountId], references: [id], onDelete: Cascade)
 }
 
 // An event awaiting collective authorization (Meeting, or cross-space Workshop).
