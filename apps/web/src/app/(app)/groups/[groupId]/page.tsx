@@ -6,6 +6,7 @@ import { getSession } from "../../../../lib/session";
 import { requireMembership, requireGroupMembershipStatus } from "./_modules/_shared/guards";
 import { ProjectsModule } from "./_modules/projects";
 import { CoalitionsModule } from "./_modules/coalitions";
+import { NodeStewardshipModule } from "./_modules/node-stewardship";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
@@ -38,12 +39,6 @@ import {
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
 import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
-import {
-  openGroupNoConfidence,
-  openGroupStewardNomination,
-  openStewardResignation,
-} from "../../../../lib/node-stewardship";
-import { openNodeNameProposal } from "../../../../lib/node-name";
 import { proposeResponsibility, PROPOSABLE_RESPONSIBILITY_ABILITIES } from "../../../../lib/responsibility-proposals";
 import {
   CATEGORY_REGISTRY,
@@ -605,82 +600,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
         <CoalitionsModule data={data} isActive={isActive} groupId={groupId} />
 
-        <CollapsibleSection id="node-stewardship" title="Node Governance" eyebrow="This node" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {(() => {
-            const publicGroups = data.nodeGroupOptions.filter((g) => !g.isPrivate);
-            const privateCount = data.nodeGroupOptions.length - publicGroups.length;
-            const stewardLabel = data.nodeState.stewardGroupId
-              ? (data.nodeGroupOptions.find((g) => g.id === data.nodeState.stewardGroupId)?.label ?? "a collective")
-              : null;
-            return (
-              <div className="mb-4 space-y-2 border-b border-[var(--border)] pb-4">
-                <p className="text-xs text-[var(--soft-text)]">
-                  Steward: {stewardLabel
-                    ? <span className="font-medium text-[var(--text)]">{stewardLabel}</span>
-                    : <span className="text-[var(--muted)]">none yet</span>}
-                </p>
-                <p className="text-xs text-[var(--soft-text)]">
-                  Collectives on this node: {publicGroups.length > 0 ? publicGroups.map((g) => g.label).join(", ") : "none public"}
-                  {privateCount > 0 ? ` · +${privateCount} private` : ""}
-                </p>
-                <a href="/node" className="inline-block text-xs text-[var(--accent)] hover:underline">Open node governance →</a>
-              </div>
-            );
-          })()}
-          <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
-            This collective may open stewardship questions. Node users decide appointments and no-confidence votes.
-          </p>
-          {isActive && !data.nodeState.stewardGroupId && (
-            <form action={openGroupStewardNominationAction} className="space-y-3">
-              <input type="hidden" name="groupId" value={groupId} />
-              <input type="hidden" name="nodeId" value={group.nodeId} />
-              <label className="block">
-                <span className="field-label">Candidate collective</span>
-                <select name="candidateGroupId" className="field-input" required>
-                  {data.nodeGroupOptions.filter((candidate) => !candidate.isPrivate).map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
-                  ))}
-                </select>
-              </label>
-              <SubmitButton variant="secondary">Open nomination petition</SubmitButton>
-            </form>
-          )}
-          {isActive && data.nodeState.stewardGroupId && (
-            <form action={openGroupNoConfidenceAction} className="space-y-3">
-              <input type="hidden" name="groupId" value={groupId} />
-              <input type="hidden" name="nodeId" value={group.nodeId} />
-              <p className="text-sm text-[var(--soft-text)]">Ask this collective whether to initiate a node-wide no-confidence vote.</p>
-              <SubmitButton variant="secondary">Open initiation petition</SubmitButton>
-            </form>
-          )}
-          {isActive && data.nodeState.stewardGroupId === groupId && (
-            <form action={openStewardResignationAction} className="mt-3">
-              <input type="hidden" name="groupId" value={groupId} />
-              <input type="hidden" name="nodeId" value={group.nodeId} />
-              <SubmitButton variant="secondary">Open steward resignation petition</SubmitButton>
-            </form>
-          )}
-          {isActive && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose a node name</summary>
-              <form action={proposeNodeNameAction} className="mt-3 space-y-3">
-                <input type="hidden" name="groupId" value={groupId} />
-                <input type="hidden" name="nodeId" value={group.nodeId} />
-                <label className="block">
-                  <span className="field-label">Proposed node name</span>
-                  <input name="proposedName" type="text" required maxLength={100} className="field-input" placeholder="e.g. Northside Commons" />
-                  <span className="mt-1 block text-xs text-[var(--muted)]">
-                    If this collective approves, it escalates to a node-wide vote to rename the node.
-                  </span>
-                </label>
-                <SubmitButton variant="secondary">Open node name petition</SubmitButton>
-              </form>
-            </details>
-          )}
-          <a href="/node" className="mt-4 inline-block text-xs font-medium text-[var(--accent)] hover:underline">
-            Open node governance
-          </a>
-        </CollapsibleSection>
+        <NodeStewardshipModule nodeState={data.nodeState} nodeGroupOptions={data.nodeGroupOptions} nodeId={group.nodeId} isActive={isActive} groupId={groupId} />
 
         {/* ── Members ───────────────────────────────────────────────── */}
         <CollapsibleSection id="members" title="Members" eyebrow="Participation" storageKey={`group:${groupId}:section:members`} className="bg-[var(--surface)] p-5 sm:p-6">
@@ -1572,67 +1492,6 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
   }
 }
 
-async function openGroupStewardNominationAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const nodeId = requiredString(formData, "nodeId");
-  const candidateGroupId = requiredString(formData, "candidateGroupId");
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    await openGroupStewardNomination(prisma, {
-      nodeId,
-      initiatingGroupId: groupId,
-      candidateGroupId,
-      createdByMembershipId: membership.id,
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
-async function openGroupNoConfidenceAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const nodeId = requiredString(formData, "nodeId");
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    await openGroupNoConfidence(prisma, {
-      nodeId,
-      initiatingGroupId: groupId,
-      createdByMembershipId: membership.id,
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
-async function openStewardResignationAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const nodeId = requiredString(formData, "nodeId");
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    await openStewardResignation(prisma, {
-      nodeId,
-      createdByMembershipId: membership.id,
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
 // ── Server Actions ────────────────────────────────────────────────────────────
 
 async function declareEmergencyAction(formData: FormData) {
@@ -1644,23 +1503,6 @@ async function declareEmergencyAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await openEmergencyPetition(prisma, { groupId, createdByMembershipId: membership.id });
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-}
-
-async function proposeNodeNameAction(formData: FormData) {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = formData.get("groupId") as string;
-  const nodeId = formData.get("nodeId") as string;
-  const proposedName = (formData.get("proposedName") as string) ?? "";
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    await openNodeNameProposal(prisma, { nodeId, initiatingGroupId: groupId, proposedName, createdByMembershipId: membership.id });
   } finally {
     await prisma.$disconnect();
   }
