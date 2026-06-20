@@ -5,6 +5,7 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { requireMembership, requireGroupMembershipStatus } from "./_modules/_shared/guards";
 import { ProjectsModule } from "./_modules/projects";
+import { CoalitionsModule } from "./_modules/coalitions";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
@@ -35,7 +36,6 @@ import {
   type PetitionFilterValue,
 } from "../../../../lib/petitions";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../lib/group-membership";
-import { openCoalitionFormationProposal, openCoalitionJoinProposal } from "../../../../lib/coalitions";
 import { visibleGroupRosterAffiliations } from "../../../../lib/federation-legibility";
 import { listNodeGroupLabelsForAccount } from "../../../../lib/node-privacy";
 import {
@@ -603,90 +603,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Projects ──────────────────────────────────────────────── */}
         <ProjectsModule projects={data.projects} isActive={isActive} groupId={groupId} />
 
-        <CollapsibleSection id="coalitions" title="Coalitions" eyebrow="Collective-to-collective coordination" storageKey={`group:${groupId}:section:coalitions`} className="bg-[var(--surface)] p-5 sm:p-6">
-          {data.coalitions.length > 0 ? (
-            <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
-              {data.coalitions.map((coalition) => (
-                <a
-                  key={coalition.id}
-                  href={`/coalitions/${coalition.id}`}
-                  className="block px-3 py-3 transition hover:bg-[var(--hover)]"
-                >
-                  <p className="text-sm font-medium text-[var(--text)]">{coalition.name}</p>
-                  {coalition.description && (
-                    <p className="mt-1 line-clamp-2 text-xs text-[var(--soft-text)]">{coalition.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    {coalition._count.memberships} member {coalition._count.memberships === 1 ? "collective" : "collectives"}
-                  </p>
-                </a>
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="This collective does not currently belong to a coalition." />
-          )}
-          {isActive && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Propose forming a new coalition</summary>
-              {data.eligibleCoalitionPartners.length > 0 ? (
-                <FormWithNotice action={proposeCoalitionFormationAction} className="mt-3 space-y-3">
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <label className="block">
-                    <span className="field-label">Coalition name</span>
-                    <input name="name" type="text" required className="field-input" placeholder="e.g. Riverside Mutual Aid Network" />
-                  </label>
-                  <label className="block">
-                    <span className="field-label">Description</span>
-                    <textarea name="description" rows={2} className="field-input resize-none" placeholder="What is this coalition for?" />
-                  </label>
-                  <label className="block">
-                    <span className="field-label">Rationale</span>
-                    <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should these collectives federate?" />
-                  </label>
-                  <fieldset className="space-y-1.5">
-                    <legend className="field-label">Partner collectives (select at least one)</legend>
-                    <p className="text-xs leading-5 text-[var(--muted)]">
-                      Each selected collective receives its own internal petition, decided independently by its members.
-                    </p>
-                    {data.eligibleCoalitionPartners.map((partner) => (
-                      <label key={partner.id} className="flex items-center gap-2 text-sm text-[var(--text)]">
-                        <input type="checkbox" name="partnerGroupId" value={partner.id} />
-                        {partner.label}
-                      </label>
-                    ))}
-                  </fieldset>
-                  <SubmitButton variant="secondary">Open formation proposal</SubmitButton>
-                </FormWithNotice>
-              ) : (
-                <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                  There are no other collectives on this node to invite into a coalition.
-                </p>
-              )}
-            </details>
-          )}
-          {isActive && data.joinableCoalitions.length > 0 && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">Apply to join a coalition</summary>
-              <FormWithNotice action={proposeCoalitionJoinAction} className="mt-3 space-y-3">
-                <input type="hidden" name="groupId" value={groupId} />
-                <label className="block">
-                  <span className="field-label">Coalition</span>
-                  <select name="coalitionId" required className="field-input">
-                    <option value="">Select a coalition&hellip;</option>
-                    {data.joinableCoalitions.map((coalition) => (
-                      <option key={coalition.id} value={coalition.id}>{coalition.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="field-label">Rationale</span>
-                  <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective join?" />
-                </label>
-                <SubmitButton variant="secondary">Open join proposal</SubmitButton>
-              </FormWithNotice>
-            </details>
-          )}
-        </CollapsibleSection>
+        <CoalitionsModule data={data} isActive={isActive} groupId={groupId} />
 
         <CollapsibleSection id="node-stewardship" title="Node Governance" eyebrow="This node" storageKey={`group:${groupId}:section:node-stewardship`} className="bg-[var(--surface)] p-5 sm:p-6">
           {(() => {
@@ -1820,87 +1737,6 @@ async function archivePublicationAction(formData: FormData) {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
-}
-
-async function proposeCoalitionFormationAction(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const name = requiredString(formData, "name");
-  const description = (formData.get("description") as string | null) ?? "";
-  const content = requiredString(formData, "content");
-  const partnerGroupIds = formData.getAll("partnerGroupId").filter((value): value is string => typeof value === "string" && value.length > 0);
-  if (partnerGroupIds.length === 0) {
-    return { kind: "error", message: "Select at least one partner collective to invite into the coalition." };
-  }
-
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    const result = await openCoalitionFormationProposal(prisma, {
-      name,
-      description: description.trim() || null,
-      content,
-      participants: [
-        { groupId, createdByMembershipId: membership.id },
-        ...partnerGroupIds.map((partnerGroupId) => ({ groupId: partnerGroupId })),
-      ],
-    });
-    if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-  return { kind: "success", message: "Coalition formation proposal opened — each collective's members will decide through their own petition." };
-}
-
-async function proposeCoalitionJoinAction(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  "use server";
-  const session = await getSession();
-  if (!session.accountId) redirect("/login");
-  const groupId = requiredString(formData, "groupId");
-  const coalitionId = requiredString(formData, "coalitionId");
-  const content = requiredString(formData, "content");
-  const membership = await requireMembership(session.accountId, groupId);
-  const prisma = createPrismaClient();
-  try {
-    const coalition = await prisma.coalition.findUnique({
-      where: { id: coalitionId },
-      select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
-    });
-    if (!coalition) return { kind: "error", message: coalitionProposalFailureMessage("not_found") };
-    const result = await openCoalitionJoinProposal(prisma, {
-      coalitionId,
-      applicant: { groupId, createdByMembershipId: membership.id },
-      memberSponsors: coalition.memberships.map((member) => ({ groupId: member.groupId })),
-      content,
-    });
-    if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
-  } finally {
-    await prisma.$disconnect();
-  }
-  revalidatePath(`/groups/${groupId}`);
-  return { kind: "success", message: "Join proposal opened. Every participating collective will decide independently." };
-}
-
-function coalitionProposalFailureMessage(reason: string) {
-  switch (reason) {
-    case "invalid_participants": return "Select at least two distinct, eligible groups on the same node.";
-    case "not_eligible": return "Every sponsoring group requires an active, active-participation member to consent.";
-    case "not_found": return "This coalition could not be found.";
-    case "already_member": return "That collective already belongs to this coalition.";
-    case "not_member": return "That collective is not currently a member of this coalition.";
-    case "duplicate_name": return "A coalition with that name already exists on this node.";
-    case "petition_error": return "This proposal could not be submitted.";
-    default: return "This proposal could not be submitted.";
-  }
 }
 
 async function sponsorApplicationAction(_prev: FormState, formData: FormData): Promise<FormState> {
