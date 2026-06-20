@@ -12,9 +12,10 @@ import { resolveCurrentNode } from "../../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
 import { buildRequestDescription, trustPreferenceOptions } from "../../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
-import { getAvailableCategoriesForScope, trustedProviderExistsForCategory } from "../../../../lib/contribution-categories";
+import { getAvailableCategoriesForScope, trustedProviderExistsForCategory, categoryHasAvailableProvider, customHasAvailableProvider } from "../../../../lib/contribution-categories";
 import { AlphaNotice } from "../../../../components/shared/Notice";
 import { InfoIcon } from "../../../../components/shared/InfoIcon";
+import { SupportTypePicker } from "../../../../components/shared/SupportTypePicker";
 
 export const dynamic = "force-dynamic";
 
@@ -120,14 +121,20 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
 
     const rawCategories = await getAvailableCategoriesForScope(prisma, { groupId: group.id });
 
-    // Pre-compute trusted provider existence per category for the trust preference picker
-    const categories = await Promise.all(
+    // Pre-compute, per category, whether a member can currently provide it (gating) and whether
+    // any trusted provider exists (for the trust preference picker copy).
+    const categoriesWithAvailability = await Promise.all(
       rawCategories.map(async (cat) => ({
         ...cat,
         hasTrustedProviders: await trustedProviderExistsForCategory(prisma, { categoryId: cat.id, groupId: group.id }),
+        hasAvailableProvider: await categoryHasAvailableProvider(prisma, { categoryId: cat.id, groupId: group.id }),
       })),
     );
+    // Only surface categories someone can currently fulfill — don't let people ask into the void.
+    const categories = categoriesWithAvailability.filter((c) => c.hasAvailableProvider);
     const anyTrustedProviders = categories.some((c) => c.hasTrustedProviders);
+    const customAvailable = group.acceptsCustomRequests && (await customHasAvailableProvider(prisma, { groupId: group.id }));
+    const hasNoCategoriesDefined = rawCategories.length === 0;
 
     async function submitGroupScopedRequest(formData: FormData) {
       "use server";
@@ -166,17 +173,18 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           redirect("/request");
         }
 
-        const customNeed = formData.get("customNeed");
-        const baseDescription = buildRequestDescription({
+        const customNeedRaw = formData.get("customNeed");
+        // Contact/location/language only — the custom need is stored separately (see customNeed)
+        // so it can be shown to helpers without exposing the contact note.
+        const description = buildRequestDescription({
           contact: contact.trim(),
           location: location && typeof location === "string" && location.trim() ? location.trim() : undefined,
           language: language && typeof language === "string" && language.trim() ? language.trim() : undefined,
         });
-        // For a custom request, the free-text need leads the description.
-        const description =
-          resolvedServiceType === "custom" && typeof customNeed === "string" && customNeed.trim()
-            ? `${customNeed.trim()}\n\n${baseDescription}`
-            : baseDescription;
+        const customNeed =
+          resolvedServiceType === "custom" && typeof customNeedRaw === "string" && customNeedRaw.trim()
+            ? customNeedRaw.trim()
+            : null;
 
         const expiresAt = new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000);
 
@@ -191,6 +199,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
             trustRequirement: trustPreference,
           }],
           description,
+          customNeed,
           urgency: urgency ?? "normal",
           privacyLevel: "private",
           expiresAt,
@@ -234,48 +243,30 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           <div className="mt-6 grid gap-8 lg:grid-cols-[1fr_320px]">
           {/* Left — form */}
           <form action={submitGroupScopedRequest} className="flex flex-col gap-5 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-            <div className="block">
-              <span className="field-label inline-flex items-center gap-1.5">
-                What do you need support with?
-                <InfoIcon description="" />
-              </span>
-              {categories.length > 0 ? (
-                <>
-                  <select name="categoryId" className="field-input">
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.id} data-has-trusted={cat.hasTrustedProviders ? "1" : "0"}>
-                        {cat.name}
-                        {cat.offeringEntityName ? ` — ${
-                          cat.offeringEntityType === "group" ? cat.offeringEntityName
-                          : cat.offeringEntityType === "project" ? `Project: ${cat.offeringEntityName}`
-                          : `Responsibility: ${cat.offeringEntityName}`
-                        }` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <input type="hidden" name="serviceType" value="" />
-                </>
-              ) : group.acceptsCustomRequests ? (
-                <>
-                  <p className="text-sm text-[var(--muted)]">
-                    This group has no set categories but accepts custom requests. Describe what you need.
-                  </p>
-                  <textarea
-                    name="customNeed"
-                    required
-                    maxLength={1000}
-                    rows={3}
-                    className="field-input resize-y"
-                    placeholder="Briefly describe the help you are looking for."
-                  />
-                  <input type="hidden" name="serviceType" value="custom" />
-                </>
-              ) : (
+            {categories.length > 0 || customAvailable ? (
+              <SupportTypePicker
+                categories={categories.map((cat) => ({
+                  id: cat.id,
+                  label: cat.offeringEntityName
+                    ? `${cat.name} — ${
+                        cat.offeringEntityType === "group" ? cat.offeringEntityName
+                        : cat.offeringEntityType === "project" ? `Project: ${cat.offeringEntityName}`
+                        : `Responsibility: ${cat.offeringEntityName}`
+                      }`
+                    : cat.name,
+                }))}
+                customAvailable={customAvailable}
+              />
+            ) : (
+              <div className="block">
+                <span className="field-label inline-flex items-center gap-1.5">What do you need support with?</span>
                 <p className="text-sm text-[var(--muted)]">
-                  This group has not defined any contribution categories yet.
+                  {hasNoCategoriesDefined && !group.acceptsCustomRequests
+                    ? "This collective hasn't set up any ways to offer support yet."
+                    : "No one in this collective is available to take requests right now — please check back soon."}
                 </p>
-              )}
-            </div>
+              </div>
+            )}
 
             <label className="block">
               <span className="field-label inline-flex items-center gap-1.5">

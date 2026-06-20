@@ -85,6 +85,7 @@ async function main() {
       description: "Eastside neighborhood coordination and mutual support.",
       membershipPolicy: "request_required",
       visibility: "public",
+      acceptsCustomRequests: true,
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: {
         supportRequests: "private",
@@ -99,6 +100,7 @@ async function main() {
       description: "Eastside neighborhood coordination and mutual support.",
       membershipPolicy: "request_required",
       visibility: "public",
+      acceptsCustomRequests: true,
       governancePreferences: { decisionThreshold: 0.7, trustReviewDays: 14 },
       privacyPreferences: {
         supportRequests: "private",
@@ -273,8 +275,17 @@ async function main() {
   // loginAccount will therefore land her on Gotham by default on login.
   await prisma.groupMembership.upsert({
     where: { accountId_groupId: { accountId: alice.id, groupId: group2.id } },
-    update: { status: "active" },
-    create: { id: "membership_alice_eastside", accountId: alice.id, groupId: group2.id, status: "active" },
+    // Alice opts in to custom requests for Eastside (which accepts them) so "Custom Request"
+    // surfaces on Eastside's request form and routes to her during verification.
+    update: { status: "active", customAvailable: true, customAvailability: { availableNow: true, preference: "available" } },
+    create: {
+      id: "membership_alice_eastside",
+      accountId: alice.id,
+      groupId: group2.id,
+      status: "active",
+      customAvailable: true,
+      customAvailability: { availableNow: true, preference: "available" },
+    },
   });
 
   const aliceRides = await prisma.serviceCapability.upsert({
@@ -359,6 +370,39 @@ async function main() {
       approvedAt: new Date("2026-05-27T12:00:00.000Z"),
     },
   });
+
+  // Seed group-offered contribution categories for Gotham Mutual Aid. These are the
+  // ways members can offer help within the collective; the group is both the governance
+  // anchor and the offering entity. The unique constraint is
+  // (offeringEntityType, offeringEntityId, name), so upsert keys on that.
+  for (const [id, name, description] of [
+    ["category_gotham_rides", "Transportation & Rides", "Driving members to appointments, groceries, and community events."],
+    ["category_gotham_meals", "Meals & Groceries", "Cooking, meal delivery, and grocery runs for members who need them."],
+    ["category_gotham_medical", "Medical Accompaniment", "Accompanying members to medical appointments and advocating during visits."],
+    ["category_gotham_translation", "Translation & Interpretation", "Spanish and English translation and interpretation for members and requests."],
+    ["category_gotham_childcare", "Childcare & Family Support", "Short-term childcare and family support during emergencies."],
+    ["category_gotham_repair", "Home & Yard Repair", "Minor home repairs, accessibility fixes, and yard work."],
+  ] as const) {
+    await prisma.contributionCategory.upsert({
+      where: {
+        offeringEntityType_offeringEntityId_name: {
+          offeringEntityType: "group",
+          offeringEntityId: group.id,
+          name,
+        },
+      },
+      update: { description, status: "active" },
+      create: {
+        id,
+        groupId: group.id,
+        offeringEntityType: "group",
+        offeringEntityId: group.id,
+        name,
+        description,
+        status: "active",
+      },
+    });
+  }
 
   const request = await prisma.supportRequest.upsert({
     where: { id: "request_mary_ride" },
@@ -844,6 +888,70 @@ async function main() {
       createdAt: identityPresenceEvent.createdAt,
     },
   });
+  // Link seeded Gotham offers to their contribution categories so those categories have an
+  // available provider and appear on the request form (report 4 availability gating). The seeded
+  // capabilities' serviceTypes don't match category names, so they're linked explicitly here.
+  // Meals & Groceries and Childcare are intentionally left without a provider to demonstrate gating.
+  const gothamOfferLinks: Array<[string, string]> = [
+    ["cap_alice_rides", "category_gotham_rides"],
+    ["cap_alice_medical_accompaniment", "category_gotham_medical"],
+    ["cap_joe_carpentry", "category_gotham_repair"],
+    ["cap_zora_translation", "category_gotham_translation"],
+  ];
+  for (const [capId, categoryId] of gothamOfferLinks) {
+    await prisma.serviceCapability.update({ where: { id: capId }, data: { categoryId } });
+  }
+
+  // One-time idempotent backfill: link existing name-only ServiceCapabilities to a same-named
+  // active ContributionCategory within the owner's groups, so category gating/routing works for
+  // pre-existing offers. Offers whose name doesn't exactly match a category are logged (they may
+  // need re-saving by the member to link).
+  const unlinkedCaps = await prisma.serviceCapability.findMany({
+    where: { categoryId: null, serviceType: { not: "custom" } },
+    select: { id: true, accountId: true, serviceType: true },
+  });
+  let linkedCount = 0;
+  const unmatchedOffers: string[] = [];
+  for (const cap of unlinkedCaps) {
+    const category = await prisma.contributionCategory.findFirst({
+      where: {
+        name: cap.serviceType,
+        status: "active",
+        group: { memberships: { some: { accountId: cap.accountId, status: "active" } } },
+      },
+      select: { id: true },
+    });
+    if (category) {
+      await prisma.serviceCapability.update({ where: { id: cap.id }, data: { categoryId: category.id } });
+      linkedCount++;
+    } else {
+      unmatchedOffers.push(`${cap.serviceType} (capability ${cap.id})`);
+    }
+  }
+  if (linkedCount || unmatchedOffers.length) {
+    console.log(`ServiceCapability categoryId backfill: linked ${linkedCount}, unmatched ${unmatchedOffers.length}.`);
+    if (unmatchedOffers.length) console.log("  Unmatched offers (may need re-saving to link):", unmatchedOffers);
+  }
+
+  // One-time idempotent backfill: move pre-migration custom-request needs out of `description`
+  // (old convention: "<need>\n\n<contact base>") into the dedicated `customNeed` column, so helpers
+  // see the need and the contact note stays in `description` (revealed only on acceptance).
+  const legacyCustomRequests = await prisma.supportRequest.findMany({
+    where: { requestType: "custom", customNeed: null },
+    select: { id: true, description: true },
+  });
+  let customNeedMigrated = 0;
+  for (const req of legacyCustomRequests) {
+    const [need, ...rest] = req.description.split("\n\n");
+    if (!need?.trim()) continue;
+    await prisma.supportRequest.update({
+      where: { id: req.id },
+      data: { customNeed: need.trim(), description: rest.join("\n\n") },
+    });
+    customNeedMigrated++;
+  }
+  if (customNeedMigrated) console.log(`Custom-need backfill: migrated ${customNeedMigrated} pre-migration custom request(s).`);
+
   console.log("Seeded Commons local-node development data.");
   console.log({
     node: node.domain,

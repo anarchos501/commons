@@ -10,7 +10,13 @@ export type GroupOption = {
   groupName: string;
   services: string[];
   hasTrustedProviders: boolean;
+  // True when this collective accepts custom requests AND a member is available for them.
+  // When true, "Custom Request" is offered as a service for this collective.
+  acceptsCustom?: boolean;
 };
+
+// Synthetic service label shown in the support-type dropdown for free-text custom requests.
+export const CUSTOM_REQUEST_LABEL = "Custom Request";
 
 interface Props {
   groupOptions: GroupOption[];
@@ -87,12 +93,12 @@ export function RequestHelpForm({ groupOptions, allServices, action, submitLabel
           <InfoIcon description="" />
         </span>
         <select
-          name="serviceType"
           className="field-input"
           value={selectedService}
           onChange={(e) => handleServiceChange(e.target.value)}
           disabled={hasNoGroups}
           required
+          aria-label="Support type"
         >
           <option value="">— Select a service —</option>
           {availableServices.map((s) => (
@@ -101,6 +107,22 @@ export function RequestHelpForm({ groupOptions, allServices, action, submitLabel
             </option>
           ))}
         </select>
+        {/* Submit "custom" for the synthetic custom option; the category/service name otherwise. */}
+        <input type="hidden" name="serviceType" value={selectedService === CUSTOM_REQUEST_LABEL ? "custom" : selectedService} />
+        {selectedService === CUSTOM_REQUEST_LABEL && (
+          <div className="mt-3">
+            <label className="field-label block" htmlFor="rh-customNeed">Describe what you need</label>
+            <textarea
+              id="rh-customNeed"
+              name="customNeed"
+              required
+              maxLength={1000}
+              rows={3}
+              className="field-input resize-y"
+              placeholder="Briefly describe the help you are looking for."
+            />
+          </div>
+        )}
       </div>
 
       {/* Which collective */}

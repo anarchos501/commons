@@ -10,3 +10,7 @@ FROM mcr.microsoft.com/devcontainers/javascript-node:4-22-trixie
 
 # [Optional] Uncomment if you want to install more global node modules
 # RUN su node -c "npm install -g <your-package-list-here>"
+
+# Pin pnpm to the version in the repo's `packageManager` field so the global pnpm that
+# turbo spawns matches and never trips the package-manager-strict version guard.
+RUN corepack enable && corepack prepare pnpm@10.33.4 --activate

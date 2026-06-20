@@ -28,9 +28,8 @@ function SignalButtons({
           value={value}
           disabled={pending}
           aria-pressed={currentSignal === Number(value)}
-          // Full-width so the three options stack as a tidy left-aligned column that never wraps
-          // on a phone (the reported layout complaint).
-          className={`w-full border ${padding} text-left text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50 ${
+          // Side-by-side in a 3-column grid (the reported complaint was vertical stacking).
+          className={`border ${padding} text-center text-xs font-medium leading-tight transition focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50 ${
             currentSignal === Number(value)
               ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
               : "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
@@ -66,7 +65,7 @@ export function GovernanceSignalForm({
       <input type="hidden" name="groupId" value={groupId} />
       <input type="hidden" name="category" value={category} />
       <input type="hidden" name="parameter" value={parameter} />
-      <div className="flex w-full max-w-[15rem] flex-col gap-1">
+      <div className="grid grid-cols-3 gap-1">
         <SignalButtons currentSignal={currentSignal} size={size} labels={labels} />
       </div>
       {error && (

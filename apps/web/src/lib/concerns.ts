@@ -1,5 +1,5 @@
 import type { PrismaClient } from "../generated/prisma/client";
-import type { ConcernClosureReason, ConcernFindingOutcome, ReportStatus, CoordinationAbility } from "../generated/prisma/enums";
+import type { ConcernClosureReason, ConcernFindingOutcome, ReportStatus, ReportKind, CoordinationAbility } from "../generated/prisma/enums";
 import { logAction } from "./action-log";
 import { getResponsibilityCoverage } from "./responsibilities";
 import { hasActiveAbilityByType } from "./responsibility-abilities";
@@ -352,4 +352,48 @@ export async function autoCloseStaleWithdrawnConcerns(
     where: { groupId, status: "withdrawn", withdrawnAt: { lte: cutoff } },
     data: { status: "closed", closureReason: "reporter_withdrawal", closedAt: now },
   });
+}
+
+export type SubmitMemberConcernInput = {
+  groupId: string;
+  reportedByAccountId: string;
+  subject: string;
+  description: string;
+  context?: string | null;
+  // Only set for person-targeting concerns (kind person_concern). A request_flag must leave this null.
+  subjectAccountId?: string | null;
+  kind?: ReportKind;
+  supportRequestId?: string | null;
+};
+
+/**
+ * Creates a member-submitted Report (concern or request flag) and writes the audit log.
+ * Intentionally thin: eligibility and subject resolution are the caller's responsibility
+ * (they differ per surface). Shared by the group Concerns form and the accepted-request page.
+ */
+export async function submitMemberConcern(
+  prisma: PrismaClient,
+  input: SubmitMemberConcernInput,
+): Promise<{ id: string }> {
+  const report = await prisma.report.create({
+    data: {
+      groupId: input.groupId,
+      reportedByAccountId: input.reportedByAccountId,
+      subject: input.subject,
+      description: input.description,
+      context: input.context ?? null,
+      subjectAccountId: input.subjectAccountId ?? null,
+      kind: input.kind ?? "person_concern",
+      supportRequestId: input.supportRequestId ?? null,
+    },
+  });
+  await logAction(prisma, {
+    actorAccountId: input.reportedByAccountId,
+    groupId: input.groupId,
+    action: "concern.submitted",
+    targetType: "report",
+    targetId: report.id,
+    metadata: { kind: report.kind },
+  });
+  return { id: report.id };
 }

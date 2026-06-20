@@ -10,6 +10,7 @@ import {
   validateGuestAccessToken,
 } from "../../../../../lib/request-lifecycle";
 import { logAction } from "../../../../../lib/action-log";
+import { getContactAccessLog } from "../../../../../lib/request-access";
 
 export const dynamic = "force-dynamic";
 
@@ -189,6 +190,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
     const statusLabel = REQUEST_STATUS_LABELS[supportRequest.status] ?? supportRequest.status;
     const isActive = ["open", "routed", "matched"].includes(supportRequest.status);
     const notice = typeof resolvedSearch.notice === "string" ? resolvedSearch.notice : null;
+    const contactAccessLog = await getContactAccessLog(prisma, supportRequest.id);
 
     return (
       <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
@@ -276,6 +278,25 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
                 </Link>
               )}
             </div>
+          </div>
+
+          <div className="border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+            <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+              <Shield className="h-4 w-4" aria-hidden="true" />
+              Who viewed your contact through Commons
+            </div>
+            {contactAccessLog.length === 0 ? (
+              <p className="mt-2 text-[var(--soft-text)]">No one has viewed your contact through Commons yet.</p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-[var(--soft-text)]">
+                {contactAccessLog.map((entry, i) => (
+                  <li key={i}>{entry.accessorName} — {entry.viewedAt.toLocaleString()}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              This shows access through Commons. It cannot show someone reading the underlying database directly.
+            </p>
           </div>
 
           <div className="border border-[var(--border)] bg-[var(--subtle)] p-3 text-sm leading-6 text-[var(--soft-text)]">

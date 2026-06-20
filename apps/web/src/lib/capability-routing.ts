@@ -29,6 +29,10 @@ export type DeclareServiceCapabilityInput = {
   availability?: SimpleAvailability;
   visibility?: VisibilityLevelValue;
   trustRequirement?: TrustRequirementValue;
+  // Optional link to a community-governed ContributionCategory. When set, category-based routing
+  // (which matches ServiceCapability by categoryId) can find this offer. Without it, only the
+  // legacy string (serviceType) routing path matches.
+  categoryId?: string;
 };
 
 export type RequestedServiceInput = {
@@ -48,6 +52,9 @@ export type CreateSupportRequestInput = {
   requestType: string;
   requestedServices: RequestedServiceInput[];
   description: string;
+  // For custom requests: the free-text need, stored separately from `description` so it can be
+  // shown to potential helpers without exposing the contact note.
+  customNeed?: string | null;
   urgency?: "low" | "normal" | "high" | "urgent";
   privacyLevel?: "private" | "group" | "project" | "public";
   expiresAt?: Date | null;
@@ -93,6 +100,7 @@ export async function declareServiceCapability(prisma: PrismaClient, input: Decl
       availability: input.availability,
       visibility,
       approvalStatus,
+      ...(input.categoryId ? { categoryId: input.categoryId } : {}),
     },
     create: {
       accountId: input.accountId,
@@ -102,6 +110,7 @@ export async function declareServiceCapability(prisma: PrismaClient, input: Decl
       visibility,
       trustRequirement,
       approvalStatus,
+      categoryId: input.categoryId ?? null,
     },
   });
 
@@ -156,6 +165,7 @@ export async function createSupportRequest(prisma: PrismaClient, input: CreateSu
       requestType: input.requestType,
       requestedServices,
       description: input.description,
+      customNeed: input.customNeed ?? null,
       urgency: input.urgency ?? "normal",
       privacyLevel: privacyResolution.privacyLevel,
       status: "open",
@@ -264,17 +274,21 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
       if (!supportRequest.group.acceptsCustomRequests || supportRequest.group.visibility !== "public") {
         continue;
       }
+      // Consent-based routing: free-text custom requests reach only members who opted in to
+      // accepting custom requests for THIS collective (per-collective consent), not everyone.
       const members = await prisma.groupMembership.findMany({
         where: {
           groupId: supportRequest.groupId,
           status: "active",
           participationStatus: "active",
+          customAvailable: true,
           accountId: supportRequest.submittedByAccountId ? { not: supportRequest.submittedByAccountId } : undefined,
         },
-        select: { accountId: true },
+        select: { accountId: true, customAvailability: true },
         orderBy: { accountId: "asc" },
       });
       for (const member of members) {
+        if (!isCapabilityAvailable(member.customAvailability, [])) continue;
         const routeKey = {
           supportRequestId_contributorAccountId_serviceType_trustRequirement: {
             supportRequestId: supportRequest.id,
@@ -493,7 +507,7 @@ type AvailabilityRecord = {
   availability: unknown;
 };
 
-function isCapabilityAvailable(capabilityAvailability: unknown, availabilityRecords: AvailabilityRecord[]): boolean {
+export function isCapabilityAvailable(capabilityAvailability: unknown, availabilityRecords: AvailabilityRecord[]): boolean {
   if (availabilityHasAvailableNowFalse(capabilityAvailability)) {
     return false;
   }

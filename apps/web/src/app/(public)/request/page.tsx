@@ -9,8 +9,9 @@ import { createSupportRequest, routeSupportRequest } from "../../../lib/capabili
 import { buildRequestDescription } from "../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../lib/request-lifecycle";
 import { AlphaNotice } from "../../../components/shared/Notice";
-import { RequestHelpForm } from "../../../components/shared/RequestHelpForm";
+import { RequestHelpForm, CUSTOM_REQUEST_LABEL } from "../../../components/shared/RequestHelpForm";
 import type { GroupOption } from "../../../components/shared/RequestHelpForm";
+import { getGroupsAvailableSupport } from "../../../lib/contribution-categories";
 
 export const dynamic = "force-dynamic";
 
@@ -96,14 +97,8 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
 
       const groupIds = groups.map((g) => g.id);
 
-      const [categories, trustedGroups] = await Promise.all([
-        groupIds.length > 0
-          ? prisma.contributionCategory.findMany({
-              where: { status: "active", groupId: { in: groupIds } },
-              select: { groupId: true, name: true },
-              orderBy: { name: "asc" },
-            })
-          : Promise.resolve([]),
+      const [availableSupport, trustedGroups] = await Promise.all([
+        getGroupsAvailableSupport(prisma, groupIds),
         groupIds.length > 0
           ? prisma.trustedProviderStatus.findMany({
               where: { groupId: { in: groupIds }, status: "active" },
@@ -116,17 +111,22 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
       const trustedGroupIds = new Set(trustedGroups.map((t) => t.groupId));
 
       groupOptions = groups
-        .map((g) => ({
-          groupId: g.id,
-          groupName: g.name,
-          services: categories.filter((c) => c.groupId === g.id).map((c) => c.name),
-          hasTrustedProviders: trustedGroupIds.has(g.id),
-        }))
-        // A group with no active contribution categories can't receive a request yet.
-        // (Phase 3.2 will also admit public groups that opt into custom requests.)
+        .map((g) => {
+          const support = availableSupport.get(g.id) ?? { availableCategoryNames: [], custom: false };
+          // Only surface categories someone can fulfill; add "Custom Request" when custom is available.
+          const services = [...support.availableCategoryNames, ...(support.custom ? [CUSTOM_REQUEST_LABEL] : [])];
+          return {
+            groupId: g.id,
+            groupName: g.name,
+            services,
+            hasTrustedProviders: trustedGroupIds.has(g.id),
+            acceptsCustom: support.custom,
+          };
+        })
+        // A group with no fulfillable categories and no available custom option can't receive a request yet.
         .filter((g) => g.services.length > 0);
 
-      allServices = [...new Set(categories.map((c) => c.name))].sort();
+      allServices = [...new Set(groupOptions.flatMap((g) => g.services))].sort();
     }
   } finally {
     await prisma.$disconnect();
@@ -156,6 +156,25 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
       ]);
       if (!actionGroup || !actionNode || actionGroup.nodeId !== actionNode.id) redirect("/request");
 
+      const isCustom = serviceType === "custom";
+      const customNeed = ((formData.get("customNeed") as string) ?? "").trim();
+      if (isCustom && !customNeed) redirect("/request?error=1");
+
+      // Resolve a chosen category name to its categoryId in this group so category-based routing
+      // (which gates on member availability) applies; fall back to legacy string routing otherwise.
+      let categoryId: string | undefined;
+      let resolvedServiceType = serviceType;
+      if (!isCustom) {
+        const category = await actionPrisma.contributionCategory.findFirst({
+          where: { groupId: actionGroup.id, name: serviceType, status: "active" },
+          select: { id: true },
+        });
+        if (category) {
+          categoryId = category.id;
+          resolvedServiceType = "category";
+        }
+      }
+
       const description = buildRequestDescription({ contact, location, language });
       const expiresAt = new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000);
 
@@ -163,9 +182,10 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
         guestRequestId: randomUUID(),
         submittedByAccountId: null,
         groupId: actionGroup.id,
-        requestType: serviceType,
-        requestedServices: [{ serviceType, trustRequirement: trustPreference }],
+        requestType: isCustom ? "custom" : resolvedServiceType,
+        requestedServices: [{ serviceType: isCustom ? "custom" : resolvedServiceType, categoryId, trustRequirement: trustPreference }],
         description,
+        customNeed: isCustom ? customNeed : null,
         urgency,
         privacyLevel: "private",
         expiresAt,

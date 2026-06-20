@@ -8,6 +8,7 @@ import {
   declareServiceCapability,
   routeSupportRequest,
 } from "../lib/capability-routing";
+import { categoryHasAvailableProvider, customHasAvailableProvider } from "../lib/contribution-categories";
 
 const prisma = createPrismaClient();
 
@@ -32,9 +33,13 @@ async function cleanupAllFixtures() {
   await cleanupFixture("caproute_diff_group");
   await cleanupFixture("caproute_custom");
   await cleanupFixture("caproute_custom_off");
+  await cleanupFixture("caproute_custom_none");
+  await cleanupFixture("caproute_category_light");
+  await cleanupFixture("caproute_cat_avail");
+  await cleanupFixture("caproute_custom_avail");
 }
 
-async function createCustomFixture(prefix: string, opts: { acceptsCustomRequests: boolean }) {
+async function createCustomFixture(prefix: string, opts: { acceptsCustomRequests: boolean; helperOptsIn?: boolean }) {
   await cleanupFixture(prefix);
   const node = await prisma.node.create({ data: { id: `${prefix}_node`, name: "Custom", domain: `${prefix}.localhost`, federationPolicy: "disabled", pluginPolicy: "disabled" } });
   const group = await prisma.group.create({ data: { id: `${prefix}_group`, nodeId: node.id, name: "Custom Group", membershipPolicy: "open", visibility: "public", acceptsCustomRequests: opts.acceptsCustomRequests } });
@@ -46,13 +51,20 @@ async function createCustomFixture(prefix: string, opts: { acceptsCustomRequests
       { accountId: helper.id, groupId: group.id, status: "active", participationStatus: "active" },
     ],
   });
+  if (opts.helperOptsIn) {
+    // Per-collective consent: the helper opts in to custom requests for this collective.
+    await prisma.groupMembership.updateMany({
+      where: { accountId: helper.id, groupId: group.id },
+      data: { customAvailable: true, customAvailability: { availableNow: true } },
+    });
+  }
   return { node, group, requester, helper };
 }
 
-test("custom request routes to active members of a public opted-in group (P3.2)", async () => {
+test("custom request routes only to members who opted in (per-collective consent)", async () => {
   const prefix = "caproute_custom";
   try {
-    const { group, requester, helper } = await createCustomFixture(prefix, { acceptsCustomRequests: true });
+    const { group, requester, helper } = await createCustomFixture(prefix, { acceptsCustomRequests: true, helperOptsIn: true });
     const request = await createSupportRequest(prisma, {
       id: `${prefix}_request`,
       submittedByAccountId: requester.id,
@@ -60,13 +72,35 @@ test("custom request routes to active members of a public opted-in group (P3.2)"
       requestType: "custom",
       requestedServices: [{ serviceType: "custom", trustRequirement: "lightweight" }],
       description: "I need help moving a couch.",
+      customNeed: "I need help moving a couch.",
       expiresAt: futureDate(),
     });
     const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
-    // Routes to the active member (helper), never the requester.
+    // Routes to the opted-in member (helper), never the requester.
     assert.equal(routes.length, 1);
     assert.equal(routes[0].contributorAccountId, helper.id);
     assert.equal(routes[0].serviceType, "custom");
+  } finally {
+    await cleanupFixture(prefix);
+  }
+});
+
+test("custom request routes to NOBODY when no member opted in (the consent gate)", async () => {
+  const prefix = "caproute_custom_none";
+  try {
+    const { group, requester } = await createCustomFixture(prefix, { acceptsCustomRequests: true, helperOptsIn: false });
+    const request = await createSupportRequest(prisma, {
+      id: `${prefix}_request`,
+      submittedByAccountId: requester.id,
+      groupId: group.id,
+      requestType: "custom",
+      requestedServices: [{ serviceType: "custom", trustRequirement: "lightweight" }],
+      description: "Anyone free?",
+      customNeed: "Anyone free?",
+      expiresAt: futureDate(),
+    });
+    const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+    assert.equal(routes.length, 0);
   } finally {
     await cleanupFixture(prefix);
   }
@@ -233,6 +267,95 @@ test("elevated category request routes to active trusted provider without declar
   assert.equal(routes.length, 1);
   assert.equal(routes[0].contributorAccountId, fixture.alice.id);
   assert.equal(routes[0].serviceCapabilityId, null);
+});
+
+test("lightweight category request routes to a member who offered that category (offer→categoryId)", async () => {
+  const fixture = await createFixture("category_light");
+  const category = await prisma.contributionCategory.create({
+    data: {
+      id: "caproute_category_light_category",
+      groupId: fixture.group.id,
+      offeringEntityType: "group",
+      offeringEntityId: fixture.group.id,
+      name: "Yard Work",
+      description: "Raking and mowing.",
+      status: "active",
+    },
+  });
+  // Alice offers the category — the capability is linked by categoryId (the A2 fix).
+  await declareServiceCapability(prisma, {
+    accountId: fixture.alice.id,
+    serviceType: "Yard Work",
+    categoryId: category.id,
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+
+  const request = await createSupportRequest(prisma, {
+    id: "caproute_category_light_request",
+    submittedByAccountId: fixture.mary.id,
+    groupId: fixture.group.id,
+    requestType: "category",
+    requestedServices: [{ serviceType: "category", categoryId: category.id, trustRequirement: "lightweight" }],
+    description: "Needs help with the yard.",
+    expiresAt: futureDate(),
+  });
+
+  const routes = await routeSupportRequest(prisma, { supportRequestId: request.id });
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].contributorAccountId, fixture.alice.id);
+});
+
+test("categoryHasAvailableProvider reflects offers and availability (report 4 gating)", async () => {
+  const fixture = await createFixture("cat_avail");
+  const category = await prisma.contributionCategory.create({
+    data: {
+      id: "caproute_cat_avail_category",
+      groupId: fixture.group.id,
+      offeringEntityType: "group",
+      offeringEntityId: fixture.group.id,
+      name: "Errands",
+      description: "Errand running.",
+      status: "active",
+    },
+  });
+  // No provider yet → not available.
+  assert.equal(await categoryHasAvailableProvider(prisma, { categoryId: category.id, groupId: fixture.group.id }), false);
+
+  // An unavailable offer does not count.
+  await declareServiceCapability(prisma, {
+    accountId: fixture.alice.id,
+    serviceType: "Errands",
+    categoryId: category.id,
+    trustRequirement: "lightweight",
+    availability: { availableNow: false },
+  });
+  assert.equal(await categoryHasAvailableProvider(prisma, { categoryId: category.id, groupId: fixture.group.id }), false);
+
+  // An available offer makes the category available.
+  await declareServiceCapability(prisma, {
+    accountId: fixture.joe.id,
+    serviceType: "Errands",
+    categoryId: category.id,
+    trustRequirement: "lightweight",
+    availability: { availableNow: true },
+  });
+  assert.equal(await categoryHasAvailableProvider(prisma, { categoryId: category.id, groupId: fixture.group.id }), true);
+});
+
+test("customHasAvailableProvider reflects per-collective opt-in (report 5 gating)", async () => {
+  const prefix = "caproute_custom_avail";
+  try {
+    const { group, helper } = await createCustomFixture(prefix, { acceptsCustomRequests: true, helperOptsIn: false });
+    assert.equal(await customHasAvailableProvider(prisma, { groupId: group.id }), false);
+    await prisma.groupMembership.updateMany({
+      where: { accountId: helper.id, groupId: group.id },
+      data: { customAvailable: true, customAvailability: { availableNow: true } },
+    });
+    assert.equal(await customHasAvailableProvider(prisma, { groupId: group.id }), true);
+  } finally {
+    await cleanupFixture(prefix);
+  }
 });
 
 test("contributors outside availability are excluded", async () => {

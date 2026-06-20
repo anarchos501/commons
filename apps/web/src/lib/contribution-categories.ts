@@ -3,6 +3,7 @@ import type { OfferingEntityType } from "../generated/prisma/enums";
 import { openPetition } from "./petitions";
 import { assertProjectWritable } from "./project-membership";
 import { hasAbilityNow } from "./responsibility-abilities";
+import { isCapabilityAvailable } from "./capability-routing";
 
 export type { OfferingEntityType };
 
@@ -390,4 +391,100 @@ export async function trustedProviderExistsForCategory(
     where: { categoryId, groupId, status: "active" },
   });
   return count > 0;
+}
+
+/**
+ * Returns true if at least one member of the group can currently provide the category:
+ * an active trusted provider (elevated), OR a member with an available ServiceCapability
+ * linked to this category (lightweight). Used to gate which categories appear on the
+ * public request form — a requester should only see support types someone can fulfill.
+ */
+export async function categoryHasAvailableProvider(
+  prisma: PrismaClient,
+  { categoryId, groupId }: { categoryId: string; groupId: string },
+): Promise<boolean> {
+  if (await trustedProviderExistsForCategory(prisma, { categoryId, groupId })) {
+    return true;
+  }
+  const capabilities = await prisma.serviceCapability.findMany({
+    where: {
+      categoryId,
+      approvalStatus: { in: ["available", "approved"] },
+      account: {
+        groupMemberships: {
+          some: { groupId, status: "active", participationStatus: "active" },
+        },
+      },
+    },
+    include: { availabilityRecords: true },
+  });
+  return capabilities.some((c) => isCapabilityAvailable(c.availability, c.availabilityRecords));
+}
+
+/**
+ * Returns true if at least one active member of the group has opted in to accepting
+ * free-text custom requests for THIS collective (per-collective consent) and is currently
+ * available. Used to gate the "Custom Request" option on the request form.
+ */
+export async function customHasAvailableProvider(
+  prisma: PrismaClient,
+  { groupId }: { groupId: string },
+): Promise<boolean> {
+  const members = await prisma.groupMembership.findMany({
+    where: { groupId, status: "active", participationStatus: "active", customAvailable: true },
+    select: { customAvailability: true },
+  });
+  return members.some((m) => isCapabilityAvailable(m.customAvailability, []));
+}
+
+export type GroupAvailableSupport = {
+  /** Names of active categories that currently have an available provider. */
+  availableCategoryNames: string[];
+  /** True if the group accepts custom requests AND a member is available for them. */
+  custom: boolean;
+};
+
+/**
+ * Batched availability summary for the discovery surfaces (/request and /groups).
+ * For each group id, returns the set of fulfillable category names plus whether custom
+ * requests are currently fulfillable. Issues O(categories) availability checks; acceptable
+ * at current scale and keeps the availability logic in one place.
+ */
+export async function getGroupsAvailableSupport(
+  prisma: PrismaClient,
+  groupIds: string[],
+): Promise<Map<string, GroupAvailableSupport>> {
+  const result = new Map<string, GroupAvailableSupport>();
+  for (const id of groupIds) result.set(id, { availableCategoryNames: [], custom: false });
+  if (groupIds.length === 0) return result;
+
+  const categories = await prisma.contributionCategory.findMany({
+    where: { groupId: { in: groupIds }, status: "active" },
+    select: { id: true, name: true, groupId: true },
+  });
+
+  await Promise.all(
+    categories.map(async (cat) => {
+      if (await categoryHasAvailableProvider(prisma, { categoryId: cat.id, groupId: cat.groupId })) {
+        const entry = result.get(cat.groupId);
+        if (entry && !entry.availableCategoryNames.includes(cat.name)) {
+          entry.availableCategoryNames.push(cat.name);
+        }
+      }
+    }),
+  );
+
+  const customMembers = await prisma.groupMembership.findMany({
+    where: { groupId: { in: groupIds }, status: "active", participationStatus: "active", customAvailable: true },
+    select: { groupId: true, customAvailability: true },
+  });
+  for (const m of customMembers) {
+    if (isCapabilityAvailable(m.customAvailability, [])) {
+      const entry = result.get(m.groupId);
+      if (entry) entry.custom = true;
+    }
+  }
+
+  for (const entry of result.values()) entry.availableCategoryNames.sort();
+  return result;
 }

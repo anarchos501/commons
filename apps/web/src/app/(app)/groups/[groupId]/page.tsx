@@ -6,7 +6,7 @@ import { getSession } from "../../../../lib/session";
 import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
 import { expireStaleAssignments, hasActiveEligibleAssignment, resignAssignment, volunteerForResponsibility, proposeResponsibilityRecall } from "../../../../lib/responsibilities";
 import { responsibilityTypeLabel } from "../../../../lib/concern-reviewer";
-import { getCoverageStatus, autoCloseStaleWithdrawnConcerns } from "../../../../lib/concerns";
+import { getCoverageStatus, autoCloseStaleWithdrawnConcerns, submitMemberConcern } from "../../../../lib/concerns";
 import { proposeBulletinCreation, openBulletinArchivalPetition } from "../../../../lib/bulletins";
 import { expireStaleContentDrafts } from "../../../../lib/content-creation-drafts";
 import { proposePublicationCreation, proposePubEntryCreation, openPublicationArchivalPetition } from "../../../../lib/publications";
@@ -89,6 +89,7 @@ import { GroupContextSync } from "../../../../components/shared/GroupContextSync
 import { ActivityFilter } from "../../../../components/shared/ActivityFilter";
 import { PetitionFilter } from "../../../../components/shared/PetitionFilter";
 import { GovernanceSignalForm } from "../../../../components/shared/GovernanceSignalForm";
+import { GovernanceMeter } from "../../../../components/shared/GovernanceMeter";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { CreateThreadForm } from "../../../../components/shared/CreateThreadForm";
 import { InviteLinkSection } from "../../../../components/shared/InviteLinkSection";
@@ -98,7 +99,8 @@ import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
 import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
 import { submitEvent, setInterest, cancelEvent } from "../../../../lib/events";
 import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
-import type { EventInterestLevel } from "../../../../generated/prisma/enums";
+import type { EventInterestLevel, ReportKind } from "../../../../generated/prisma/enums";
+import { REQUEST_STATUS_LABELS } from "../../../../lib/request-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -949,9 +951,19 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               {data.reviewerQueue.map((concern) => (
                 <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-medium">{concern.subject}</p>
+                    <div className="min-w-0">
+                      <ReportKindBadge kind={concern.kind} />
+                      <p className="mt-1 text-sm font-medium">{concern.subject}</p>
+                    </div>
                     <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
                   </div>
+                  {concern.kind === "request_flag" && concern.supportRequest && (
+                    <p className="text-xs text-[var(--muted)]">
+                      Flagged request: {concern.supportRequest.requestType === "custom"
+                        ? `Custom${concern.supportRequest.customNeed ? ` — ${concern.supportRequest.customNeed}` : ""}`
+                        : concern.supportRequest.requestType} · {(REQUEST_STATUS_LABELS[concern.supportRequest.status] ?? concern.supportRequest.status)}
+                    </p>
+                  )}
                   {concern.findings.length > 0 && (
                     <p className="text-xs text-[var(--muted)]">
                       {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
@@ -967,7 +979,10 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               {data.myReports.map((report) => (
                 <div key={report.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-medium">{report.subject}</p>
+                    <div className="min-w-0">
+                      <ReportKindBadge kind={report.kind} />
+                      <p className="mt-1 text-sm font-medium">{report.subject}</p>
+                    </div>
                     <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{report.status.replace(/_/g, " ")}</span>
                   </div>
                   {report.closureReason && (
@@ -1013,6 +1028,25 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         {/* ── Contribution Categories ───────────────────────────────── */}
         <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this community offers" storageKey={`group:${groupId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
           <div className="space-y-4">
+            {/* Custom support requests — public groups may opt in to free-text requests */}
+            {data.group.visibility === "public" && isActive && (
+              <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                <p className="text-sm font-medium text-[var(--text)]">Custom support requests</p>
+                <p className="mt-1 text-xs text-[var(--soft-text)]">
+                  {data.group.acceptsCustomRequests
+                    ? "Custom requests are accepted. They appear as a support type on the request form when at least one member has marked themselves available for them."
+                    : "Only your defined contribution categories can be requested. Enable custom requests to also accept free-text asks (members opt in to receiving them)."}
+                </p>
+                <form action={toggleCustomRequestsAction} className="mt-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <input type="hidden" name="accepts" value={data.group.acceptsCustomRequests ? "false" : "true"} />
+                  <SubmitButton variant="secondary">
+                    {data.group.acceptsCustomRequests ? "Stop accepting custom requests" : "Accept custom requests"}
+                  </SubmitButton>
+                </form>
+              </div>
+            )}
+
             {data.contributionCategories.length > 0 ? (
               <div className="space-y-3">
                 {data.contributionCategories.map((cat) => (
@@ -1185,25 +1219,6 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
               </div>
             )}
 
-            {/* Custom support requests — public groups may opt in to free-text requests */}
-            {data.group.visibility === "public" && isActive && (
-              <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
-                <p className="text-sm font-medium text-[var(--text)]">Custom support requests</p>
-                <p className="mt-1 text-xs text-[var(--soft-text)]">
-                  {data.group.acceptsCustomRequests
-                    ? "Requesters can send free-text custom requests even when no categories are offered; they are routed to active members."
-                    : "Only your defined contribution categories can be requested. Enable custom requests to also accept free-text asks."}
-                </p>
-                <form action={toggleCustomRequestsAction} className="mt-3">
-                  <input type="hidden" name="groupId" value={groupId} />
-                  <input type="hidden" name="accepts" value={data.group.acceptsCustomRequests ? "false" : "true"} />
-                  <SubmitButton variant="secondary">
-                    {data.group.acceptsCustomRequests ? "Stop accepting custom requests" : "Accept custom requests"}
-                  </SubmitButton>
-                </form>
-              </div>
-            )}
-
             {/* Emergency period status + declaration */}
             {data.activeEmergency ? (
               <div className="border border-amber-400 bg-amber-50 p-3">
@@ -1263,6 +1278,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
                           {PARAM_LABELS[parameter.name] ?? parameter.name} · {formatParamValue(parameter.name, parameter.value)}
                           {!parameter.hasOwnSignal && setting.categorySignal !== 0 ? " · using bulk vote" : ""}
                         </span>
+                        <GovernanceMeter temperature={parameter.temperature} />
                         <GovernanceSignalForm
                           action={updateGovernanceSignalAction}
                           groupId={groupId}
@@ -1389,7 +1405,11 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       prisma.report.findMany({
         where: { reportedByAccountId: accountId, groupId },
         orderBy: { createdAt: "desc" },
-        select: { id: true, subject: true, context: true, description: true, status: true, closureReason: true, createdAt: true },
+        select: {
+          id: true, subject: true, context: true, description: true, status: true, closureReason: true, createdAt: true, kind: true,
+          // Safe linked-request summary for request flags — NEVER the description (contact note).
+          supportRequest: { select: { requestType: true, customNeed: true, status: true } },
+        },
       }),
       prisma.report.count({
         where: { groupId, status: { in: ["open", "under_review", "findings_issued", "action_proposed"] } },
@@ -1640,6 +1660,9 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
             subject: true,
             status: true,
             createdAt: true,
+            kind: true,
+            // Safe linked-request summary for request flags — NEVER the description (contact note).
+            supportRequest: { select: { requestType: true, customNeed: true, status: true } },
             findings: { select: { outcome: true } },
             actionProposals: { select: { status: true } },
           },
@@ -2346,8 +2369,13 @@ async function submitConcernAction(formData: FormData) {
       });
       subjectAccountId = subjectMembership?.accountId ?? null;
     }
-    await prisma.report.create({
-      data: { groupId, reportedByAccountId: session.accountId, subject, subjectAccountId, description, context: context || null },
+    await submitMemberConcern(prisma, {
+      groupId,
+      reportedByAccountId: session.accountId,
+      subject,
+      description,
+      context: context || null,
+      subjectAccountId,
     });
   } finally {
     await prisma.$disconnect();
@@ -2714,6 +2742,15 @@ function formatParamValue(param: string, value: number): string {
 
 // Compact timestamp options shared with <LocalTime> so client-rendered times match the old look.
 const COMPACT_DATE: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+
+function ReportKindBadge({ kind }: { kind: ReportKind }) {
+  const isFlag = kind === "request_flag";
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium ${isFlag ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"}`}>
+      {isFlag ? "Request flag" : "Person concern"}
+    </span>
+  );
+}
 
 function formatRelativeDate(date: Date) {
   return new Intl.DateTimeFormat("en", COMPACT_DATE).format(date);

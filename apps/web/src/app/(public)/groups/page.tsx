@@ -4,6 +4,7 @@ import { createPrismaClient } from "../../../lib/prisma";
 import { getSession } from "../../../lib/session";
 import { resolveCurrentNode } from "../../../lib/node-context";
 import { capitalize } from "../../../lib/support-form";
+import { getGroupsAvailableSupport } from "../../../lib/contribution-categories";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,8 @@ export default async function FindGroupsPage() {
     name: string;
     description: string | null;
     membershipPolicy: string;
-    serviceOfferings: Array<{ serviceType: string }>;
+    availableServices: string[];
+    acceptsCustom: boolean;
   }> = [];
   let myGroupIds = new Set<string>();
 
@@ -52,11 +54,6 @@ export default async function FindGroupsPage() {
             name: true,
             description: true,
             membershipPolicy: true,
-            serviceOfferings: {
-              where: { status: "active" },
-              select: { serviceType: true },
-              orderBy: { serviceType: "asc" },
-            },
           },
           orderBy: { createdAt: "asc" },
         }),
@@ -67,7 +64,13 @@ export default async function FindGroupsPage() {
             })
           : Promise.resolve([] as { groupId: string }[]),
       ]);
-      groups = groupRows;
+      // Show what each collective can currently fulfill: categories with an available member,
+      // plus whether custom requests are available. Drives the "Request Support" button gate.
+      const availableSupport = await getGroupsAvailableSupport(prisma, groupRows.map((g) => g.id));
+      groups = groupRows.map((g) => {
+        const support = availableSupport.get(g.id) ?? { availableCategoryNames: [], custom: false };
+        return { ...g, availableServices: support.availableCategoryNames, acceptsCustom: support.custom };
+      });
       myGroupIds = new Set(memberships.map((m) => m.groupId));
     }
   } finally {
@@ -105,6 +108,7 @@ export default async function FindGroupsPage() {
               {groups.map((group) => {
                 const isMember = myGroupIds.has(group.id);
                 const canJoinDirectly = !isMember && group.membershipPolicy === "open";
+                const canRequestSupport = group.availableServices.length > 0 || group.acceptsCustom;
 
                 return (
                   <li key={group.id} className="bg-[var(--surface)] p-5 sm:p-6">
@@ -113,9 +117,9 @@ export default async function FindGroupsPage() {
                     {group.description && (
                       <p className="mt-1 text-sm text-[var(--soft-text)]">{group.description}</p>
                     )}
-                    {group.serviceOfferings.length > 0 && (
+                    {(group.availableServices.length > 0 || group.acceptsCustom) && (
                       <p className="mt-2 text-xs text-[var(--muted)]">
-                        {group.serviceOfferings.map((o) => capitalize(o.serviceType)).join(" · ")}
+                        {[...group.availableServices.map((s) => capitalize(s)), ...(group.acceptsCustom ? ["Custom requests"] : [])].join(" · ")}
                       </p>
                     )}
 
@@ -140,7 +144,7 @@ export default async function FindGroupsPage() {
                         <div className="mt-2 flex flex-col gap-2 border-t border-[var(--border)] pt-3">
 
                           {/* Request Support */}
-                          {group.serviceOfferings.length > 0 ? (
+                          {canRequestSupport ? (
                             <Link
                               href={`/request/${group.id}`}
                               className="inline-flex items-center gap-2 border border-transparent bg-[var(--accent)] px-4 py-2 text-sm font-medium leading-none text-[var(--accent-text)] hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--surface)]"
@@ -154,7 +158,7 @@ export default async function FindGroupsPage() {
                                 <HelpCircle className="h-4 w-4" aria-hidden="true" />
                                 Request Support
                               </div>
-                              <p className="mt-1 text-xs leading-4 text-[var(--muted)]">No active services are currently available from this collective.</p>
+                              <p className="mt-1 text-xs leading-4 text-[var(--muted)]">No one in this collective is currently available to take requests.</p>
                             </div>
                           )}
 

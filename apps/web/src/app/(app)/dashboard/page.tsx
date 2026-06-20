@@ -30,8 +30,10 @@ import { LocalTime } from "../../../components/shared/LocalTime";
 import { SubmitButton } from "../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../components/shared/EmptyState";
 import { Notice, AlphaNotice } from "../../../components/shared/Notice";
-import { RequestHelpForm } from "../../../components/shared/RequestHelpForm";
+import { RequestHelpForm, CUSTOM_REQUEST_LABEL } from "../../../components/shared/RequestHelpForm";
 import type { GroupOption } from "../../../components/shared/RequestHelpForm";
+import { getGroupsAvailableSupport } from "../../../lib/contribution-categories";
+import { CONTACT_VIEWED_ACTION } from "../../../lib/request-access";
 import { NotificationFilters } from "../../../components/shared/NotificationFilters";
 import { DashboardCalendar } from "../../../components/shared/DashboardCalendar";
 import { loadDashboardCalendarData } from "../../../lib/calendar-data";
@@ -62,6 +64,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
     type: typeof params.notifType === "string" ? params.notifType : "all",
     groupId: typeof params.notifGroup === "string" ? params.notifGroup : null,
   };
+  const myReqView: "made" | "accepted" = params.myReqView === "accepted" ? "accepted" : "made";
   const data = await getDashboardData(session.accountId, session.activeGroupId ?? null, notifFilters);
   const calendar = await loadDashboardCalendarData(session.accountId);
   const accountId = session.accountId;
@@ -170,7 +173,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
             <CollapsibleSection id="request" title="Request Support" eyebrow="Ask only what is needed" storageKey="dashboard:request" className="bg-[var(--surface)] p-5 sm:p-6">
               <RequestHelpForm
                 groupOptions={data.groupOptions}
-                allServices={data.allServices}
+                allServices={data.requestServices}
                 action={requestHelpAction}
               />
             </CollapsibleSection>
@@ -191,6 +194,23 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                     ))}
                   </div>
                 </fieldset>
+
+                {data.customOfferOptions.length > 0 && (
+                  <fieldset>
+                    <legend className="field-label">Custom requests</legend>
+                    <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
+                      Opt in, per collective, to receive free-text custom requests. You only become reachable in the collectives you choose.
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {data.customOfferOptions.map((opt) => (
+                        <label key={opt.membershipId} className="flex min-h-11 items-center gap-3 border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
+                          <input name="customMemberships" type="checkbox" value={opt.membershipId} defaultChecked={opt.customAvailable} className="h-4 w-4 accent-[#0d9488]" />
+                          <span>Custom requests — {opt.groupName}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
                 <label className="block">
                   <span className="field-label">Availability boundary</span>
                   <select name="availabilityPreference" className="field-input" defaultValue="available">
@@ -279,66 +299,140 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
 
             {/* My Requests */}
             {data.myGroups.length > 0 && (
-              <CollapsibleSection id="my-requests" title="My Requests" eyebrow="Requests you submitted" storageKey="dashboard:my-requests" className="bg-[var(--surface)] p-5 sm:p-6">
-                {data.myRequests.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">No active requests.</p>
+              <CollapsibleSection id="my-requests" title="My Requests" eyebrow="Requests you made and accepted" storageKey="dashboard:my-requests" className="bg-[var(--surface)] p-5 sm:p-6">
+                {/* Toggle: requests you made vs. requests you've accepted from others */}
+                <div className="mb-4 inline-flex border border-[var(--border)] text-xs font-medium">
+                  <Link
+                    href="/dashboard?myReqView=made#my-requests"
+                    className={`px-3 py-1.5 ${myReqView === "made" ? "bg-[var(--accent)] text-[var(--accent-text)]" : "bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
+                  >
+                    You made
+                  </Link>
+                  <Link
+                    href="/dashboard?myReqView=accepted#my-requests"
+                    className={`border-l border-[var(--border)] px-3 py-1.5 ${myReqView === "accepted" ? "bg-[var(--accent)] text-[var(--accent-text)]" : "bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
+                  >
+                    You accepted
+                  </Link>
+                </div>
+
+                {myReqView === "made" ? (
+                  <>
+                    {data.myRequests.length === 0 ? (
+                      <p className="text-sm text-[var(--muted)]">No active requests.</p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {data.myRequests.map((request) => {
+                          const statusLabel = REQUEST_STATUS_LABELS[request.status] ?? request.status;
+                          const isActive = ["open", "routed", "matched"].includes(request.status);
+                          const accessLog = data.contactAccessByRequest[request.id] ?? [];
+
+                          async function fulfillMyRequest() {
+                            "use server";
+                            const s = await getSession();
+                            if (!s.accountId) redirect("/login");
+                            const p = createPrismaClient();
+                            try { await fulfillSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
+                            finally { await p.$disconnect(); }
+                            revalidatePath("/dashboard");
+                          }
+
+                          async function deleteMyRequest() {
+                            "use server";
+                            const s = await getSession();
+                            if (!s.accountId) redirect("/login");
+                            const p = createPrismaClient();
+                            try { await deleteSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
+                            finally { await p.$disconnect(); }
+                            revalidatePath("/dashboard");
+                          }
+
+                          return (
+                            <li key={request.id} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-medium capitalize">{request.requestType}</p>
+                                <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
+                              </div>
+                              <p className="mt-1 text-xs text-[var(--muted)]">
+                                Submitted {new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.createdAt)}
+                              </p>
+                              {(isActive || request.status !== "deleted") && (
+                                <div className="mt-2 flex gap-2">
+                                  {request.status === "matched" && (
+                                    <form action={fulfillMyRequest}>
+                                      <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">Mark support received</button>
+                                    </form>
+                                  )}
+                                  {request.status !== "fulfilled" && request.status !== "expired" && (
+                                    <form action={deleteMyRequest}>
+                                      <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--text)] hover:underline">Delete</button>
+                                    </form>
+                                  )}
+                                </div>
+                              )}
+                              <details className="mt-2">
+                                <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--text)] select-none">
+                                  Who viewed your contact through Commons{accessLog.length > 0 ? ` (${accessLog.length})` : ""}
+                                </summary>
+                                <div className="mt-1 border-l border-[var(--border)] pl-3 text-xs text-[var(--soft-text)]">
+                                  {accessLog.length === 0 ? (
+                                    <p>No one has viewed your contact through Commons yet.</p>
+                                  ) : (
+                                    <ul className="space-y-1">
+                                      {accessLog.map((entry, i) => (
+                                        <li key={i}>
+                                          {entry.accessorName} — <LocalTime value={entry.viewedAtIso} />
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  <p className="mt-1 text-[var(--muted)]">
+                                    This shows access through Commons. It cannot show someone reading the underlying database directly.
+                                  </p>
+                                </div>
+                              </details>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <p className="mt-3 text-xs text-[var(--muted)]">
+                      Deleting a request removes it from active views. Contact details are removed after any accountability period.
+                    </p>
+                  </>
                 ) : (
-                  <ul className="space-y-3">
-                    {data.myRequests.map((request) => {
-                      const statusLabel = REQUEST_STATUS_LABELS[request.status] ?? request.status;
-                      const isActive = ["open", "routed", "matched"].includes(request.status);
-
-                      async function fulfillMyRequest() {
-                        "use server";
-                        const s = await getSession();
-                        if (!s.accountId) redirect("/login");
-                        const p = createPrismaClient();
-                        try { await fulfillSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
-                        finally { await p.$disconnect(); }
-                        revalidatePath("/dashboard");
-                      }
-
-                      async function deleteMyRequest() {
-                        "use server";
-                        const s = await getSession();
-                        if (!s.accountId) redirect("/login");
-                        const p = createPrismaClient();
-                        try { await deleteSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
-                        finally { await p.$disconnect(); }
-                        revalidatePath("/dashboard");
-                      }
-
-                      return (
-                        <li key={request.id} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium capitalize">{request.requestType}</p>
-                            <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
-                          </div>
-                          <p className="mt-1 text-xs text-[var(--muted)]">
-                            Submitted {new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.createdAt)}
-                          </p>
-                          {(isActive || request.status !== "deleted") && (
-                            <div className="mt-2 flex gap-2">
-                              {request.status === "matched" && (
-                                <form action={fulfillMyRequest}>
-                                  <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">Mark support received</button>
-                                </form>
-                              )}
-                              {request.status !== "fulfilled" && request.status !== "expired" && (
-                                <form action={deleteMyRequest}>
-                                  <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--text)] hover:underline">Delete</button>
-                                </form>
-                              )}
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  <>
+                    {data.acceptedRequests.length === 0 ? (
+                      <p className="text-sm text-[var(--muted)]">You have not accepted any requests yet.</p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {data.acceptedRequests.map((r) => (
+                          <li key={r.routeId}>
+                            <Link
+                              href={`/requests/accepted/${r.routeId}`}
+                              className="block border border-[var(--border)] bg-[var(--surface)] px-4 py-3 hover:bg-[var(--hover)]"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-medium">
+                                  {r.serviceType === "custom"
+                                    ? `Custom Request${r.customNeed ? `: ${r.customNeed}` : ""}`
+                                    : capitalize(r.serviceType)}
+                                </p>
+                                <span className="shrink-0 text-xs text-[var(--muted)]">{r.requestStatusLabel}</span>
+                              </div>
+                              <p className="mt-1 text-xs text-[var(--muted)]">
+                                {r.groupName}
+                                {r.acceptedAtIso ? <> · accepted <LocalTime value={r.acceptedAtIso} /></> : null}
+                              </p>
+                              <p className="mt-1 text-xs text-[var(--accent)]">View contact &amp; coordinate →</p>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="mt-3 text-xs text-[var(--muted)]">Accepted requests are shown across all your collectives.</p>
+                  </>
                 )}
-                <p className="mt-3 text-xs text-[var(--muted)]">
-                  Deleting a request removes it from active views. Contact details are removed after any accountability period.
-                </p>
               </CollapsibleSection>
             )}
 
@@ -386,6 +480,9 @@ type RouteNotif = {
   groupId: string;
   groupName: string;
   serviceType: string;
+  // For custom requests: the requester's free-text need (shown as a secondary contribution type).
+  // The contact note is NOT included here — it stays in the request description until acceptance.
+  customNeed: string | null;
   status: string;
   urgencyLabel: string;
   createdAtIso: string;
@@ -424,7 +521,12 @@ async function getDashboardData(
     const myGroupMemberships = await prisma.groupMembership.findMany({
       where: { accountId, status: "active" },
       orderBy: { joinedAt: "asc" },
-      select: { id: true, groupId: true, group: { select: { name: true, description: true, visibility: true } } },
+      select: {
+        id: true,
+        groupId: true,
+        customAvailable: true,
+        group: { select: { name: true, description: true, visibility: true, acceptsCustomRequests: true } },
+      },
     });
     const memberGroupIds = myGroupMemberships.map((m) => m.groupId);
     const membershipIdByGroup = Object.fromEntries(myGroupMemberships.map((m) => [m.groupId, m.id]));
@@ -438,7 +540,7 @@ async function getDashboardData(
       memberGroupIds.length > 0
         ? prisma.contributionCategory.findMany({
             where: { status: "active", groupId: { in: memberGroupIds } },
-            select: { groupId: true, name: true },
+            select: { id: true, groupId: true, name: true },
             orderBy: { name: "asc" },
           })
         : Promise.resolve([]),
@@ -495,6 +597,45 @@ async function getDashboardData(
         : Promise.resolve([]),
     ]);
 
+    // Requests this member has ACCEPTED from others (cross-group) — for the "accepted" tab.
+    const acceptedRoutesRaw = await prisma.requestRoute.findMany({
+      where: { contributorAccountId: accountId, status: "accepted" },
+      orderBy: { decidedAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        serviceType: true,
+        decidedAt: true,
+        supportRequest: { select: { requestType: true, status: true, customNeed: true, group: { select: { name: true } } } },
+      },
+    });
+    const acceptedRequests = acceptedRoutesRaw.map((r) => ({
+      routeId: r.id,
+      serviceType: r.serviceType,
+      customNeed: r.serviceType === "custom" ? r.supportRequest.customNeed ?? null : null,
+      groupName: r.supportRequest.group.name,
+      acceptedAtIso: r.decidedAt ? r.decidedAt.toISOString() : null,
+      requestStatusLabel: REQUEST_STATUS_LABELS[r.supportRequest.status] ?? r.supportRequest.status,
+    }));
+
+    // Contact-access ledger for requests this member MADE: who viewed their contact through Commons.
+    const madeIds = myRequests.map((r) => r.id);
+    const accessRows = madeIds.length
+      ? await prisma.actionLog.findMany({
+          where: { action: CONTACT_VIEWED_ACTION, targetId: { in: madeIds } },
+          select: { targetId: true, createdAt: true, actor: { select: { displayName: true } } },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+    const contactAccessByRequest: Record<string, { accessorName: string; viewedAtIso: string }[]> = {};
+    for (const id of madeIds) contactAccessByRequest[id] = [];
+    for (const row of accessRows) {
+      (contactAccessByRequest[row.targetId] ??= []).push({
+        accessorName: row.actor?.displayName ?? "A helper",
+        viewedAtIso: row.createdAt.toISOString(),
+      });
+    }
+
     // Build unified notification list
     const routeNotifs: RouteNotif[] = routes.map((r) => ({
       kind: "route",
@@ -502,6 +643,7 @@ async function getDashboardData(
       groupId: r.supportRequest.groupId,
       groupName: r.supportRequest.group.name,
       serviceType: r.serviceType,
+      customNeed: r.serviceType === "custom" ? r.supportRequest.customNeed ?? null : null,
       status: r.status,
       urgencyLabel: urgencyLabel(r.supportRequest.urgency),
       createdAtIso: r.createdAt.toISOString(),
@@ -559,17 +701,37 @@ async function getDashboardData(
     const trustedGroupIds = new Set(trustedProviderGroups.map((t) => t.groupId));
     // Support requests target PUBLIC groups only — private groups (even ones the user belongs to)
     // must not appear as request targets. "My Collectives" below still lists all member groups.
+    const publicMemberGroupIds = myGroupMemberships
+      .filter((m) => m.group.visibility === "public")
+      .map((m) => m.groupId);
+    const availableSupport = await getGroupsAvailableSupport(prisma, publicMemberGroupIds);
+
     const groupOptions: GroupOption[] = myGroupMemberships
       .filter((m) => m.group.visibility === "public")
-      .map((m) => ({
-        groupId: m.groupId,
-        groupName: m.group.name,
-        services: groupCategories.filter((c) => c.groupId === m.groupId).map((c) => c.name),
-        hasTrustedProviders: trustedGroupIds.has(m.groupId),
-      }));
+      .map((m) => {
+        const support = availableSupport.get(m.groupId) ?? { availableCategoryNames: [], custom: false };
+        // Request form: only categories someone can fulfill, plus "Custom Request" when available.
+        const services = [...support.availableCategoryNames, ...(support.custom ? [CUSTOM_REQUEST_LABEL] : [])];
+        return {
+          groupId: m.groupId,
+          groupName: m.group.name,
+          services,
+          hasTrustedProviders: trustedGroupIds.has(m.groupId),
+          acceptsCustom: support.custom,
+        };
+      });
 
-    // Distinct category names across all member groups — for the Offer Support checkboxes
+    // Offer Support checkboxes: every category the member's groups define (members create the
+    // availability, so the offer list must not be gated by it).
     const allServices = [...new Set(groupCategories.map((c) => c.name))].sort();
+    // Request form: only fulfillable categories + custom where available (report 4/5 gating).
+    const requestServices = [...new Set(groupOptions.flatMap((g) => g.services))].sort();
+
+    // Per-collective custom-request opt-in options: public collectives that accept custom requests.
+    // Each option carries the member's own membershipId and current opt-in state (revocable consent).
+    const customOfferOptions = myGroupMemberships
+      .filter((m) => m.group.visibility === "public" && m.group.acceptsCustomRequests)
+      .map((m) => ({ membershipId: m.id, groupName: m.group.name, customAvailable: m.customAvailable }));
 
     // Pending applications the user submitted (group + project) — so they can track and withdraw them.
     const [pendingGroupApps, pendingProjectApps] = await Promise.all([
@@ -597,7 +759,11 @@ async function getDashboardData(
         description: m.group.description,
       })),
       allServices,
+      requestServices,
       groupOptions,
+      customOfferOptions,
+      acceptedRequests,
+      contactAccessByRequest,
       notifications,
       myRequests,
       pendingApplications,
@@ -661,16 +827,34 @@ async function requestHelpAction(formData: FormData) {
   const activeDays = Math.min(90, Math.max(3, parseInt(optionalString(formData, "activeDays") ?? "30", 10) || 30));
   const groupId = optionalString(formData, "groupId") ?? session.activeGroupId;
   if (!groupId) redirect("/dashboard?notice=Please+select+a+group");
+  const isCustom = serviceType === "custom";
+  const customNeed = (optionalString(formData, "customNeed") ?? "").trim();
+  if (isCustom && !customNeed) redirect("/dashboard?notice=Please+describe+what+you+need");
   const prisma = createPrismaClient();
   try {
     await requireGroupMembership(prisma, session.accountId, groupId);
+    // Resolve a chosen category name to its categoryId so category-based routing (gated on member
+    // availability) applies; fall back to legacy string routing if no matching category.
+    let categoryId: string | undefined;
+    let resolvedServiceType = serviceType;
+    if (!isCustom) {
+      const category = await prisma.contributionCategory.findFirst({
+        where: { groupId, name: serviceType, status: "active" },
+        select: { id: true },
+      });
+      if (category) {
+        categoryId = category.id;
+        resolvedServiceType = "category";
+      }
+    }
     const request = await createSupportRequest(prisma, {
       submittedByAccountId: session.accountId,
       groupId,
       projectId: null,
-      requestType: serviceType,
-      requestedServices: [{ serviceType, trustRequirement: trustPreference }],
+      requestType: isCustom ? "custom" : resolvedServiceType,
+      requestedServices: [{ serviceType: isCustom ? "custom" : resolvedServiceType, categoryId, trustRequirement: trustPreference }],
       description: buildRequestDescription({ contact, location, language }),
+      customNeed: isCustom ? customNeed : null,
       urgency,
       privacyLevel: "private",
       expiresAt: new Date(Date.now() + activeDays * 24 * 60 * 60 * 1000),
@@ -686,24 +870,68 @@ async function offerHelpAction(formData: FormData) {
   "use server";
   const session = await getSession();
   if (!session.accountId) redirect("/login");
+  const accountId = session.accountId;
   const services = formData.getAll("services").map(String).filter(Boolean);
-  if (services.length === 0) redirect("/dashboard?notice=Choose%20at%20least%20one%20kind%20of%20support%20before%20saving%20an%20offer.");
+  const checkedCustom = new Set(formData.getAll("customMemberships").map(String).filter(Boolean));
   const availabilityPreference = requiredString(formData, "availabilityPreference") as "unavailable" | "available" | "limited" | "time-sensitive-capable";
   const availableNow = availabilityPreference !== "unavailable";
   const prisma = createPrismaClient();
+  let nothingToOffer = false;
   try {
-    for (const serviceType of services) {
-      await declareServiceCapability(prisma, {
-        accountId: session.accountId,
-        serviceType,
-        trustRequirement: "lightweight",
-        availability: { availableNow, preference: availabilityPreference },
-        visibility: "group",
-      });
+    // The member's active memberships in public collectives that accept custom requests — the set
+    // the custom checkboxes were rendered from. Drives per-collective set/unset (revocable consent).
+    const customEligible = await prisma.groupMembership.findMany({
+      where: { accountId, status: "active", group: { visibility: "public", acceptsCustomRequests: true } },
+      select: { id: true },
+    });
+
+    if (services.length === 0 && customEligible.length === 0) {
+      nothingToOffer = true;
+    } else {
+      // Resolve each chosen category name to a categoryId within the member's groups, so the offer
+      // links to the community-governed category and category-based routing can find it.
+      if (services.length > 0) {
+        const memberGroups = await prisma.groupMembership.findMany({
+          where: { accountId, status: "active" },
+          select: { groupId: true },
+        });
+        const memberGroupIds = memberGroups.map((m) => m.groupId);
+        const categories = memberGroupIds.length
+          ? await prisma.contributionCategory.findMany({
+              where: { status: "active", groupId: { in: memberGroupIds }, name: { in: services } },
+              select: { id: true, name: true },
+            })
+          : [];
+        const categoryIdByName = new Map<string, string>();
+        for (const c of categories) if (!categoryIdByName.has(c.name)) categoryIdByName.set(c.name, c.id);
+
+        for (const serviceType of services) {
+          await declareServiceCapability(prisma, {
+            accountId,
+            serviceType,
+            trustRequirement: "lightweight",
+            availability: { availableNow, preference: availabilityPreference },
+            visibility: "group",
+            categoryId: categoryIdByName.get(serviceType),
+          });
+        }
+      }
+
+      // Per-collective custom opt-in: enable for checked memberships, disable the rest.
+      for (const m of customEligible) {
+        const optIn = checkedCustom.has(m.id);
+        await prisma.groupMembership.update({
+          where: { id: m.id },
+          data: optIn
+            ? { customAvailable: true, customAvailability: { availableNow, preference: availabilityPreference } }
+            : { customAvailable: false },
+        });
+      }
     }
   } finally {
     await prisma.$disconnect();
   }
+  if (nothingToOffer) redirect("/dashboard?notice=Choose%20at%20least%20one%20kind%20of%20support%20before%20saving%20an%20offer.");
   revalidatePath("/dashboard");
 }
 
@@ -792,7 +1020,11 @@ function RouteCard({ route }: { route: RouteNotif }) {
             <span className="text-xs font-medium text-[var(--muted)]">{route.groupName}</span>
             {route.isUnread && <span className="text-xs font-semibold text-[var(--accent)]">New</span>}
           </div>
-          <h3 className="mt-0.5 font-semibold capitalize">{route.serviceType} requested</h3>
+          {route.serviceType === "custom" ? (
+            <h3 className="mt-0.5 font-semibold">Custom Request{route.customNeed ? `: ${route.customNeed}` : ""}</h3>
+          ) : (
+            <h3 className="mt-0.5 font-semibold capitalize">{route.serviceType} requested</h3>
+          )}
           <p className="mt-1 text-sm text-[var(--soft-text)]">Routed to you. {route.urgencyLabel}</p>
         </div>
         <span className="border border-[var(--border)] bg-[var(--subtle)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
@@ -829,15 +1061,24 @@ function RouteCard({ route }: { route: RouteNotif }) {
           </>
         ) : null}
         {accepted ? (
-          <form action={recordContributionAction}>
-            <input type="hidden" name="routeId" value={route.id} />
-            <SubmitButton>
-              <span className="inline-flex items-center gap-2"><HeartHandshake className="h-4 w-4" />Mark as supported</span>
-            </SubmitButton>
-          </form>
+          <>
+            <Link
+              href={`/requests/accepted/${route.id}`}
+              className="btn-secondary inline-flex min-h-11 items-center gap-2 border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+            >
+              <Shield className="h-4 w-4" aria-hidden="true" />
+              View contact &amp; coordinate
+            </Link>
+            <form action={recordContributionAction}>
+              <input type="hidden" name="routeId" value={route.id} />
+              <SubmitButton>
+                <span className="inline-flex items-center gap-2"><HeartHandshake className="h-4 w-4" />Mark as supported</span>
+              </SubmitButton>
+            </form>
+          </>
         ) : null}
       </div>
-      {accepted && <p className="mt-3 text-sm leading-6 text-[var(--accent)]">Accepted. Coordinate privately, then mark support given when finished.</p>}
+      {accepted && <p className="mt-3 text-sm leading-6 text-[var(--accent)]">Accepted. Open “View contact &amp; coordinate” to reach the requester, then mark support given when finished.</p>}
       {declined && <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Declined. That is okay; no contribution or judgment is recorded.</p>}
     </article>
   );

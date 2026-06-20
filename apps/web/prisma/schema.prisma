@@ -276,6 +276,14 @@ enum ConcernFindingOutcome {
   withdrawn
 }
 
+// Distinguishes a person-accountability concern (may name a subject; remedy acts on a person)
+// from a content/request flag (no subject; remedy acts on the request itself, e.g. spam/fraud).
+// Both are Report rows, but reviewers need to know which kind they are looking at.
+enum ReportKind {
+  person_concern
+  request_flag
+}
+
 enum ConcernClosureReason {
   reporter_withdrawal
   review_complete_no_action
@@ -713,6 +721,12 @@ model GroupMembership {
   participationStatus ParticipationStatus @default(active)
   lastSeenAt          DateTime?
   applicationNote     String?             // optional note submitted with a pending membership application
+  // Per-collective consent to receive free-text "custom" support requests. Membership is already
+  // group-scoped, so opting in here applies only to THIS collective (not account-wide). When true,
+  // this member is offered custom requests routed to the group. `customAvailability` mirrors
+  // ServiceCapability.availability (e.g. { availableNow, preference }).
+  customAvailable     Boolean             @default(false)
+  customAvailability  Json?
 
   account                       Account                            @relation(fields: [accountId], references: [id], onDelete: Cascade)
   group                         Group                              @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -922,6 +936,10 @@ model SupportRequest {
   requestType          String
   requestedServices    Json
   description          String
+  // For custom (free-text) requests: the requester's described need, stored separately from
+  // `description` so the need can be shown to potential helpers without exposing the contact
+  // note (which lives in `description` and is only revealed after a helper accepts).
+  customNeed           String?
   urgency              UrgencyLevel         @default(normal)
   privacyLevel         PrivacyLevel         @default(private)
   status               SupportRequestStatus @default(open)
@@ -936,6 +954,7 @@ model SupportRequest {
   services          SupportRequestService[]
   routes            RequestRoute[]
   guestAccessToken  GuestAccessToken?
+  flaggedReports    Report[]                @relation("RequestFlag")
 
   @@index([submittedByAccountId])
   @@index([groupId])
@@ -1124,6 +1143,10 @@ model Report {
   subjectAccountId    String?
   context             String?
   description         String
+  kind                ReportKind            @default(person_concern)
+  // Set for request flags (kind = request_flag): the request the flag is about, so reviewers have
+  // the artifact to act on. Null for person concerns. Does NOT imply a subject.
+  supportRequestId    String?
   status              ReportStatus          @default(open)
   visibility          String                @default("private")
   closureReason       ConcernClosureReason?
@@ -1137,6 +1160,7 @@ model Report {
   subjectAccount   Account?               @relation("ConcernSubject", fields: [subjectAccountId], references: [id])
   guestAccessToken GuestAccessToken?      @relation(fields: [guestAccessTokenId], references: [id])
   group            Group                  @relation(fields: [groupId], references: [id])
+  supportRequest   SupportRequest?        @relation("RequestFlag", fields: [supportRequestId], references: [id])
   reviews          ConcernReview[]
   findings         ConcernFinding[]
   actionProposals  ConcernActionProposal[]
@@ -1146,6 +1170,7 @@ model Report {
   @@index([guestAccessTokenId])
   @@index([groupId])
   @@index([status])
+  @@index([supportRequestId])
 }
 
 model ConcernReview {

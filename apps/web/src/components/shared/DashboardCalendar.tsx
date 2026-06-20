@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "./CollapsibleSection";
 import { CalendarView } from "./CalendarView";
 import { CalendarFilterControls } from "./CalendarFilterControls";
 import { EventForm } from "./EventForm";
@@ -15,29 +16,27 @@ type Props = {
   filterAction: (prev: FormState, fd: FormData) => Promise<FormState>;
 };
 
-/** The aggregated personal calendar on the dashboard. */
+/** The aggregated personal calendar on the dashboard. Collapsible like the other cards. */
 export function DashboardCalendar(props: Props) {
   return (
-    <section id="calendar" className="border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
-      <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Across your spaces</span>
-      <h2 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)]">Calendar</h2>
-      <p className="mt-1 mb-4 text-sm leading-6 text-[var(--soft-text)]">
-        Events from your collectives, projects, responsibilities, coalitions, and personal plans.
-      </p>
+    <CollapsibleSection id="calendar" title="Calendar" eyebrow="Across your spaces" storageKey="dashboard:calendar">
+      <div className="space-y-4">
+        <p className="text-sm leading-6 text-[var(--soft-text)]">
+          Events from your collectives, projects, responsibilities, coalitions, and personal plans.
+        </p>
 
-      <CalendarFilterControls action={props.filterAction} current={props.filters} />
+        <CalendarFilterControls action={props.filterAction} current={props.filters} />
 
-      <div className="mb-4">
         <EventForm action={props.submitAction} allowMeeting={false} audiences={[]} />
-      </div>
 
-      <CalendarView
-        events={props.events}
-        myInterests={props.myInterests}
-        interestAction={props.interestAction}
-        cancelAction={props.cancelAction}
-        currentAccountId={props.currentAccountId}
-      />
-    </section>
+        <CalendarView
+          events={props.events}
+          myInterests={props.myInterests}
+          interestAction={props.interestAction}
+          cancelAction={props.cancelAction}
+          currentAccountId={props.currentAccountId}
+        />
+      </div>
+    </CollapsibleSection>
   );
 }
