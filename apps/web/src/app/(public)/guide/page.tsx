@@ -75,16 +75,42 @@ export default async function GuidePage() {
         <header className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
           <p className="text-xs font-semibold uppercase tracking-widest text-[var(--accent)]">Commons Guide</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">A simple guide to Commons</h1>
+          <p className="mt-4 max-w-3xl text-lg font-medium leading-8 text-[var(--text)]">
+            Make cooperation easier and domination harder.
+          </p>
           <p className="mt-4 max-w-3xl text-base leading-7 text-[var(--soft-text)]">
             Commons helps people ask for help, offer help, work on projects, and make decisions together. It is
-            here to support real relationships, not replace them. It is not a social network, a popularity contest,
-            or a place where one hidden admin quietly controls everything.
+            here to support real relationships, not replace them — not a social network, a popularity contest, or a
+            place where one hidden admin quietly controls everything.
           </p>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--muted)]">
-            The basic idea is simple: make it easier to cooperate, make power easier to see, and ask people for
-            less private information.
+            The basic idea: make it easier to cooperate, make power easier to see, and ask people for less private
+            information.
           </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <ActionLink href="/guide/handbook" primary>Read the full user guide →</ActionLink>
+            <span className="text-xs text-[var(--muted)]">The complete walkthrough — how to ask, offer, decide, and host.</span>
+          </div>
         </header>
+
+        {/* Philosophy in three ideas */}
+        <section className="grid gap-3 sm:grid-cols-3">
+          <PhilosophyCard
+            icon={Vote}
+            title="No admins"
+            body="The group decides — by petition. There is no owner-account that can approve, delete, or overrule."
+          />
+          <PhilosophyCard
+            icon={HandHeart}
+            title="Remembers help, not need"
+            body="Who helped is kept in full. The sensitive details of a request are erased once they are no longer needed."
+          />
+          <PhilosophyCard
+            icon={Network}
+            title="Borrowed, reversible power"
+            body="Roles are held for a term and can be recalled. Most decisions can be undone — Commons avoids one-way doors."
+          />
+        </section>
 
         <section className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
           <div className="flex items-center gap-2">
@@ -288,6 +314,26 @@ function GuideStep({
         <p className="mt-1 text-sm leading-6 text-[var(--soft-text)]">{body}</p>
       </div>
     </li>
+  );
+}
+
+function PhilosophyCard({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4 text-[var(--accent)]" aria-hidden={true} />
+        <h2 className="text-sm font-semibold">{title}</h2>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-[var(--soft-text)]">{body}</p>
+    </div>
   );
 }
 
