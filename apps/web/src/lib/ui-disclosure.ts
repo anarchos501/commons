@@ -1,24 +1,32 @@
 import type { PrismaClient } from "../generated/prisma/client";
 import { Prisma } from "../generated/prisma/client";
-import { MODULE_IDS, type ModuleId } from "./group-modules";
+import { MODULE_IDS } from "./group-modules";
+import { HOME_MODULE_IDS } from "./home-modules";
 
 // Progressive-disclosure preferences: per-user show/hide switches over capability cards. Pure
 // data access + resolution (no server-action side effects here, so it's safe to import from server
 // components and from the action wrappers alike).
+//
+// Scope-generic by design: the same store backs both the group workspace (scope = "<groupId>") and
+// the person-centric home (scope = "home"), plus a cross-surface "global" scope. Module ids are
+// therefore typed as plain strings at the function boundaries; the runtime sanitizer (below) is the
+// validator, whitelisting the union of every known group + home module id.
 
 export type DisclosureValue = "show" | "hide";
-export type ScopeOverrides = Partial<Record<ModuleId, DisclosureValue>>;
-// Keyed by "global" + "<groupId>".
+export type ScopeOverrides = Partial<Record<string, DisclosureValue>>;
+// Keyed by "global" + "<groupId>" + "home".
 export type DisclosureOverrides = Record<string, ScopeOverrides>;
 export type UiDisclosurePrefs = { revealAll: boolean; overrides: DisclosureOverrides };
 
-const MODULE_ID_SET = new Set<string>(MODULE_IDS);
+// Union of every known module id across surfaces. `calendar` is the one id shared by group + home;
+// it dedupes in the Set and is scope-separated in the overrides map, so there is no collision.
+const MODULE_ID_SET = new Set<string>([...MODULE_IDS, ...HOME_MODULE_IDS]);
 
 function sanitizeScope(raw: unknown): ScopeOverrides {
   const out: ScopeOverrides = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (MODULE_ID_SET.has(k) && (v === "show" || v === "hide")) out[k as ModuleId] = v;
+    if (MODULE_ID_SET.has(k) && (v === "show" || v === "hide")) out[k] = v;
   }
   return out;
 }
@@ -64,7 +72,7 @@ export async function setModuleOverride(
   prisma: PrismaClient,
   accountId: string,
   scope: string,
-  moduleId: ModuleId,
+  moduleId: string,
   value: DisclosureValue | null,
 ): Promise<void> {
   const current = await getUiDisclosurePreference(prisma, accountId);
@@ -81,20 +89,20 @@ export async function setModuleOverride(
  * Effective presence of a module's card on the page:
  *  1. an explicit `?section=<id>` deep-link presents it transiently (beats a stored hide — a clicked
  *     link never silently no-ops), without changing the stored preference;
- *  2. else a group-scoped override wins, then a global override;
+ *  2. else a scope-specific override wins (the groupId or "home"), then a global override;
  *  3. else `revealAll` shows everything not explicitly overridden;
  *  4. else the automatic foreground membership.
  */
 export function resolveEffectiveVisibility(
-  moduleId: ModuleId,
-  groupId: string,
-  foreground: ReadonlySet<ModuleId>,
+  moduleId: string,
+  scopeKey: string,
+  foreground: ReadonlySet<string>,
   prefs: UiDisclosurePrefs,
   sectionParam?: string | null,
 ): DisclosureValue {
   if (sectionParam === moduleId) return "show";
-  const groupOv = prefs.overrides[groupId]?.[moduleId];
-  if (groupOv) return groupOv;
+  const scopeOv = prefs.overrides[scopeKey]?.[moduleId];
+  if (scopeOv) return scopeOv;
   const globalOv = prefs.overrides.global?.[moduleId];
   if (globalOv) return globalOv;
   if (prefs.revealAll) return "show";
