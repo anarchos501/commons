@@ -15,7 +15,7 @@ import { PetitionsModule } from "./_modules/petitions";
 import { MembersModule } from "./_modules/members";
 import { GovernanceModule } from "./_modules/governance";
 import { OverviewModule } from "./_modules/overview";
-import { RoomsMap } from "./_modules/RoomsMap";
+import { CapabilityMap } from "../../../../components/shared/CapabilityMap";
 import { DisclosureBookmarkFallback } from "./_modules/DisclosureBookmarkFallback";
 import { getActiveParticipantCount } from "../../../../lib/participation";
 import { runGroupVisitEffects } from "../../../../lib/group-visit";
@@ -161,7 +161,15 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
       {/* ── Rooms map: everything this collective can do, present or one switch away ── */}
       <div className="mt-4">
-        <RoomsMap cards={data.disclosureCards} revealAll={data.revealAll} groupId={groupId} />
+        <CapabilityMap
+          cards={data.disclosureCards}
+          revealAll={data.revealAll}
+          scope="group"
+          scopeId={groupId}
+          eyebrow="This collective"
+          heading="Everything this collective can do"
+          intro="Every capability is one switch away. Showing a section adds its card to your page; hiding tucks it back here. Your choices only change your own view."
+        />
       </div>
 
       {/* ── Overview + Discussion (connected) ─────────────────────── */}
