@@ -12,18 +12,18 @@ This is the Next.js web application for Commons. It implements the coordination 
 
 **Prerequisites**
 
-- Node.js 20+
+- Node.js 22 (the version used by the devcontainer and the Docker image)
 - pnpm 10 via Corepack
 - Docker, for PostgreSQL
 
 **Steps**
 
-```powershell
+```bash
 # 1. From the repo root, start PostgreSQL
 docker compose up -d
 
 # 2. Create your environment file
-Copy-Item apps/web/.env.example apps/web/.env
+cp apps/web/.env.example apps/web/.env
 
 # 3. Run migrations
 pnpm --dir apps/web db:migrate
@@ -56,7 +56,7 @@ SESSION_SECRET="dev-commons-session-secret-change-this-in-production-32chars"
 
 ## Database Commands
 
-```powershell
+```bash
 pnpm --dir apps/web db:migrate
 pnpm --dir apps/web db:seed
 pnpm --dir apps/web db:studio
@@ -67,7 +67,7 @@ pnpm --dir apps/web db:generate
 
 ## Tests And Build
 
-```powershell
+```bash
 pnpm test
 pnpm --dir apps/web lint
 pnpm --dir apps/web build
@@ -82,11 +82,11 @@ The test runner uses `--test-concurrency=1` because tests share a live PostgreSQ
 ## Current UI Surface
 
 - Public users can browse groups, request support, track request status, register, and apply for membership where sponsorship is required.
-- Authenticated users get a dashboard plus group, project, and responsibility workspaces through the sidebar.
+- Authenticated users get a person-centric home dashboard (with a progressive-disclosure capability map to choose which sections are visible) plus group, project, and responsibility workspaces through the sidebar.
 - Group workspaces expose discussion, library material, members, petitions, contribution categories, trusted providers, responsibilities, governance settings, emergency periods, and accountability concerns.
 - Project workspaces expose their own discussion, library, members, petitions, and contribution categories. Project-internal petitions and participation use project membership.
 - Responsibility workspaces expose role overview, holders, volunteer/resign controls, discussion, and library material.
-- Governance UI is surfaced for all 12 categories with temperature signals, resolved thresholds, petition durations, support/withdraw actions, and explicit petition outcome checks.
+- Governance UI is surfaced for all 17 categories with temperature signals, resolved thresholds, petition durations, support/withdraw actions, and explicit petition outcome checks.
 
 ---
 

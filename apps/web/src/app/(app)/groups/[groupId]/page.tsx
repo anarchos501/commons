@@ -577,7 +577,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       }),
     );
 
-    // Governance — all 16 categories
+    // Governance — all 17 categories
     const currentSignals = await prisma.memberGovernanceSignal.findMany({
       where: { membershipId: currentMembership.id },
       select: { category: true, parameter: true, signal: true },

@@ -16,7 +16,7 @@ Governance preferences are first-class infrastructure. They apply through explic
 
 ## Current Governance Categories
 
-The UI exposes the 12 current categories:
+The UI exposes the 17 current categories:
 
 - Membership
 - Project
@@ -24,12 +24,17 @@ The UI exposes the 12 current categories:
 - Accountability
 - Living document
 - Archival
-- Emergency
-- Discussion
 - Support request
 - Contribution offer
+- Emergency
+- Discussion
 - Contribution category
 - Trusted provider
+- Group settings
+- Publishing
+- Participation
+- Node stewardship
+- Coordination
 
 Each category shows the member's signal, current temperature label, resolved threshold, and petition duration.
 

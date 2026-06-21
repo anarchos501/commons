@@ -33,12 +33,15 @@ The project charter is the main product compass: [docs/charter.md](docs/charter.
 Commons currently includes:
 
 - Account registration, login, collectives (groups), public support request intake, and request status links. The first person to register on a new node automatically founds the node.
+- A person-centric home dashboard: an "Active" recent-activity strip, a "while you were away" catch-up digest, and your petitions, projects, responsibilities, and concerns surfaced alongside requests, offers, notifications, and collectives.
+- Progressive disclosure: a per-space "choose what features are visible" capability map on the home and every collective page lets each person foreground or tuck away sections in their own view — capabilities are never hidden from existence, only from clutter.
 - Collective workspaces with discussion, bulletins, publications, living documents, members, petitions, governance settings, contribution categories, trusted providers, responsibilities, and concerns.
 - Project workspaces with their own discussion, library, members (with join requests), petitions, and contribution categories. Project-internal governance is scoped to active project members rather than host-collective membership.
 - Responsibility workspaces for group-accountable roles, including holders, volunteering, resignation, discussion, and library material.
 - Petition-backed governance flows for membership sponsorship, project proposals, project join requests, responsibility volunteering, living document revisions, archival decisions, emergency declarations, contribution categories, and trusted provider status.
 - Coalitions: multi-collective federation spaces where each collective retains its own membership and governance. Coalition proposals (joining, departing, removal, host-adoption) run as bundled petitions requiring separate approval by each member collective.
-- Governance temperature signals across 16 categories, with resolved thresholds and petition durations visible in the UI.
+- Shared calendars and coordination events (meetings and workshops) spanning collectives, projects, responsibilities, coalitions, and personal plans, with interest and RSVP.
+- Governance temperature signals across 17 categories, with resolved thresholds and petition durations visible in the UI.
 - Node feedback inbox for surfacing routing activity and coordination signals to node hosts.
 - A public plain-language guide page explaining core concepts, governance, and how to get started.
 - PostgreSQL persistence through Prisma, action logging, privacy envelope primitives, and federation/plugin-ready schema foundations.

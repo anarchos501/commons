@@ -18,7 +18,7 @@ Commons currently lets communities:
 - Propose projects through host-collective governance, then let active project members govern project-internal decisions. Project join requests are approved by existing members.
 - Volunteer for collective responsibilities and confirm responsibility assignments through petitions.
 - Form coalitions — multi-collective spaces where each collective keeps its own members and governance. Coalition proposals run as bundled petitions requiring separate approval from each member collective.
-- Use governance temperature signals across 16 categories to affect displayed thresholds and petition durations.
+- Use governance temperature signals across 17 categories to affect displayed thresholds and petition durations.
 - Declare emergency periods through petitions and show active emergency periods in the governance surface.
 - File and review accountability concerns where appropriate responsibilities are assigned.
 - View node feedback and routing activity in the node host inbox.
@@ -44,7 +44,7 @@ The goal is not production readiness. The goal is to test whether Commons makes 
 - Sponsor a pending membership application.
 - Support, withdraw support from, and explicitly evaluate petitions.
 - Propose a project and approve it through collective governance.
-- Adjust governance temperature signals across the 16 categories.
+- Adjust governance temperature signals across the 17 categories.
 - Declare an emergency and observe the active emergency period.
 
 **Coalitions**
