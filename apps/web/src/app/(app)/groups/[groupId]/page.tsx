@@ -16,7 +16,7 @@ import { MembersModule } from "./_modules/members";
 import { GovernanceModule } from "./_modules/governance";
 import { OverviewModule } from "./_modules/overview";
 import { CapabilityMap } from "../../../../components/shared/CapabilityMap";
-import { DisclosureBookmarkFallback } from "./_modules/DisclosureBookmarkFallback";
+import { DisclosureBookmarkFallback } from "../../../../components/shared/DisclosureBookmarkFallback";
 import { getActiveParticipantCount } from "../../../../lib/participation";
 import { runGroupVisitEffects } from "../../../../lib/group-visit";
 import { hasActiveEligibleAssignment } from "../../../../lib/responsibilities";
@@ -57,7 +57,7 @@ import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
 import { submitEvent, setInterest, cancelEvent, getViewerSpaces } from "../../../../lib/events";
 import { getUiDisclosurePreference, resolveEffectiveVisibility } from "../../../../lib/ui-disclosure";
 import { resolveGroupView } from "../../../../lib/group-view";
-import { isModuleId } from "../../../../lib/group-modules";
+import { isModuleId, MODULE_IDS } from "../../../../lib/group-modules";
 import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
 import type { EventInterestLevel } from "../../../../generated/prisma/enums";
 
@@ -155,7 +155,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
       <GroupContextSync syncAction={syncGroupContext} />
-      <DisclosureBookmarkFallback present={[...present]} />
+      <DisclosureBookmarkFallback present={[...present]} validIds={[...MODULE_IDS]} />
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
