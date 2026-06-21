@@ -4,6 +4,7 @@ import { EmptyState } from "../../../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../../../components/shared/FormWithNotice";
 import { LocalTime } from "../../../../../../components/shared/LocalTime";
 import { PetitionFilter } from "../../../../../../components/shared/PetitionFilter";
+import { PetitionDetails } from "../../../../../../components/shared/PetitionDetails";
 import { proposalFamilyLabel } from "../../../../../../lib/petition-evaluation";
 import type { PetitionFilterValue } from "../../../../../../lib/petitions";
 import { COMPACT_DATE } from "../_shared/format";
@@ -51,24 +52,7 @@ function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { 
           )}
         </div>
       </div>
-      <details className="mt-2 text-xs">
-        <summary className="cursor-pointer text-[var(--accent)] hover:underline">Details</summary>
-        <dl className="mt-2 grid gap-1 text-[var(--soft-text)]">
-          <div><p className="text-[var(--text)]">{petition.outcome}</p></div>
-          {petition.proposer && (
-            <div className="flex gap-2">
-              <dt className="shrink-0 text-[var(--muted)]">Proposed by</dt>
-              <dd>{petition.proposer}</dd>
-            </div>
-          )}
-          {petition.detailFields.map((field) => (
-            <div key={field.label} className="flex gap-2">
-              <dt className="shrink-0 text-[var(--muted)]">{field.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words">{field.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
+      <PetitionDetails outcome={petition.outcome} proposer={petition.proposer} fields={petition.detailFields} />
       <div className="mt-3 grid gap-2 text-xs text-[var(--muted)] sm:grid-cols-3">
         <p>{petition.supportCount} supporting</p>
         <p>{petition.requiredSupport} needed</p>

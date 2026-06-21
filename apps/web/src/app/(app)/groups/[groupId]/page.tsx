@@ -175,7 +175,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           scope="group"
           scopeId={groupId}
           eyebrow="This collective"
-          heading="Everything this collective can do"
+          heading="Choose what features are visible"
           intro="Every capability is one switch away. Showing a section adds its card to your page; hiding tucks it back here. Your choices only change your own view."
         />
       </div>

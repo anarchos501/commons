@@ -22,7 +22,7 @@ import { withdrawProjectJoinRequest } from "../../../lib/project-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString } from "../../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
 import { addNodePetitionSupport, addPetitionSupport } from "../../../lib/petitions";
-import { evaluateAndApplyPetition } from "../../../lib/petition-evaluation";
+import { evaluateAndApplyPetition, getPetitionDetail } from "../../../lib/petition-evaluation";
 import { resolveCurrentNode } from "../../../lib/node-context";
 import { getNodeParticipationStatus } from "../../../lib/node-governance";
 import { CollapsibleSection } from "../../../components/shared/CollapsibleSection";
@@ -186,7 +186,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           scope="home"
           scopeId="home"
           eyebrow="Your home"
-          heading="Everything you're part of"
+          heading="Choose what features are visible"
           intro="Every part of your life across spaces is one switch away. Showing a section adds its card to your home; hiding tucks it back here. Your choices only change your own view."
         />
 
@@ -273,56 +273,66 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           {/* Groups + Notifications + My Requests */}
           <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
-            {/* My Collectives */}
+            {/* My Collectives — full card for members; a slim Find/Create on-ramp at zero
+                collectives. `collectives` stays baseline (the way back home is always present),
+                but an empty membership becomes a useful on-ramp rather than an empty shell. */}
             {present.has("collectives") && (
-            <CollapsibleSection id="collectives" title="My Collectives" eyebrow="Your coordination spaces" storageKey="dashboard:collectives" className="bg-[var(--surface)] p-5 sm:p-6">
-              {data.myGroups.length > 0 ? (
-                <div className="space-y-3">
-                  {data.myGroups.map((g) => (
-                    <div key={g.groupId} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium text-[var(--text)]">{g.groupName}</p>
-                          {g.description && <p className="mt-0.5 text-xs text-[var(--muted)] line-clamp-2">{g.description}</p>}
+              data.myGroups.length > 0 ? (
+                <CollapsibleSection id="collectives" title="My Collectives" eyebrow="Your coordination spaces" storageKey="dashboard:collectives" className="bg-[var(--surface)] p-5 sm:p-6">
+                  <div className="space-y-3">
+                    {data.myGroups.map((g) => (
+                      <div key={g.groupId} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-[var(--text)]">{g.groupName}</p>
+                            {g.description && <p className="mt-0.5 text-xs text-[var(--muted)] line-clamp-2">{g.description}</p>}
+                          </div>
+                          <a
+                            href={`/groups/${g.groupId}`}
+                            className="btn-secondary shrink-0 border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+                          >
+                            Open
+                          </a>
                         </div>
-                        <a
-                          href={`/groups/${g.groupId}`}
-                          className="btn-secondary shrink-0 border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)]"
-                        >
-                          Open
-                        </a>
+                        <details className="mt-2">
+                          <summary className="cursor-pointer list-none text-xs text-amber-700 hover:text-amber-600 transition select-none">
+                            Leave collective
+                          </summary>
+                          <div className="mt-2 border border-[var(--border)] bg-[var(--subtle)] p-3">
+                            <p className="text-xs leading-5 text-[var(--soft-text)]">
+                              Leaving will end your membership in {g.groupName}. You will need to reapply if you want to rejoin.
+                            </p>
+                            <form action={leaveGroupAction} className="mt-3">
+                              <input type="hidden" name="groupId" value={g.groupId} />
+                              <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-600 transition">
+                                Confirm — leave {g.groupName}
+                              </button>
+                            </form>
+                          </div>
+                        </details>
                       </div>
-                      <details className="mt-2">
-                        <summary className="cursor-pointer list-none text-xs text-amber-700 hover:text-amber-600 transition select-none">
-                          Leave collective
-                        </summary>
-                        <div className="mt-2 border border-[var(--border)] bg-[var(--subtle)] p-3">
-                          <p className="text-xs leading-5 text-[var(--soft-text)]">
-                            Leaving will end your membership in {g.groupName}. You will need to reapply if you want to rejoin.
-                          </p>
-                          <form action={leaveGroupAction} className="mt-3">
-                            <input type="hidden" name="groupId" value={g.groupId} />
-                            <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-600 transition">
-                              Confirm — leave {g.groupName}
-                            </button>
-                          </form>
-                        </div>
-                      </details>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 border-t border-[var(--border)] pt-4 flex items-center gap-4">
+                    <Link href="/groups" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                      Find Collectives →
+                    </Link>
+                    <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                      Create Collective →
+                    </Link>
+                  </div>
+                </CollapsibleSection>
               ) : (
-                <EmptyState text="You are not yet a member of any collective." />
-              )}
-              <div className="mt-4 border-t border-[var(--border)] pt-4 flex items-center gap-4">
-                <Link href="/groups" className="text-xs font-medium text-[var(--accent)] hover:underline">
-                  Find Collectives →
-                </Link>
-                <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
-                  Create Collective →
-                </Link>
-              </div>
-            </CollapsibleSection>
+                <div id="collectives" className="bg-[var(--surface)] p-5 sm:p-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <span className="text-sm text-[var(--soft-text)]">Not part of a collective yet?</span>
+                  <Link href="/groups" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                    Find Collectives →
+                  </Link>
+                  <Link href="/groups/new" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                    Create Collective →
+                  </Link>
+                </div>
+              )
             )}
 
             {/* Notifications */}
@@ -662,7 +672,9 @@ async function getDashboardData(
       }),
       memberGroupIds.length > 0
         ? prisma.petition.findMany({
-            where: { groupId: { in: memberGroupIds }, status: "open" },
+            // scopeType:"group" so project petitions (which carry the host collective's groupId
+            // for back-compat) don't leak into a member's notifications / active threads.
+            where: { groupId: { in: memberGroupIds }, scopeType: "group", status: "open" },
             include: {
               group: { select: { id: true, name: true } },
               support: {
@@ -874,7 +886,7 @@ async function getDashboardData(
     const viewerSpaces = await getViewerSpaces(prisma, accountId);
     const [filedConcernCount, partyPetitionCount, hasCatchUp, prefs] = await Promise.all([
       prisma.report.count({ where: { reportedByAccountId: accountId } }),
-      prisma.petition.count({ where: { support: { some: { membership: { accountId } } } } }),
+      prisma.petition.count({ where: { support: { some: { membership: { accountId } } }, scopeType: "group" } }),
       hasCatchUpSince(prisma, accountId),
       getUiDisclosurePreference(prisma, accountId),
     ]);
@@ -898,6 +910,28 @@ async function getDashboardData(
 
     // Active strip: YOUR OWN live commitments with a next step — drawn only from already-loaded
     // data (about-you items, requests you accepted, petitions you're party to). No counts/urgency.
+    // Petition rows carry expandable details (feedback #2), resolved via getPetitionDetail.
+    const petitionThreads = await Promise.all(
+      petitions
+        .filter((p) => p.support.length > 0)
+        .map(async (p) => {
+          const d = await getPetitionDetail(prisma, {
+            subjectType: p.subjectType,
+            subjectId: p.subjectId,
+            status: p.status,
+            createdByMembershipId: p.createdByMembershipId,
+            createdByAccountId: p.createdByAccountId,
+          });
+          return {
+            key: `pet:${p.id}`,
+            kind: "petition" as const,
+            label: `${capitalize(p.category)} petition`,
+            detail: p.group?.name ?? null,
+            href: `/groups/${p.groupId ?? p.scopeId}#petitions`,
+            details: { outcome: d.outcome, proposer: d.proposer, fields: d.fields },
+          };
+        }),
+    );
     const activeThreads = [
       ...derived.items
         .filter((n) => n.category === "aboutYou")
@@ -905,9 +939,7 @@ async function getDashboardData(
       ...acceptedRequests
         .filter((r) => r.requestStatusLabel !== "Fulfilled")
         .map((r) => ({ key: `req:${r.routeId}`, kind: "request" as const, label: r.serviceType === "custom" ? `Custom request${r.customNeed ? `: ${r.customNeed}` : ""}` : capitalize(r.serviceType), detail: r.groupName, href: `/requests/accepted/${r.routeId}` })),
-      ...petitions
-        .filter((p) => p.support.length > 0)
-        .map((p) => ({ key: `pet:${p.id}`, kind: "petition" as const, label: `${capitalize(p.category)} petition`, detail: p.group?.name ?? null, href: `/groups/${p.groupId ?? p.scopeId}#petitions` })),
+      ...petitionThreads,
     ];
 
     // Heavy person-centric thread slices — loaded only when their card is present.
@@ -916,12 +948,45 @@ async function getDashboardData(
       ? await prisma.project.findMany({ where: { id: { in: projectIds } }, select: { id: true, name: true, status: true }, orderBy: { name: "asc" } })
       : [];
     const myPetitions = present.has("my-petitions")
-      ? (await prisma.petition.findMany({
-          where: { support: { some: { membership: { accountId } } }, status: "open" },
-          select: { id: true, category: true, groupId: true, scopeId: true, closesAt: true, group: { select: { name: true } } },
-          orderBy: { closesAt: "asc" },
-          take: 25,
-        })).map((p) => ({ id: p.id, label: `${capitalize(p.category)} petition`, groupName: p.group?.name ?? null, href: `/groups/${p.groupId ?? p.scopeId}#petitions`, closesAtIso: p.closesAt.toISOString() }))
+      ? await Promise.all(
+          (await prisma.petition.findMany({
+            // scopeType:"group" mirrors the group page — your group-petition involvement only.
+            where: { support: { some: { membership: { accountId } } }, scopeType: "group", status: "open" },
+            select: {
+              id: true, category: true, groupId: true, scopeId: true, closesAt: true,
+              subjectType: true, subjectId: true, status: true,
+              createdByMembershipId: true, createdByAccountId: true,
+              group: { select: { name: true } },
+              createdBy: { select: { accountId: true } },
+              support: { where: { membership: { accountId } }, select: { id: true }, take: 1 },
+            },
+            orderBy: { closesAt: "asc" },
+            take: 25,
+          })).map(async (p) => {
+            const d = await getPetitionDetail(prisma, {
+              subjectType: p.subjectType,
+              subjectId: p.subjectId,
+              status: p.status,
+              createdByMembershipId: p.createdByMembershipId,
+              createdByAccountId: p.createdByAccountId,
+            });
+            // Involvement computed positively (not by elimination): proposer if you created it,
+            // supporter if you have a support record, otherwise no badge.
+            const isProposer = p.createdBy?.accountId === accountId || p.createdByAccountId === accountId;
+            const involvement = isProposer ? "You proposed" : p.support.length > 0 ? "You support" : null;
+            return {
+              id: p.id,
+              label: `${capitalize(p.category)} petition`,
+              groupName: p.group?.name ?? null,
+              href: `/groups/${p.groupId ?? p.scopeId}#petitions`,
+              closesAtIso: p.closesAt.toISOString(),
+              involvement,
+              outcome: d.outcome,
+              proposer: d.proposer,
+              detailFields: d.fields,
+            };
+          }),
+        )
       : [];
     const myConcerns = present.has("my-concerns")
       ? (await prisma.report.findMany({
