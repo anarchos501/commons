@@ -1,5 +1,5 @@
 import type { ModuleId, ModuleTier } from "../../../../../lib/group-modules";
-import { setDisclosureOverrideAction, setRevealAllAction } from "./_shared/disclosure-actions";
+import { setDisclosureOverrideAction, setRevealAllAction } from "../../../_shared/disclosure-actions";
 
 // The always-visible orientation panel: every capability this collective can do, present or not,
 // each one switch away. Disclosure foregrounds; it never hides existence — so the doors to power
@@ -19,7 +19,8 @@ export function RoomsMap({ cards, revealAll, groupId }: { cards: RoomsMapCard[];
           </p>
         </div>
         <form action={setRevealAllAction} className="shrink-0">
-          <input type="hidden" name="groupId" value={groupId} />
+          <input type="hidden" name="scope" value="group" />
+          <input type="hidden" name="scopeId" value={groupId} />
           <input type="hidden" name="revealAll" value={revealAll ? "false" : "true"} />
           <button type="submit" className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-1.5 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
             {revealAll ? "Minimal view" : "Show every section"}
@@ -37,9 +38,9 @@ export function RoomsMap({ cards, revealAll, groupId }: { cards: RoomsMapCard[];
               )}
             </div>
             <form action={setDisclosureOverrideAction} className="shrink-0">
-              <input type="hidden" name="groupId" value={groupId} />
-              <input type="hidden" name="moduleId" value={card.id} />
               <input type="hidden" name="scope" value="group" />
+              <input type="hidden" name="scopeId" value={groupId} />
+              <input type="hidden" name="moduleId" value={card.id} />
               <input type="hidden" name="value" value={card.present && !card.transient ? "hide" : "show"} />
               <button type="submit" className="border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
                 {card.transient ? "Keep showing" : card.present ? "Hide" : "Show"}
