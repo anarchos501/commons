@@ -33,17 +33,25 @@ export async function resolveParticipationThresholds(
  * Guest access via request token is NOT a Group Presence Event — callers must not
  * invoke this function for unauthenticated or token-only access paths.
  */
+export type GroupPresenceResult = {
+  reactivated: boolean; // the viewer returned from quiet/dormant to active on this visit
+  previousLastSeenAt: Date | null; // the watermark BEFORE this visit (for a "while you were away" digest)
+};
+
 export async function recordGroupPresence(
   prisma: PrismaClient,
   accountId: string,
   groupId: string,
-): Promise<void> {
+): Promise<GroupPresenceResult> {
   const membership = await prisma.groupMembership.findUnique({
     where: { accountId_groupId: { accountId, groupId } },
     select: { id: true, status: true, participationStatus: true, lastSeenAt: true },
   });
 
-  if (!membership || membership.status !== "active") return;
+  if (!membership || membership.status !== "active") return { reactivated: false, previousLastSeenAt: null };
+
+  // Captured BEFORE any update below, so a caller can summarise what changed since the last visit.
+  const previousLastSeenAt = membership.lastSeenAt ?? null;
 
   // Reactivation: always immediate, bypasses the rate limit.
   // RFC-004: returning to Active restores participation only.
@@ -61,18 +69,19 @@ export async function recordGroupPresence(
       targetId: membership.id,
       metadata: { previousStatus: membership.participationStatus },
     });
-    return;
+    return { reactivated: true, previousLastSeenAt };
   }
 
   // Rate-limit routine presence writes
   if (membership.lastSeenAt && Date.now() - membership.lastSeenAt.getTime() < SEEN_REFRESH_INTERVAL_MS) {
-    return;
+    return { reactivated: false, previousLastSeenAt };
   }
 
   await prisma.groupMembership.update({
     where: { accountId_groupId: { accountId, groupId } },
     data: { lastSeenAt: new Date() },
   });
+  return { reactivated: false, previousLastSeenAt };
 }
 
 /**

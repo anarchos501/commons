@@ -1,25 +1,42 @@
-import type { ModuleId, ModuleTier } from "../../../../../lib/group-modules";
-import { setDisclosureOverrideAction, setRevealAllAction } from "./_shared/disclosure-actions";
+import type { ModuleTier } from "../../lib/disclosure-view-core";
+import { setDisclosureOverrideAction, setRevealAllAction } from "../../app/(app)/_shared/disclosure-actions";
 
-// The always-visible orientation panel: every capability this collective can do, present or not,
-// each one switch away. Disclosure foregrounds; it never hides existence — so the doors to power
-// (governance, petitions, concerns) and latent authority (stewardship, recall) always live here.
+// The always-visible orientation panel: every capability a surface can offer, present or not, each
+// one switch away. Disclosure foregrounds; it never hides existence — so the doors to power and any
+// latent authority always live here. Scope-generic: the group workspace renders it with collective
+// copy (scope="group"), the person-centric home with home copy (scope="home"). The switches are
+// plain <form action> posts (no client JS) to the shared scope-aware disclosure actions.
 
-export type RoomsMapCard = { id: ModuleId; label: string; tier: ModuleTier; present: boolean; transient: boolean };
+export type CapabilityMapCard = { id: string; label: string; tier: ModuleTier; present: boolean; transient: boolean };
 
-export function RoomsMap({ cards, revealAll, groupId }: { cards: RoomsMapCard[]; revealAll: boolean; groupId: string }) {
+export function CapabilityMap({
+  cards,
+  revealAll,
+  scope,
+  scopeId,
+  eyebrow,
+  heading,
+  intro,
+}: {
+  cards: CapabilityMapCard[];
+  revealAll: boolean;
+  scope: "group" | "home";
+  scopeId: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+}) {
   return (
     <section className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">This collective</span>
-          <h2 className="mt-1 text-lg font-bold tracking-tight text-[var(--text)]">Everything this collective can do</h2>
-          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
-            Every capability is one switch away. Showing a section adds its card to your page; hiding tucks it back here. Your choices only change your own view.
-          </p>
+          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{eyebrow}</span>
+          <h2 className="mt-1 text-lg font-bold tracking-tight text-[var(--text)]">{heading}</h2>
+          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{intro}</p>
         </div>
         <form action={setRevealAllAction} className="shrink-0">
-          <input type="hidden" name="groupId" value={groupId} />
+          <input type="hidden" name="scope" value={scope} />
+          <input type="hidden" name="scopeId" value={scopeId} />
           <input type="hidden" name="revealAll" value={revealAll ? "false" : "true"} />
           <button type="submit" className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-1.5 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
             {revealAll ? "Minimal view" : "Show every section"}
@@ -37,9 +54,9 @@ export function RoomsMap({ cards, revealAll, groupId }: { cards: RoomsMapCard[];
               )}
             </div>
             <form action={setDisclosureOverrideAction} className="shrink-0">
-              <input type="hidden" name="groupId" value={groupId} />
+              <input type="hidden" name="scope" value={scope} />
+              <input type="hidden" name="scopeId" value={scopeId} />
               <input type="hidden" name="moduleId" value={card.id} />
-              <input type="hidden" name="scope" value="group" />
               <input type="hidden" name="value" value={card.present && !card.transient ? "hide" : "show"} />
               <button type="submit" className="border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
                 {card.transient ? "Keep showing" : card.present ? "Hide" : "Show"}

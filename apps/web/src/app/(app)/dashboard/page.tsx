@@ -46,10 +46,22 @@ import { NotificationPreferencesForm } from "../../../components/shared/Notifica
 import { NotificationFilters } from "../../../components/shared/NotificationFilters";
 import { DashboardCalendar } from "../../../components/shared/DashboardCalendar";
 import { loadDashboardCalendarData } from "../../../lib/calendar-data";
-import { submitEvent, setInterest, cancelEvent, setCalendarFilterPreferences } from "../../../lib/events";
+import { submitEvent, setInterest, cancelEvent, setCalendarFilterPreferences, getViewerSpaces } from "../../../lib/events";
 import { parseEventSubmission, submitEventFailureMessage } from "../../../lib/event-form";
 import type { FormState } from "../../../components/shared/form-state";
 import type { EventInterestLevel } from "../../../generated/prisma/enums";
+import { getUiDisclosurePreference, resolveEffectiveVisibility } from "../../../lib/ui-disclosure";
+import { resolveHomeView } from "../../../lib/home-view";
+import { isHomeModuleId, HOME_MODULE_IDS } from "../../../lib/home-modules";
+import { hasCatchUpSince, getCatchUpDigest } from "../../../lib/catch-up";
+import { CapabilityMap } from "../../../components/shared/CapabilityMap";
+import { DisclosureBookmarkFallback } from "../../../components/shared/DisclosureBookmarkFallback";
+import { ActiveThreads } from "./_modules/ActiveThreads";
+import { CatchUp } from "./_modules/CatchUp";
+import { MyProjects } from "./_modules/MyProjects";
+import { MyPetitions } from "./_modules/MyPetitions";
+import { MyConcerns } from "./_modules/MyConcerns";
+import { MySeats } from "./_modules/MySeats";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +86,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
     groupId: typeof params.notifGroup === "string" ? params.notifGroup : null,
   };
   const myReqView: "made" | "accepted" = params.myReqView === "accepted" ? "accepted" : "made";
-  const data = await getDashboardData(session.accountId, session.activeGroupId ?? null, notifFilters);
+  const section = typeof params.section === "string" && isHomeModuleId(params.section) ? params.section : null;
+  const data = await getDashboardData(session.accountId, session.activeGroupId ?? null, notifFilters, section);
+  const present = data.present;
   const calendar = await loadDashboardCalendarData(session.accountId);
   const accountId = session.accountId;
 
@@ -163,22 +177,41 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           </div>
         </div>
 
-        <DashboardCalendar
-          events={calendar.events}
-          myInterests={calendar.myInterests}
-          filters={calendar.filters}
-          currentAccountId={accountId}
-          submitAction={submitDashboardEventAction}
-          interestAction={eventInterestAction}
-          cancelAction={eventCancelAction}
-          filterAction={setCalendarFilterAction}
+        <DisclosureBookmarkFallback present={[...present]} validIds={[...HOME_MODULE_IDS]} />
+
+        {/* ── Home map: everything you're part of, present or one switch away ── */}
+        <CapabilityMap
+          cards={data.disclosureCards}
+          revealAll={data.revealAll}
+          scope="home"
+          scopeId="home"
+          eyebrow="Your home"
+          heading="Everything you're part of"
+          intro="Every part of your life across spaces is one switch away. Showing a section adds its card to your home; hiding tucks it back here. Your choices only change your own view."
         />
+
+        {present.has("active-threads") && <ActiveThreads items={data.activeThreads} />}
+        {present.has("catch-up") && <CatchUp digests={data.catchUp} />}
+
+        {present.has("calendar") && (
+          <DashboardCalendar
+            events={calendar.events}
+            myInterests={calendar.myInterests}
+            filters={calendar.filters}
+            currentAccountId={accountId}
+            submitAction={submitDashboardEventAction}
+            interestAction={eventInterestAction}
+            cancelAction={eventCancelAction}
+            filterAction={setCalendarFilterAction}
+          />
+        )}
 
         <div className="flex flex-col gap-6">
 
           {/* Request + Offer */}
           <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
+            {present.has("request") && (
             <CollapsibleSection id="request" title="Request Support" eyebrow="Ask only what is needed" storageKey="dashboard:request" className="bg-[var(--surface)] p-5 sm:p-6">
               <RequestHelpForm
                 groupOptions={data.groupOptions}
@@ -186,7 +219,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 action={requestHelpAction}
               />
             </CollapsibleSection>
+            )}
 
+            {present.has("offer") && (
             <CollapsibleSection id="offer" title="Offer Support" eyebrow="Set your own boundaries" storageKey="dashboard:offer" className="bg-[var(--surface)] p-5 sm:p-6">
               <form action={offerHelpAction} className="space-y-5">
                 <p className="text-sm leading-6 text-[var(--soft-text)]">
@@ -231,6 +266,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 <SubmitButton variant="secondary">Save what I can offer</SubmitButton>
               </form>
             </CollapsibleSection>
+            )}
 
           </div>
 
@@ -238,7 +274,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
             {/* My Collectives */}
-            <CollapsibleSection id="groups" title="My Collectives" eyebrow="Your coordination spaces" storageKey="dashboard:groups" className="bg-[var(--surface)] p-5 sm:p-6">
+            {present.has("collectives") && (
+            <CollapsibleSection id="collectives" title="My Collectives" eyebrow="Your coordination spaces" storageKey="dashboard:collectives" className="bg-[var(--surface)] p-5 sm:p-6">
               {data.myGroups.length > 0 ? (
                 <div className="space-y-3">
                   {data.myGroups.map((g) => (
@@ -286,9 +323,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </Link>
               </div>
             </CollapsibleSection>
+            )}
 
             {/* Notifications */}
-            <CollapsibleSection id="routes" title="Notifications" eyebrow="Requests and updates" storageKey="dashboard:routes" className="bg-[var(--surface)] p-5 sm:p-6">
+            {present.has("notifications") && (
+            <CollapsibleSection id="notifications" title="Notifications" eyebrow="Requests and updates" storageKey="dashboard:notifications" className="bg-[var(--surface)] p-5 sm:p-6">
               <NotificationFilters groups={data.myGroups.map((g) => ({ id: g.groupId, name: g.groupName }))} />
 
               {/* Per-category "N new · Mark read" for the read-state categories */}
@@ -347,9 +386,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 </div>
               </details>
             </CollapsibleSection>
+            )}
+
+            {/* My projects */}
+            {present.has("my-projects") && <MyProjects projects={data.myProjects} />}
 
             {/* My Requests */}
-            {data.myGroups.length > 0 && (
+            {present.has("my-requests") && (
               <CollapsibleSection id="my-requests" title="My Requests" eyebrow="Requests you made and accepted" storageKey="dashboard:my-requests" className="bg-[var(--surface)] p-5 sm:p-6">
                 {/* Toggle: requests you made vs. requests you've accepted from others */}
                 <div className="mb-4 inline-flex border border-[var(--border)] text-xs font-medium">
@@ -487,9 +530,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
               </CollapsibleSection>
             )}
 
+            {/* My petitions / concerns / seats */}
+            {present.has("my-petitions") && <MyPetitions petitions={data.myPetitions} />}
+            {present.has("my-concerns") && <MyConcerns concerns={data.myConcerns} />}
+            {present.has("my-seats") && <MySeats seats={data.mySeats} />}
+
             {/* My Pending Applications */}
-            {data.pendingApplications.length > 0 && (
-              <CollapsibleSection id="my-applications" title="My Pending Applications" eyebrow="Membership requests you submitted" storageKey="dashboard:my-applications" className="bg-[var(--surface)] p-5 sm:p-6">
+            {present.has("applications") && (
+              <CollapsibleSection id="applications" title="My Pending Applications" eyebrow="Membership requests you submitted" storageKey="dashboard:applications" className="bg-[var(--surface)] p-5 sm:p-6">
                 <ul className="space-y-3">
                   {data.pendingApplications.map((app) => (
                     <li key={`${app.kind}:${app.id}`} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -570,6 +618,7 @@ async function getDashboardData(
   accountId: string,
   groupId: string | null,
   notifFilters: { unreadOnly: boolean; type: string; groupId: string | null },
+  section: string | null,
 ) {
   const prisma = createPrismaClient();
   try {
@@ -819,6 +868,78 @@ async function getDashboardData(
       ...pendingProjectApps.map((m) => ({ kind: "project" as const, id: m.projectId, name: m.project.name, appliedIso: m.joinedAt.toISOString() })),
     ];
 
+    // ── Progressive disclosure: cheap cross-space facts → resolve which home cards are PRESENT, so
+    // the heavy person-centric thread slices below load only when their card is shown. Reads
+    // relational facts + the ?section signal + the user's switches — never participation.
+    const viewerSpaces = await getViewerSpaces(prisma, accountId);
+    const [filedConcernCount, partyPetitionCount, hasCatchUp, prefs] = await Promise.all([
+      prisma.report.count({ where: { reportedByAccountId: accountId } }),
+      prisma.petition.count({ where: { support: { some: { membership: { accountId } } } } }),
+      hasCatchUpSince(prisma, accountId),
+      getUiDisclosurePreference(prisma, accountId),
+    ]);
+    const view = resolveHomeView(
+      {
+        viewer: viewerSpaces,
+        hasMadeRequests: myRequests.length > 0 || acceptedRequests.length > 0,
+        partyToPetition: partyPetitionCount > 0,
+        filedConcern: filedConcernCount > 0,
+        hasPendingApplications: pendingApplications.length > 0,
+        hasCatchUp,
+      },
+      { section },
+      prefs,
+    );
+    const present = view.present;
+    const disclosureCards = view.cards.map((card) => ({
+      ...card,
+      transient: card.present && resolveEffectiveVisibility(card.id, "home", view.foreground, prefs) === "hide",
+    }));
+
+    // Active strip: YOUR OWN live commitments with a next step — drawn only from already-loaded
+    // data (about-you items, requests you accepted, petitions you're party to). No counts/urgency.
+    const activeThreads = [
+      ...derived.items
+        .filter((n) => n.category === "aboutYou")
+        .map((n) => ({ key: `about:${n.id}`, kind: "about" as const, label: n.title, detail: n.detail, href: n.href ?? "#routes" })),
+      ...acceptedRequests
+        .filter((r) => r.requestStatusLabel !== "Fulfilled")
+        .map((r) => ({ key: `req:${r.routeId}`, kind: "request" as const, label: r.serviceType === "custom" ? `Custom request${r.customNeed ? `: ${r.customNeed}` : ""}` : capitalize(r.serviceType), detail: r.groupName, href: `/requests/accepted/${r.routeId}` })),
+      ...petitions
+        .filter((p) => p.support.length > 0)
+        .map((p) => ({ key: `pet:${p.id}`, kind: "petition" as const, label: `${capitalize(p.category)} petition`, detail: p.group?.name ?? null, href: `/groups/${p.groupId ?? p.scopeId}#petitions` })),
+    ];
+
+    // Heavy person-centric thread slices — loaded only when their card is present.
+    const projectIds = [...viewerSpaces.projectIds];
+    const myProjects = present.has("my-projects") && projectIds.length
+      ? await prisma.project.findMany({ where: { id: { in: projectIds } }, select: { id: true, name: true, status: true }, orderBy: { name: "asc" } })
+      : [];
+    const myPetitions = present.has("my-petitions")
+      ? (await prisma.petition.findMany({
+          where: { support: { some: { membership: { accountId } } }, status: "open" },
+          select: { id: true, category: true, groupId: true, scopeId: true, closesAt: true, group: { select: { name: true } } },
+          orderBy: { closesAt: "asc" },
+          take: 25,
+        })).map((p) => ({ id: p.id, label: `${capitalize(p.category)} petition`, groupName: p.group?.name ?? null, href: `/groups/${p.groupId ?? p.scopeId}#petitions`, closesAtIso: p.closesAt.toISOString() }))
+      : [];
+    const myConcerns = present.has("my-concerns")
+      ? (await prisma.report.findMany({
+          where: { reportedByAccountId: accountId },
+          select: { id: true, subject: true, status: true, groupId: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 25,
+        })).map((r) => ({ id: r.id, subject: r.subject, status: r.status, href: `/groups/${r.groupId}#concerns`, createdAtIso: r.createdAt.toISOString() }))
+      : [];
+    const mySeats = present.has("my-seats")
+      ? (await prisma.responsibilityAssignment.findMany({
+          where: { endedAt: null, expiresAt: { gt: new Date() }, membership: { accountId, status: "active" } },
+          select: { id: true, expiresAt: true, responsibility: { select: { type: true, groupId: true, group: { select: { name: true } } } } },
+          orderBy: { expiresAt: "asc" },
+        })).map((a) => ({ id: a.id, type: a.responsibility.type, groupName: a.responsibility.group.name, href: `/groups/${a.responsibility.groupId}#responsibilities`, expiresAtIso: a.expiresAt.toISOString() }))
+      : [];
+    const catchUp = present.has("catch-up") ? await getCatchUpDigest(prisma, accountId) : [];
+
     return {
       account,
       myGroups: myGroupMemberships.map((m) => ({
@@ -837,6 +958,17 @@ async function getDashboardData(
       notifPrefs,
       myRequests,
       pendingApplications,
+      // progressive disclosure
+      view,
+      present,
+      revealAll: prefs.revealAll,
+      disclosureCards,
+      activeThreads,
+      myProjects,
+      myPetitions,
+      myConcerns,
+      mySeats,
+      catchUp,
     };
   } finally {
     await prisma.$disconnect();

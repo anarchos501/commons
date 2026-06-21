@@ -1,5 +1,6 @@
 import { MODULE_IDS, BASELINE_MODULES, MODULE_LABELS, moduleTier, isModuleId, type ModuleId, type ModuleTier } from "./group-modules";
-import { resolveEffectiveVisibility, type UiDisclosurePrefs } from "./ui-disclosure";
+import { type UiDisclosurePrefs } from "./ui-disclosure";
+import { computePresentAndCards } from "./disclosure-view-core";
 import type { ViewerSpaces } from "./events";
 
 // Pure resolver for the group workspace's progressive disclosure. Separates *what can exist*
@@ -81,15 +82,14 @@ export function resolveGroupView(inputs: GroupViewInputs, signals: GroupSearchSi
   // module, but the module — and its propose affordance — is always offerable in the map).
   const possible = MODULE_IDS;
   const foreground = computeForeground(inputs, signals);
-  const present = new Set<ModuleId>();
-  for (const id of MODULE_IDS) {
-    if (resolveEffectiveVisibility(id, inputs.groupId, foreground, prefs, signals.section) === "show") present.add(id);
-  }
-  const cards: CapabilityCard[] = MODULE_IDS.map((id) => ({
-    id,
-    label: MODULE_LABELS[id],
-    tier: moduleTier(id),
-    present: present.has(id),
-  }));
+  const { present, cards } = computePresentAndCards(
+    MODULE_IDS,
+    inputs.groupId,
+    foreground,
+    prefs,
+    signals.section,
+    MODULE_LABELS,
+    moduleTier,
+  );
   return { standing: inputs.standing, participation: inputs.participation, possible, foreground, present, cards };
 }
