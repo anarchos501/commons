@@ -15,17 +15,18 @@ import { PetitionsModule } from "./_modules/petitions";
 import { MembersModule } from "./_modules/members";
 import { GovernanceModule } from "./_modules/governance";
 import { OverviewModule } from "./_modules/overview";
-import { applyParticipationTransitions, getActiveParticipantCount, recordGroupPresence } from "../../../../lib/participation";
-import { expireStaleAssignments, hasActiveEligibleAssignment } from "../../../../lib/responsibilities";
-import { getCoverageStatus, autoCloseStaleWithdrawnConcerns } from "../../../../lib/concerns";
-import { expireStaleContentDrafts } from "../../../../lib/content-creation-drafts";
+import { RoomsMap } from "./_modules/RoomsMap";
+import { DisclosureBookmarkFallback } from "./_modules/DisclosureBookmarkFallback";
+import { getActiveParticipantCount } from "../../../../lib/participation";
+import { runGroupVisitEffects } from "../../../../lib/group-visit";
+import { hasActiveEligibleAssignment } from "../../../../lib/responsibilities";
+import { getCoverageStatus } from "../../../../lib/concerns";
 import {
   ensureGeneralDiscussion,
   listDiscussionMessages,
   listDiscussionThreads,
 } from "../../../../lib/discussions";
 import {
-  archiveStalePetitions,
   petitionFilterWhere,
   PETITION_FILTER_VALUES,
   type PetitionFilterValue,
@@ -40,7 +41,6 @@ import {
 import { getActiveGroupInvitePreview } from "../../../../lib/group-invites";
 import { computeAllParameterTemperatures } from "../../../../lib/governance-temperature";
 import {
-  resolveDuePetitionsForGroup,
   getPetitionDetail,
 } from "../../../../lib/petition-evaluation";
 import {
@@ -54,7 +54,10 @@ import { GroupContextSync } from "../../../../components/shared/GroupContextSync
 import { type FormState } from "../../../../components/shared/form-state";
 import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
 import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
-import { submitEvent, setInterest, cancelEvent } from "../../../../lib/events";
+import { submitEvent, setInterest, cancelEvent, getViewerSpaces } from "../../../../lib/events";
+import { getUiDisclosurePreference, resolveEffectiveVisibility } from "../../../../lib/ui-disclosure";
+import { resolveGroupView } from "../../../../lib/group-view";
+import { isModuleId } from "../../../../lib/group-modules";
 import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
 import type { EventInterestLevel } from "../../../../generated/prisma/enums";
 
@@ -67,6 +70,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   const sp = await searchParams;
   const notice = typeof sp.notice === "string" ? sp.notice : null;
   const selectedThreadId = typeof sp.discussionThread === "string" ? sp.discussionThread : null;
+  const section = typeof sp.section === "string" && isModuleId(sp.section) ? sp.section : null;
   const VALID_ACTIVITY_FILTERS = ["week", "month", "3month", "6month", "all"];
   const activityFilter =
     typeof sp.activityFilter === "string" && VALID_ACTIVITY_FILTERS.includes(sp.activityFilter)
@@ -81,7 +85,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   if (!session.accountId) redirect("/login");
 
 
-  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, activityFilter, petitionFilter);
+  const data = await getGroupSpaceData(session.accountId, groupId, selectedThreadId, section, activityFilter, petitionFilter);
+  const present = data.view.present;
 
   // Server action: update session.activeGroupId after confirmed membership.
   // Must be a server action (not inline code) because cookies can only be written
@@ -150,37 +155,46 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
       <GroupContextSync syncAction={syncGroupContext} />
+      <DisclosureBookmarkFallback present={[...present]} />
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
+      {/* ── Rooms map: everything this collective can do, present or one switch away ── */}
+      <div className="mt-4">
+        <RoomsMap cards={data.disclosureCards} revealAll={data.revealAll} groupId={groupId} />
+      </div>
+
       {/* ── Overview + Discussion (connected) ─────────────────────── */}
-      <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
-        <OverviewModule
-          group={group}
-          activeParticipantCount={data.activeParticipantCount}
-          currentParticipationStatus={currentMembership?.participationStatus ?? null}
-          groupContributions={data.groupContributions}
-          activityFilter={activityFilter}
-        />
+      <div className="mt-4 border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
+        {present.has("overview") && (
+          <OverviewModule
+            group={group}
+            activeParticipantCount={data.activeParticipantCount}
+            currentParticipationStatus={currentMembership?.participationStatus ?? null}
+            groupContributions={data.groupContributions}
+            activityFilter={activityFilter}
+          />
+        )}
 
-
-        <DiscussionModule data={data} isActive={isActive} groupId={groupId} />
+        {present.has("discussion") && <DiscussionModule data={data} isActive={isActive} groupId={groupId} />}
         {/* ══ Calendar ══════════════════════════════════════════════════ */}
-        <SpaceCalendar
-          sectionId="calendar"
-          storageKey={`group:${groupId}:section:calendar`}
-          events={calendar.events}
-          myInterests={calendar.myInterests}
-          audiences={calendar.audiences}
-          canCreate={isActive}
-          allowMeeting
-          currentAccountId={session.accountId}
-          submitAction={submitGroupEventAction}
-          interestAction={eventInterestAction}
-          cancelAction={eventCancelAction}
-        />
+        {present.has("calendar") && (
+          <SpaceCalendar
+            sectionId="calendar"
+            storageKey={`group:${groupId}:section:calendar`}
+            events={calendar.events}
+            myInterests={calendar.myInterests}
+            audiences={calendar.audiences}
+            canCreate={isActive}
+            allowMeeting
+            currentAccountId={session.accountId}
+            submitAction={submitGroupEventAction}
+            interestAction={eventInterestAction}
+            cancelAction={eventCancelAction}
+          />
+        )}
         {/* ══ Library ═══════════════════════════════════════════════════ */}
-        <LibraryModule data={data} isActive={isActive} groupId={groupId} />
+        {present.has("library") && <LibraryModule data={data} isActive={isActive} groupId={groupId} />}
       </div>{/* end top container */}
 
       <div className="mt-4 flex flex-col gap-6">
@@ -189,28 +203,32 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
         {/* ── Responsibilities ──────────────────────────────────────── */}
-        <ResponsibilitiesModule
-          responsibilityTypes={data.responsibilityTypes}
-          myResponsibilityTypes={data.myResponsibilityTypes}
-          currentMembershipId={currentMembership?.id}
-          isActive={isActive}
-          groupId={groupId}
-        />
+        {present.has("responsibilities") && (
+          <ResponsibilitiesModule
+            responsibilityTypes={data.responsibilityTypes}
+            myResponsibilityTypes={data.myResponsibilityTypes}
+            currentMembershipId={currentMembership?.id}
+            isActive={isActive}
+            groupId={groupId}
+          />
+        )}
 
         {/* ── Projects ──────────────────────────────────────────────── */}
-        <ProjectsModule projects={data.projects} isActive={isActive} groupId={groupId} />
+        {present.has("projects") && <ProjectsModule projects={data.projects} isActive={isActive} groupId={groupId} />}
 
-        <CoalitionsModule data={data} isActive={isActive} groupId={groupId} />
+        {present.has("coalitions") && <CoalitionsModule data={data} isActive={isActive} groupId={groupId} />}
 
-        <NodeStewardshipModule nodeState={data.nodeState} nodeGroupOptions={data.nodeGroupOptions} nodeId={group.nodeId} isActive={isActive} groupId={groupId} />
+        {present.has("node-stewardship") && <NodeStewardshipModule nodeState={data.nodeState} nodeGroupOptions={data.nodeGroupOptions} nodeId={group.nodeId} isActive={isActive} groupId={groupId} />}
 
         {/* ── Members ───────────────────────────────────────────────── */}
-        <MembersModule
-          data={data}
-          currentParticipationStatus={currentMembership?.participationStatus ?? null}
-          isActive={isActive}
-          groupId={groupId}
-        />
+        {present.has("members") && (
+          <MembersModule
+            data={data}
+            currentParticipationStatus={currentMembership?.participationStatus ?? null}
+            isActive={isActive}
+            groupId={groupId}
+          />
+        )}
 
         </div>{/* end Participation */}
 
@@ -218,31 +236,35 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
         <div className="border border-[var(--border)] divide-y divide-[var(--border)] flex flex-col">
 
         {/* ── Petitions ─────────────────────────────────────────────── */}
-        <PetitionsModule
-          petitions={data.petitions}
-          petitionFilter={petitionFilter}
-          isActive={isActive}
-          currentMembershipId={currentMembership?.id ?? null}
-          groupId={groupId}
-        />
+        {present.has("petitions") && (
+          <PetitionsModule
+            petitions={data.petitions}
+            petitionFilter={petitionFilter}
+            isActive={isActive}
+            currentMembershipId={currentMembership?.id ?? null}
+            groupId={groupId}
+          />
+        )}
 
         {/* ── Concerns ──────────────────────────────────────────────── */}
-        <ConcernsModule data={data} groupId={groupId} />
+        {present.has("concerns") && <ConcernsModule data={data} groupId={groupId} />}
 
         {/* ── Contribution Categories ───────────────────────────────── */}
-        <ContributionCategoriesModule data={data} isActive={isActive} groupId={groupId} />
+        {present.has("contribution-categories") && <ContributionCategoriesModule data={data} isActive={isActive} groupId={groupId} />}
 
         {/* ── Trusted Providers ─────────────────────────────────────── */}
-        <TrustedProvidersModule contributionCategories={data.contributionCategories} isActive={isActive} groupId={groupId} />
+        {present.has("trusted-providers") && <TrustedProvidersModule contributionCategories={data.contributionCategories} isActive={isActive} groupId={groupId} />}
 
         {/* ── Governance Settings ───────────────────────────────────── */}
-        <GovernanceModule
-          group={data.group}
-          activeEmergency={data.activeEmergency}
-          governanceSettings={data.governanceSettings}
-          isActive={isActive}
-          groupId={groupId}
-        />
+        {present.has("governance") && (
+          <GovernanceModule
+            group={data.group}
+            activeEmergency={data.activeEmergency}
+            governanceSettings={data.governanceSettings}
+            isActive={isActive}
+            groupId={groupId}
+          />
+        )}
 
         </div>{/* end Governance + Accountability */}
 
@@ -263,16 +285,12 @@ function activityFilterCutoff(filter: string): Date | null {
   return date;
 }
 
-async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, activityFilter = "month", petitionFilter: PetitionFilterValue = "all") {
+async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, section: string | null, activityFilter = "month", petitionFilter: PetitionFilterValue = "all") {
   const prisma = createPrismaClient();
   try {
-    await recordGroupPresence(prisma, accountId, groupId);
-    await applyParticipationTransitions(prisma, groupId);
-    await expireStaleAssignments(prisma, groupId);
-    await resolveDuePetitionsForGroup(prisma, groupId);
-    await archiveStalePetitions(prisma, groupId);
-    await autoCloseStaleWithdrawnConcerns(prisma, groupId);
-    await expireStaleContentDrafts(prisma, groupId);
+    // Presence + reactivation + maintenance sweeps — one named, ordered unit (see lib/group-visit.ts).
+    // MUST stay first: a quiet/dormant member's visit reactivates them before anything is read.
+    await runGroupVisitEffects(prisma, accountId, groupId);
 
     const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
 
@@ -292,6 +310,66 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       listNodeGroupLabelsForAccount(prisma, group.nodeId, accountId),
     ]);
 
+    // ── Progressive disclosure: cheap relational/existence facts → resolve which module cards
+    // are PRESENT, so the heavy CONTEXTUAL slices below load only when their card is shown.
+    // Reads relational facts + route signals + the user's switches — never participation.
+    const [
+      viewerSpaces,
+      groupProjectIdRows,
+      groupCoalitionIdRows,
+      bulletinCount,
+      publicationCount,
+      livingDocCount,
+      activeCategoryCount,
+      trustedProviderCount,
+      authoredThreadCount,
+      hasReviewerRole,
+    ] = await Promise.all([
+      getViewerSpaces(prisma, accountId),
+      prisma.project.findMany({ where: { hostings: { some: { groupId, endedAt: null } }, status: { not: "closed" }, archivedAt: null }, select: { id: true } }),
+      prisma.coalition.findMany({ where: { status: "active", memberships: { some: { groupId, endedAt: null } } }, select: { id: true } }),
+      prisma.bulletin.count({ where: { spaceType: "group", spaceId: groupId, archivedAt: null } }),
+      prisma.publication.count({ where: { spaceType: "group", spaceId: groupId, archivedAt: null } }),
+      prisma.livingDocument.count({ where: { spaceType: "group", spaceId: groupId, archivedAt: null } }),
+      prisma.contributionCategory.count({ where: { groupId, status: "active" } }),
+      prisma.trustedProviderStatus.count({ where: { groupId, status: "active" } }),
+      prisma.discussionThread.count({ where: { spaceType: "group", spaceId: groupId, createdByAccountId: accountId } }),
+      hasActiveEligibleAssignment(prisma, currentMembership.id, "reviewer"),
+    ]);
+    const groupProjectIds = new Set(groupProjectIdRows.map((p) => p.id));
+    const groupCoalitionIds = new Set(groupCoalitionIdRows.map((c) => c.id));
+    const hasCategories = activeCategoryCount > 0;
+    const prefs = await getUiDisclosurePreference(prisma, accountId);
+    const view = resolveGroupView(
+      {
+        groupId,
+        standing: "member",
+        participation: currentMembership.participationStatus as "active" | "quiet" | "dormant",
+        viewer: viewerSpaces,
+        groupResponsibilityIds: new Set(viewerSpaces.responsibilityIds),
+        groupProjectIds,
+        groupCoalitionIds,
+        hasReviewerRole,
+        filedConcern: false,
+        partyToOpenPetition: false,
+        authoredDiscussionThread: authoredThreadCount > 0,
+        hasCategories,
+        hasTrustedProviders: trustedProviderCount > 0,
+        hasLibraryContent: bulletinCount > 0 || publicationCount > 0 || livingDocCount > 0,
+        isNodeSteward: nodeState.stewardGroupId === groupId,
+      },
+      { section, discussionThread: selectedThreadId, petitionFilter },
+      prefs,
+    );
+    const present = view.present;
+    const categoriesPresent = present.has("contribution-categories") || present.has("trusted-providers");
+    // RoomsMap rows: every capability + its current presence; `transient` = present only because a
+    // ?section deep-link beats a stored hide (so the switch can offer "keep showing").
+    const disclosureCards = view.cards.map((card) => ({
+      ...card,
+      transient: card.present && resolveEffectiveVisibility(card.id, groupId, view.foreground, prefs) === "hide",
+    }));
+
     const [
       projects,
       coalitions,
@@ -304,7 +382,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       activeParticipantCount,
       pendingApplications,
     ] = await Promise.all([
-      prisma.project.findMany({
+      present.has("projects") ? prisma.project.findMany({
         where: {
           hostings: { some: { groupId, endedAt: null } },
           status: { not: "closed" },
@@ -318,8 +396,8 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           status: true,
           _count: { select: { hostings: { where: { endedAt: null } } } },
         },
-      }),
-      prisma.coalition.findMany({
+      }) : [],
+      present.has("coalitions") ? prisma.coalition.findMany({
         where: {
           status: "active",
           memberships: { some: { groupId, endedAt: null } },
@@ -331,24 +409,24 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           _count: { select: { memberships: { where: { endedAt: null } } } },
         },
         orderBy: { createdAt: "asc" },
-      }),
-      prisma.bulletin.findMany({
+      }) : [],
+      present.has("library") ? prisma.bulletin.findMany({
         where: { spaceType: "group", spaceId: groupId, archivedAt: null },
         include: { author: { select: { displayName: true } } },
         orderBy: { publishedAt: "desc" },
-      }),
-      prisma.publication.findMany({
+      }) : [],
+      present.has("library") ? prisma.publication.findMany({
         where: { spaceType: "group", spaceId: groupId, archivedAt: null },
         include: {
           creator: { select: { displayName: true } },
           _count: { select: { entries: { where: { archivedAt: null } } } },
         },
         orderBy: { createdAt: "desc" },
-      }),
-      prisma.livingDocument.findMany({
+      }) : [],
+      present.has("library") ? prisma.livingDocument.findMany({
         where: { spaceType: "group", spaceId: groupId, archivedAt: null },
         orderBy: { lastRevisedAt: "desc" },
-      }),
+      }) : [],
       prisma.report.findMany({
         where: { reportedByAccountId: accountId, groupId },
         orderBy: { createdAt: "desc" },
@@ -414,11 +492,11 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // form is not a discovery directory; a shared member bridges private–private coalitions by
     // initiating from within a group they belong to. (isPrivate = !(public || actor-is-member).)
     const eligibleCoalitionPartners =
-      currentMembership.participationStatus === "active"
+      present.has("coalitions") && currentMembership.participationStatus === "active"
         ? nodeGroupOptions.filter((candidate) => candidate.id !== groupId && !candidate.isPrivate)
         : [];
     const joinableCoalitions =
-      currentMembership.participationStatus === "active"
+      present.has("coalitions") && currentMembership.participationStatus === "active"
         ? await prisma.coalition.findMany({
             where: {
               nodeId: group.nodeId,
@@ -519,29 +597,29 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       ? await listDiscussionMessages(prisma, selectedThread.id)
       : [];
 
-    // Contribution categories
-    const contributionCategories = await getAvailableCategoriesForScope(prisma, { groupId });
-    const categoriesWithProviders = await Promise.all(
-      contributionCategories.map(async (cat) => ({
-        ...cat,
-        trustedProviders: await getTrustedProvidersForCategory(prisma, { categoryId: cat.id, groupId }),
-      })),
-    );
-
-    // Whether this group has any active contribution categories (used for auto-publicize warning)
-    const activeCategoryCount = await prisma.contributionCategory.count({
-      where: { groupId, status: "active" },
-    });
+    // Contribution categories (+ trusted providers) — present only when the Categories or
+    // Trusted Providers card is shown; otherwise these heavy slices don't load.
+    const contributionCategories = categoriesPresent ? await getAvailableCategoriesForScope(prisma, { groupId }) : [];
+    const categoriesWithProviders = categoriesPresent
+      ? await Promise.all(
+          contributionCategories.map(async (cat) => ({
+            ...cat,
+            trustedProviders: await getTrustedProvidersForCategory(prisma, { categoryId: cat.id, groupId }),
+          })),
+        )
+      : [];
 
     // Active invite preview (preview chars + expiry only — never the full token)
     const invitePreview = await getActiveGroupInvitePreview(prisma, groupId);
 
     // Projects for entity selector in category proposal form
-    const allProjects = await prisma.project.findMany({
-      where: { hostings: { some: { groupId, endedAt: null } }, status: "active", archivedAt: null },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    });
+    const allProjects = present.has("contribution-categories")
+      ? await prisma.project.findMany({
+          where: { hostings: { some: { groupId, endedAt: null } }, status: "active", archivedAt: null },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : [];
 
     // Members for trusted provider petition form and member roster
     const rawGroupMembers = await prisma.groupMembership.findMany({
@@ -592,8 +670,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
         .map((r) => r.type),
     );
 
-    // Reviewer queue
-    const hasReviewerRole = await hasActiveEligibleAssignment(prisma, currentMembership.id, "reviewer");
+    // Reviewer queue (hasReviewerRole computed above with the disclosure facts)
     const reviewerQueue = hasReviewerRole
       ? await prisma.report.findMany({
           where: {
@@ -648,6 +725,9 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       invitePreview,
       nodeState,
       nodeGroupOptions,
+      view,
+      revealAll: prefs.revealAll,
+      disclosureCards,
     };
   } finally {
     await prisma.$disconnect();

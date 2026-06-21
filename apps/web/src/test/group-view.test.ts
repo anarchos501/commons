@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveGroupView, computeForeground, type GroupViewInputs, type GroupSearchSignals } from "../lib/group-view";
-import { BASELINE_MODULES, MODULE_IDS, type ModuleId } from "../lib/group-modules";
-import type { UiDisclosurePrefs } from "../lib/ui-disclosure";
+import { BASELINE_MODULES, MODULE_IDS, MODULE_LABELS, type ModuleId } from "../lib/group-modules";
+import { resolveEffectiveVisibility, type UiDisclosurePrefs } from "../lib/ui-disclosure";
 import type { ViewerSpaces } from "../lib/events";
 
 // Pure-function guardrail tests — no DB needed.
@@ -120,4 +120,25 @@ test("revealAll shows all possible (still overridable per module)", () => {
   const v = resolveGroupView(inputs(), NO_SIGNALS, prefs);
   assert.ok(v.present.has("coalitions"), "revealAll shows a contextual card");
   assert.ok(!v.present.has("trusted-providers"), "explicit hide still wins over revealAll");
+});
+
+test("guardrail 4: no gamification — labels carry no unlock/progress/streak/level wording", () => {
+  const banned = /unlock|progress|streak|level|badge|points|achiev|reward|xp\b/i;
+  for (const id of MODULE_IDS) {
+    assert.ok(!banned.test(MODULE_LABELS[id]), `label for ${id} ("${MODULE_LABELS[id]}") must not gamify`);
+  }
+});
+
+test("RoomsMap transient flag: a ?section-shown hidden card is detectably hidden-in-settings", () => {
+  // The loader marks a card `transient` when it is present ONLY because ?section beats a stored
+  // hide — i.e. present with the section, but resolves to "hide" without it. Pin that formula.
+  const prefs: UiDisclosurePrefs = { revealAll: false, overrides: { g1: { library: "hide" } } };
+  const withSection = resolveGroupView(inputs(), { section: "library" }, prefs);
+  assert.ok(withSection.present.has("library"), "?section presents the hidden card");
+  const foreground = computeForeground(inputs(), { section: "library" });
+  // Without the section param, the effective visibility is still a hide → so it is transient.
+  assert.equal(resolveEffectiveVisibility("library", "g1", foreground, prefs), "hide");
+  // A genuinely-foregrounded card (not overridden) is NOT transient.
+  const fgPrefs: UiDisclosurePrefs = { revealAll: false, overrides: {} };
+  assert.equal(resolveEffectiveVisibility("petitions", "g1", computeForeground(inputs(), NO_SIGNALS), fgPrefs), "show");
 });
