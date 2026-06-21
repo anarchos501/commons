@@ -26,6 +26,18 @@ export type CatchUpGroupDigest = {
   total: number; // sum of the visible counts (excludes a null concern line)
 };
 
+/** A calm one-line summary of a group's digest, e.g. "2 petitions resolved · 3 new posts". */
+export function catchUpSummaryLine(d: CatchUpGroupDigest): string {
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const parts: string[] = [];
+  if (d.resolvedPetitions) parts.push(`${plural(d.resolvedPetitions, "petition")} resolved`);
+  if (d.newPosts) parts.push(plural(d.newPosts, "new post"));
+  if (d.routedToYou) parts.push(`${plural(d.routedToYou, "request")} routed to you`);
+  if (d.newMembers) parts.push(plural(d.newMembers, "new member"));
+  if (d.newConcerns) parts.push(plural(d.newConcerns, "new concern"));
+  return parts.join(" · ");
+}
+
 type Membership = { groupId: string; groupName: string; lastSeenAt: Date };
 
 // The viewer's active memberships that have a non-null watermark, with the group name.

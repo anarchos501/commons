@@ -19,6 +19,7 @@ import { CapabilityMap } from "../../../../components/shared/CapabilityMap";
 import { DisclosureBookmarkFallback } from "../../../../components/shared/DisclosureBookmarkFallback";
 import { getActiveParticipantCount } from "../../../../lib/participation";
 import { runGroupVisitEffects } from "../../../../lib/group-visit";
+import { summarizeGroupSinceLastSeen, catchUpSummaryLine } from "../../../../lib/catch-up";
 import { hasActiveEligibleAssignment } from "../../../../lib/responsibilities";
 import { getCoverageStatus } from "../../../../lib/concerns";
 import {
@@ -159,6 +160,13 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
       <AlphaNotice />
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
+      {data.catchUpBanner && (
+        <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">While you were away</p>
+          <p className="mt-1 text-sm text-[var(--soft-text)]">{catchUpSummaryLine(data.catchUpBanner)}</p>
+        </div>
+      )}
+
       {/* ── Rooms map: everything this collective can do, present or one switch away ── */}
       <div className="mt-4">
         <CapabilityMap
@@ -298,7 +306,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
   try {
     // Presence + reactivation + maintenance sweeps — one named, ordered unit (see lib/group-visit.ts).
     // MUST stay first: a quiet/dormant member's visit reactivates them before anything is read.
-    await runGroupVisitEffects(prisma, accountId, groupId);
+    const presence = await runGroupVisitEffects(prisma, accountId, groupId);
 
     const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
 
@@ -347,6 +355,19 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     const groupProjectIds = new Set(groupProjectIdRows.map((p) => p.id));
     const groupCoalitionIds = new Set(groupCoalitionIdRows.map((c) => c.id));
     const hasCategories = activeCategoryCount > 0;
+    // One-time "while you were away" digest at the reactivation moment, against the prior watermark
+    // captured before this visit reset it. Concern lines respect the viewer's reviewer entitlement.
+    const reactivationDigest =
+      presence.reactivated && presence.previousLastSeenAt
+        ? await summarizeGroupSinceLastSeen(prisma, {
+            accountId,
+            groupId,
+            groupName: group.name,
+            since: presence.previousLastSeenAt,
+            canSeeConcerns: hasReviewerRole,
+          })
+        : null;
+    const catchUpBanner = reactivationDigest && reactivationDigest.total > 0 ? reactivationDigest : null;
     const prefs = await getUiDisclosurePreference(prisma, accountId);
     const view = resolveGroupView(
       {
@@ -736,6 +757,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       view,
       revealAll: prefs.revealAll,
       disclosureCards,
+      catchUpBanner,
     };
   } finally {
     await prisma.$disconnect();
