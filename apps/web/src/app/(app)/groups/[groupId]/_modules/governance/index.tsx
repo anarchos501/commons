@@ -85,21 +85,6 @@ export function GovernanceModule({
           </div>
         )}
 
-        {/* Emergency period status + declaration */}
-        {activeEmergency ? (
-          <div className="border border-amber-400 bg-amber-50 p-3">
-            <p className="text-sm font-medium text-amber-900">Emergency period active</p>
-            <p className="mt-0.5 text-xs text-amber-700">
-              Expires <LocalTime value={activeEmergency.expiresAt.toISOString()} options={COMPACT_DATE} />
-            </p>
-          </div>
-        ) : isActive && (
-          <form action={declareEmergencyAction}>
-            <input type="hidden" name="groupId" value={groupId} />
-            <SubmitButton variant="secondary">Declare Emergency Period</SubmitButton>
-          </form>
-        )}
-
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
         {governanceSettings.map((setting) => (
           <div key={setting.category} className="bg-[var(--subtle)] p-3">
@@ -160,6 +145,32 @@ export function GovernanceModule({
           </div>
         ))}
         </div>
+
+        {/* Emergency declaration — placed last and behind a confirm gate so it's hard to
+            trigger by accident. Declaring opens an emergency petition (may activate quickly). */}
+        {activeEmergency ? (
+          <div className="border border-amber-400 bg-amber-50 p-3">
+            <p className="text-sm font-medium text-amber-900">Emergency period active</p>
+            <p className="mt-0.5 text-xs text-amber-700">
+              Expires <LocalTime value={activeEmergency.expiresAt.toISOString()} options={COMPACT_DATE} />
+            </p>
+          </div>
+        ) : isActive && (
+          <details className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+            <summary className="cursor-pointer list-none text-sm font-medium text-amber-700 hover:text-amber-600 transition select-none">
+              Declare emergency period…
+            </summary>
+            <div className="mt-2">
+              <p className="text-xs leading-5 text-[var(--soft-text)]">
+                This opens an emergency declaration petition, which can activate quickly once it reaches the approval threshold. Emergency periods temporarily change how the collective governs itself — only declare one if your collective genuinely needs it.
+              </p>
+              <form action={declareEmergencyAction} className="mt-3">
+                <input type="hidden" name="groupId" value={groupId} />
+                <SubmitButton variant="secondary">Confirm — declare emergency period</SubmitButton>
+              </form>
+            </div>
+          </details>
+        )}
       </div>
     </CollapsibleSection>
   );

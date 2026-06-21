@@ -27,7 +27,10 @@ export type SpacePetition = {
 
 function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { petition: SpacePetition; canSupport: boolean; groupId: string; currentMembershipId: string | null }) {
   const isOpen = petition.status === "open";
-  const canWithdraw = isOpen && currentMembershipId !== null && petition.createdByMembershipId === currentMembershipId;
+  const isProposer = currentMembershipId !== null && petition.createdByMembershipId === currentMembershipId;
+  const canWithdraw = isOpen && isProposer;
+  // How the viewer is involved — proposer takes precedence over supporter.
+  const involvement = isProposer ? "You proposed" : petition.supportedByCurrentMember ? "You support" : null;
   return (
     <article className="border border-[var(--border)] bg-[var(--subtle)] p-3">
       <div className="flex items-start justify-between gap-3">
@@ -37,9 +40,16 @@ function PetitionCard({ petition, canSupport, groupId, currentMembershipId }: { 
             <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{petition.subjectLabel}</p>
           )}
         </div>
-        <span className="shrink-0 border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
-          {petition.status}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium capitalize text-[var(--soft-text)]">
+            {petition.status}
+          </span>
+          {involvement && (
+            <span className="whitespace-nowrap border border-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">
+              {involvement}
+            </span>
+          )}
+        </div>
       </div>
       <details className="mt-2 text-xs">
         <summary className="cursor-pointer text-[var(--accent)] hover:underline">Details</summary>

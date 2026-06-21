@@ -28,43 +28,58 @@ export function CapabilityMap({
 }) {
   return (
     <section className="border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{eyebrow}</span>
-          <h2 className="mt-1 text-lg font-bold tracking-tight text-[var(--text)]">{heading}</h2>
-          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">{intro}</p>
-        </div>
-        <form action={setRevealAllAction} className="shrink-0">
-          <input type="hidden" name="scope" value={scope} />
-          <input type="hidden" name="scopeId" value={scopeId} />
-          <input type="hidden" name="revealAll" value={revealAll ? "false" : "true"} />
-          <button type="submit" className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-1.5 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
-            {revealAll ? "Minimal view" : "Show every section"}
-          </button>
-        </form>
-      </div>
-      <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
-        {cards.map((card) => (
-          <li key={card.id} className="flex items-center justify-between gap-2 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
-            <div className="min-w-0">
-              <a href={`#${card.id}`} className="text-sm text-[var(--text)] hover:text-[var(--accent)]">{card.label}</a>
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-[var(--muted)]">{card.tier}</span>
-              {card.transient && (
-                <p className="mt-0.5 text-[11px] leading-4 text-amber-700">Hidden in your settings — shown via a link. Keep showing?</p>
-              )}
-            </div>
-            <form action={setDisclosureOverrideAction} className="shrink-0">
+      {/* Collapsed by default so the exhaustive grid doesn't take over the top of the page.
+          The summary still advertises the full range (heading + count), keeping latent
+          capabilities discoverable. Scope-generic: same collapse on the collective workspace
+          and the person-centric home. */}
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{eyebrow}</span>
+            <span className="mt-1 block text-lg font-bold tracking-tight text-[var(--text)]">
+              {heading}
+              <span className="ml-1.5 font-normal text-[var(--muted)]">({cards.length})</span>
+            </span>
+          </span>
+          <span className="shrink-0 text-sm text-[var(--muted)] select-none group-open:hidden">Show →</span>
+          <span className="hidden shrink-0 text-sm text-[var(--muted)] select-none group-open:inline">Hide</span>
+        </summary>
+        <div className="mt-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <p className="min-w-0 text-xs leading-5 text-[var(--soft-text)]">{intro}</p>
+            <form action={setRevealAllAction} className="shrink-0">
               <input type="hidden" name="scope" value={scope} />
               <input type="hidden" name="scopeId" value={scopeId} />
-              <input type="hidden" name="moduleId" value={card.id} />
-              <input type="hidden" name="value" value={card.present && !card.transient ? "hide" : "show"} />
-              <button type="submit" className="border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
-                {card.transient ? "Keep showing" : card.present ? "Hide" : "Show"}
+              <input type="hidden" name="revealAll" value={revealAll ? "false" : "true"} />
+              <button type="submit" className="border border-[var(--border)] bg-[var(--subtle)] px-3 py-1.5 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
+                {revealAll ? "Minimal view" : "Show every section"}
               </button>
             </form>
-          </li>
-        ))}
-      </ul>
+          </div>
+          <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
+            {cards.map((card) => (
+              <li key={card.id} className="flex items-center justify-between gap-2 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                <div className="min-w-0">
+                  <a href={`#${card.id}`} className="text-sm text-[var(--text)] hover:text-[var(--accent)]">{card.label}</a>
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-[var(--muted)]">{card.tier}</span>
+                  {card.transient && (
+                    <p className="mt-0.5 text-[11px] leading-4 text-amber-700">Hidden in your settings — shown via a link. Keep showing?</p>
+                  )}
+                </div>
+                <form action={setDisclosureOverrideAction} className="shrink-0">
+                  <input type="hidden" name="scope" value={scope} />
+                  <input type="hidden" name="scopeId" value={scopeId} />
+                  <input type="hidden" name="moduleId" value={card.id} />
+                  <input type="hidden" name="value" value={card.present && !card.transient ? "hide" : "show"} />
+                  <button type="submit" className="border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--soft-text)] transition hover:bg-[var(--hover)]">
+                    {card.transient ? "Keep showing" : card.present ? "Hide" : "Show"}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
     </section>
   );
 }

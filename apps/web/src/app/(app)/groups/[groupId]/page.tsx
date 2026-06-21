@@ -537,9 +537,10 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           })
         : [];
 
-    // Petitions
+    // Petitions — scope-filter so project-scoped petitions (which still carry the host
+    // collective's groupId for back-compat) don't leak into the collective's list.
     const petitionRows = await prisma.petition.findMany({
-      where: { groupId, ...petitionFilterWhere(petitionFilter) },
+      where: { scopeType: "group", scopeId: groupId, ...petitionFilterWhere(petitionFilter) },
       orderBy: [{ status: "asc" }, { closesAt: "asc" }],
       include: {
         _count: { select: { support: true } },

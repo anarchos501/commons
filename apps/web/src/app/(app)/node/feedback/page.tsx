@@ -69,12 +69,13 @@ export default async function FeedbackInboxPage() {
               <div className="mt-3 space-y-3">
                 {digests.map((digest) => (
                   <details key={digest.id} className="min-w-0 border border-[var(--border)] bg-[var(--subtle)] p-3">
-                    <summary className="cursor-pointer text-sm text-[var(--text)]">
-                      {digest.title} · <LocalTime value={digest.compiledAt.toISOString()} />
+                    {/* Copy lives in the summary so a digest can be copied while still collapsed. */}
+                    <summary className="flex items-center justify-between gap-2 cursor-pointer text-sm text-[var(--text)]">
+                      <span className="min-w-0 [overflow-wrap:anywhere]">
+                        {digest.title} · <LocalTime value={digest.compiledAt.toISOString()} />
+                      </span>
+                      <CopyTextButton text={digest.body} label="Copy all" stopPropagation />
                     </summary>
-                    <div className="mt-2 flex justify-end">
-                      <CopyTextButton text={digest.body} label="Copy all" />
-                    </div>
                     <pre className="mt-2 overflow-x-hidden whitespace-pre-wrap [overflow-wrap:anywhere] text-xs leading-5 text-[var(--soft-text)]">{digest.body}</pre>
                   </details>
                 ))}
