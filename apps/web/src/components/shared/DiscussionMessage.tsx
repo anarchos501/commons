@@ -5,9 +5,9 @@ const MESSAGE_TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric
 /**
  * A single chat-style discussion message bubble, shared across the group/coalition/project/
  * responsibility discussion spaces. The viewer's own messages hug the right in the neutral
- * (theme-aware) surface color; everyone else's sit on the left in the blue used by the app's
- * badges. Author name is bold and slightly larger. The blue is a fixed Tailwind color (like
- * those badges) so it doesn't theme in dark mode — paired with fixed blue text it stays readable.
+ * surface color; everyone else's sit on the left in the teal "notice" palette (the same
+ * theme-aware tokens as the Open Alpha banner), so both bubbles adapt to light/dark mode.
+ * Author name is bold and slightly larger.
  */
 export function DiscussionMessage({
   body,
@@ -29,13 +29,13 @@ export function DiscussionMessage({
     <div className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-[85%] px-3 py-2 ${
-          isOwn ? "bg-[var(--subtle)]" : "border border-blue-100 bg-blue-50"
+          isOwn ? "bg-[var(--subtle)]" : "border border-[var(--notice-border)] bg-[var(--notice)]"
         }`}
       >
-        <p className={`text-sm font-semibold ${isOwn ? "text-[var(--text)]" : "text-blue-900"}`}>{authorName}</p>
-        <p className={`mt-0.5 text-sm leading-6 ${isOwn ? "text-[var(--soft-text)]" : "text-blue-900"}`}>{body}</p>
+        <p className={`text-sm font-semibold ${isOwn ? "text-[var(--text)]" : "text-[var(--notice-text)]"}`}>{authorName}</p>
+        <p className={`mt-0.5 text-sm leading-6 ${isOwn ? "text-[var(--soft-text)]" : "text-[var(--notice-text)]"}`}>{body}</p>
         {createdAtIso && (
-          <p className={`mt-1 text-xs ${isOwn ? "text-[var(--muted)]" : "text-blue-700"}`}>
+          <p className={`mt-1 text-xs ${isOwn ? "text-[var(--muted)]" : "text-[var(--notice-text)] opacity-70"}`}>
             <LocalTime value={createdAtIso} options={MESSAGE_TIME} />
           </p>
         )}
