@@ -44,7 +44,9 @@ export async function generateGroupInviteToken(
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
 
   await prisma.groupInviteToken.create({
-    data: { tokenHash, tokenPreview, groupId, createdByMembershipId, expiresAt },
+    // rawToken is persisted so any active member can re-copy the full link later (feedback #2);
+    // see the schema comment on why that's acceptable for a shareable bearer link.
+    data: { tokenHash, tokenPreview, rawToken, groupId, createdByMembershipId, expiresAt },
   });
 
   return { ok: true, rawToken, expiresAt };
@@ -81,7 +83,9 @@ export async function resolveGroupInviteToken(
   };
 }
 
-export type ActiveInvitePreview = { tokenPreview: string; expiresAt: Date } | null;
+// rawToken is the full token for re-display; null on links created before the rawToken column
+// existed (those degrade to preview-only in the UI).
+export type ActiveInvitePreview = { tokenPreview: string; rawToken: string | null; expiresAt: Date } | null;
 
 export async function getActiveGroupInvitePreview(
   prisma: PrismaClient,
@@ -90,7 +94,7 @@ export async function getActiveGroupInvitePreview(
   const now = new Date();
   const record = await prisma.groupInviteToken.findFirst({
     where: { groupId, revokedAt: null, expiresAt: { gt: now } },
-    select: { tokenPreview: true, expiresAt: true },
+    select: { tokenPreview: true, rawToken: true, expiresAt: true },
     orderBy: { createdAt: "desc" },
   });
   return record ?? null;

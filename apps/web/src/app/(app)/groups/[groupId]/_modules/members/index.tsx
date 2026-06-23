@@ -21,7 +21,7 @@ export type MembersModuleData = {
     joinedAt: Date;
     hasOpenSponsorship: boolean;
   }>;
-  invitePreview: { tokenPreview: string; expiresAt: Date } | null;
+  invitePreview: { tokenPreview: string; expiresAt: Date; activeUrl: string | null } | null;
 };
 
 export function MembersModule({
@@ -111,6 +111,7 @@ export function MembersModule({
           <p className="text-xs font-medium text-[var(--muted)] mb-3">Invite link</p>
           <InviteLinkSection
             groupId={groupId}
+            activeUrl={data.invitePreview?.activeUrl ?? null}
             invitePreview={data.invitePreview}
             generateAction={generateInviteLinkAction}
             revokeAction={revokeInviteLinkAction}

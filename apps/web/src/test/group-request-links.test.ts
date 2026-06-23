@@ -118,6 +118,41 @@ test("resolveGroupRequestLink returns not_found for an unknown token", async () 
   assert.equal(result.reason, "not_found");
 });
 
+test("the raw token is persisted so the preview getter can re-display the full link (feedback #2)", async () => {
+  await cleanupFixture("grl_raw");
+  try {
+    const { membership, groupId } = await createFixture("grl_raw");
+    const gen = await generateGroupRequestLink(prisma, { groupId, createdByMembershipId: membership.id });
+    assert.equal(gen.ok, true);
+    if (!gen.ok) return;
+    const preview = await getActiveGroupRequestLinkPreview(prisma, groupId);
+    assert.equal(preview?.rawToken, gen.rawToken, "the full raw token is retrievable for re-copy");
+    assert.equal(preview?.tokenPreview, gen.rawToken.slice(0, 8));
+  } finally {
+    await cleanupFixture("grl_raw");
+  }
+});
+
+test("a legacy link with no stored raw token still works by hash and degrades to null rawToken", async () => {
+  await cleanupFixture("grl_legacy");
+  try {
+    const { membership, groupId } = await createFixture("grl_legacy");
+    const gen = await generateGroupRequestLink(prisma, { groupId, createdByMembershipId: membership.id });
+    assert.equal(gen.ok, true);
+    if (!gen.ok) return;
+    // Simulate a pre-migration row: clear the stored raw token.
+    await prisma.groupRequestLink.updateMany({ where: { groupId }, data: { rawToken: null } });
+    // The link keeps working (resolution is by hash) ...
+    assert.equal(await requestLinkGrantsAccess(prisma, groupId, gen.rawToken), true);
+    // ... but it can't be re-displayed: the getter returns the row with a null rawToken (not null/crash).
+    const preview = await getActiveGroupRequestLinkPreview(prisma, groupId);
+    assert.notEqual(preview, null);
+    assert.equal(preview?.rawToken, null);
+  } finally {
+    await cleanupFixture("grl_legacy");
+  }
+});
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 async function createFixture(prefix: string) {

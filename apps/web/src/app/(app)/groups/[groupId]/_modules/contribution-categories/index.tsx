@@ -16,7 +16,7 @@ export type ContributionCategoriesModuleData = {
   groupMembers: Array<{ id: string; account: { displayName: string } }>;
   allProjects: Array<{ id: string; name: string }>;
   hasNoActiveCategories: boolean;
-  requestLinkPreview: { tokenPreview: string } | null;
+  requestLinkPreview: { tokenPreview: string; activeUrl: string | null } | null;
 };
 
 export function ContributionCategoriesModule({
@@ -64,6 +64,7 @@ export function ContributionCategoriesModule({
             <div className="mt-3">
               <RequestLinkSection
                 groupId={groupId}
+                activeUrl={data.requestLinkPreview?.activeUrl ?? null}
                 linkPreview={data.requestLinkPreview}
                 generateAction={generateRequestLinkAction}
                 revokeAction={revokeRequestLinkAction}

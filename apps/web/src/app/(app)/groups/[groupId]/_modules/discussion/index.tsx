@@ -2,7 +2,7 @@ import { CollapsibleSection } from "../../../../../../components/shared/Collapsi
 import { SubmitButton } from "../../../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../../../components/shared/FormWithNotice";
-import { LocalTime } from "../../../../../../components/shared/LocalTime";
+import { DiscussionMessage } from "../../../../../../components/shared/DiscussionMessage";
 import { ThreadList } from "../../../../../../components/shared/ThreadList";
 import { CreateThreadForm } from "../../../../../../components/shared/CreateThreadForm";
 import { COMPACT_DATE } from "../_shared/format";
@@ -15,17 +15,19 @@ function formatRelativeDate(date: Date) {
 export type DiscussionModuleData = {
   discussionThreads: Array<{ id: string; title: string; messageCount: number; lastActivityAt: Date }>;
   selectedThread: { id: string; title: string } | null;
-  discussionMessages: Array<{ id: string; body: string; author: { displayName: string }; createdAt: Date }>;
+  discussionMessages: Array<{ id: string; body: string; authorId: string; author: { displayName: string }; createdAt: Date }>;
 };
 
 export function DiscussionModule({
   data,
   isActive,
   groupId,
+  viewerAccountId,
 }: {
   data: DiscussionModuleData;
   isActive: boolean;
   groupId: string;
+  viewerAccountId: string | null;
 }) {
   return (
     <CollapsibleSection id="discussion" title="Discussion" eyebrow="Temporary coordination" storageKey={`group:${groupId}:section:discussion`} className="bg-[var(--surface)] p-5 sm:p-6">
@@ -50,12 +52,14 @@ export function DiscussionModule({
                 {data.discussionMessages.length > 0 ? (
                   <div className="mb-3 max-h-72 space-y-3 overflow-y-auto pr-1">
                     {data.discussionMessages.map((msg) => (
-                      <div key={msg.id} className="bg-[var(--subtle)] px-3 py-2">
-                        <p className="text-sm leading-6 text-[var(--soft-text)]">{msg.body}</p>
-                        <p className="mt-1 text-xs text-[var(--muted)]">
-                          {msg.author.displayName} &middot; <LocalTime value={msg.createdAt.toISOString()} options={COMPACT_DATE} />
-                        </p>
-                      </div>
+                      <DiscussionMessage
+                        key={msg.id}
+                        body={msg.body}
+                        authorName={msg.author.displayName}
+                        authorId={msg.authorId}
+                        viewerAccountId={viewerAccountId}
+                        createdAtIso={msg.createdAt.toISOString()}
+                      />
                     ))}
                   </div>
                 ) : (

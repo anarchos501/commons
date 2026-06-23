@@ -394,7 +394,14 @@ export async function listDiscussionMessages(prisma: PrismaClient, threadId: str
       threadId,
       expiresAt: { gt: new Date() },
     },
-    include: { author: { select: { displayName: true } } },
+    // authorId lets the UI tell the viewer's own messages from others' (chat-bubble alignment).
+    select: {
+      id: true,
+      body: true,
+      createdAt: true,
+      authorId: true,
+      author: { select: { displayName: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 }

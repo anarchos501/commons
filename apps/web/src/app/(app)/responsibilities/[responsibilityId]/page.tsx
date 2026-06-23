@@ -12,6 +12,7 @@ import { requiredString } from "../../../../lib/support-form";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
+import { DiscussionMessage } from "../../../../components/shared/DiscussionMessage";
 import { AlphaNotice, Notice } from "../../../../components/shared/Notice";
 import { type FormState } from "../../../../components/shared/form-state";
 import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
@@ -189,10 +190,13 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                     {data.discussionMessages.length > 0 ? (
                       <div className="mb-3 mt-2 max-h-72 space-y-3 overflow-y-auto pr-1">
                         {data.discussionMessages.map((msg) => (
-                          <div key={msg.id} className="bg-[var(--subtle)] px-3 py-2">
-                            <p className="text-sm leading-6 text-[var(--soft-text)]">{msg.body}</p>
-                            <p className="mt-1 text-xs text-[var(--muted)]">{msg.author.displayName}</p>
-                          </div>
+                          <DiscussionMessage
+                            key={msg.id}
+                            body={msg.body}
+                            authorName={msg.author.displayName}
+                            authorId={msg.authorId}
+                            viewerAccountId={session.accountId ?? null}
+                          />
                         ))}
                       </div>
                     ) : (
@@ -232,7 +236,11 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
           <CollapsibleSection id="concerns" title="Concerns" eyebrow="Shared accountability" storageKey={`responsibility:${responsibilityId}:section:concerns`} className="bg-[var(--surface)] p-5 sm:p-6">
             <div className="space-y-3">
               {data.activeConcerns.map((concern) => (
-                <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+                <a
+                  key={concern.id}
+                  href={`/groups/${responsibility.groupId}/concerns/${concern.id}`}
+                  className="block space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium">{concern.subject}</p>
                     <span className="shrink-0 text-xs capitalize text-[var(--muted)]">{concern.status.replace(/_/g, " ")}</span>
@@ -242,7 +250,8 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                       {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
                     </p>
                   )}
-                </div>
+                  <p className="text-xs font-medium text-[var(--accent)]">View / review →</p>
+                </a>
               ))}
             </div>
           </CollapsibleSection>

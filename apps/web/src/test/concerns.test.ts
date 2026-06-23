@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { isEligibleReviewer, getCoverageStatus, startReview, issueFindings, proposeAction, closeConcern, autoCloseStaleWithdrawnConcerns } from "../lib/concerns";
+import { isEligibleReviewer, canViewConcern, getCoverageStatus, startReview, issueFindings, proposeAction, closeConcern, autoCloseStaleWithdrawnConcerns } from "../lib/concerns";
 import { provisionConcernReviewer } from "../lib/concern-reviewer";
 import { revokeAbility } from "../lib/responsibility-abilities";
 
@@ -106,6 +106,45 @@ test("naming a different member as subject leaves the reviewer eligible (F3)", a
     assert.equal(eligible, true);
   } finally {
     await cleanupFixture("cer_subject_other");
+  }
+});
+
+// --- canViewConcern (the concern detail page gate) ---
+
+test("canViewConcern allows the reporter and an eligible reviewer, denies an unrelated member", async () => {
+  const { group, account, reviewerAccount } = await createFixture("cvc_basic");
+  try {
+    const report = await prisma.report.findFirstOrThrow({ where: { groupId: group.id } });
+    // Reporter can always view their own concern; eligible reviewer can view.
+    assert.equal(await canViewConcern(prisma, account.id, group.id, report.id), true);
+    assert.equal(await canViewConcern(prisma, reviewerAccount.id, group.id, report.id), true);
+    // An active member who is neither the reporter nor a reviewer cannot view.
+    const outsider = await prisma.account.create({
+      data: { id: "cvc_basic_outsider", homeNodeId: "cvc_basic_node", displayName: "Outsider", accountType: "member", profileVisibility: "private" },
+    });
+    await prisma.groupMembership.create({ data: { accountId: outsider.id, groupId: group.id, status: "active", participationStatus: "active" } });
+    assert.equal(await canViewConcern(prisma, outsider.id, group.id, report.id), false);
+  } finally {
+    await cleanupFixture("cvc_basic");
+  }
+});
+
+test("canViewConcern denies the SUBJECT of the concern even if they hold the reviewer role", async () => {
+  const { group, reviewerAccount, report } = await createFixture("cvc_subject");
+  try {
+    await prisma.report.update({ where: { id: report.id }, data: { subjectAccountId: reviewerAccount.id } });
+    assert.equal(await canViewConcern(prisma, reviewerAccount.id, group.id, report.id), false);
+  } finally {
+    await cleanupFixture("cvc_subject");
+  }
+});
+
+test("canViewConcern fails closed on a group mismatch", async () => {
+  const { account, report } = await createFixture("cvc_mismatch");
+  try {
+    assert.equal(await canViewConcern(prisma, account.id, "cvc_mismatch_wronggroup", report.id), false);
+  } finally {
+    await cleanupFixture("cvc_mismatch");
   }
 });
 

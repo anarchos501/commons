@@ -773,8 +773,14 @@ model GroupServiceOffering {
 
 model GroupInviteToken {
   id                    String    @id @default(cuid())
-  tokenHash             String    @unique   // SHA-256 of raw token; raw token is never stored
+  tokenHash             String    @unique   // SHA-256 of raw token, for lookup + uniqueness
   tokenPreview          String              // first 8 chars of raw token for display after reload
+  // The raw token is stored ONLY so any active member can re-copy the full link (feedback #2).
+  // This is acceptable BECAUSE these are shareable bearer links meant to be distributed, and
+  // revocation (revokedAt) is the kill switch. Do NOT copy this pattern for secrets that are
+  // never meant to be shared (session tokens, password-reset tokens) — those must stay hash-only.
+  // Nullable: links created before this column existed have null and degrade to preview-only.
+  rawToken              String?
   groupId               String
   createdByMembershipId String
   createdAt             DateTime  @default(now())
@@ -792,8 +798,12 @@ model GroupInviteToken {
 // it never expires — it stays valid until revoked (revocation is the only off-switch).
 model GroupRequestLink {
   id                    String    @id @default(cuid())
-  tokenHash             String    @unique // SHA-256 of raw token; raw token is never stored
+  tokenHash             String    @unique // SHA-256 of raw token, for lookup + uniqueness
   tokenPreview          String             // first 8 chars of raw token, shown so members know a link is active
+  // Raw token stored ONLY for re-copy (feedback #2) — acceptable because this is a shareable
+  // bearer link meant to be distributed, with revocation as the kill switch. Never store raw
+  // tokens that aren't meant to be shared (session/reset tokens). Nullable for pre-column rows.
+  rawToken              String?
   groupId               String
   createdByMembershipId String
   createdAt             DateTime  @default(now())

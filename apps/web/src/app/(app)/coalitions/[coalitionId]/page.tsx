@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AlphaNotice, Notice } from "../../../../components/shared/Notice";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
 import { EmptyState } from "../../../../components/shared/EmptyState";
+import { DiscussionMessage } from "../../../../components/shared/DiscussionMessage";
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { type FormState } from "../../../../components/shared/form-state";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
@@ -152,10 +153,13 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
                       {data.discussionMessages.length > 0 ? (
                         <div className="mb-3 mt-2 max-h-72 space-y-3 overflow-y-auto pr-1">
                           {data.discussionMessages.map((message) => (
-                            <div key={message.id} className="bg-[var(--subtle)] px-3 py-2">
-                              <p className="text-sm leading-6 text-[var(--soft-text)]">{message.body}</p>
-                              <p className="mt-1 text-xs text-[var(--muted)]">{message.author.displayName}</p>
-                            </div>
+                            <DiscussionMessage
+                              key={message.id}
+                              body={message.body}
+                              authorName={message.author.displayName}
+                              authorId={message.authorId}
+                              viewerAccountId={session.accountId ?? null}
+                            />
                           ))}
                         </div>
                       ) : (

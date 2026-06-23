@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CollapsibleSection } from "../../../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../../../components/shared/SubmitButton";
 import { REQUEST_STATUS_LABELS } from "../../../../../../lib/request-lifecycle";
@@ -67,7 +68,11 @@ export function ConcernsModule({
         <div className="mb-5 space-y-3">
           <p className="text-xs font-medium text-[var(--muted)]">Reviewer queue</p>
           {data.reviewerQueue.map((concern) => (
-            <div key={concern.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+            <Link
+              key={concern.id}
+              href={`/groups/${groupId}/concerns/${concern.id}`}
+              className="block space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <ReportKindBadge kind={concern.kind} />
@@ -87,7 +92,8 @@ export function ConcernsModule({
                   {concern.findings.length} finding{concern.findings.length !== 1 ? "s" : ""}: {concern.findings.map((f) => f.outcome.replace(/_/g, " ")).join(", ")}
                 </p>
               )}
-            </div>
+              <p className="text-xs font-medium text-[var(--accent)]">View / review →</p>
+            </Link>
           ))}
         </div>
       )}
@@ -95,7 +101,11 @@ export function ConcernsModule({
         <div className="mb-5 space-y-3">
           <p className="text-xs font-medium text-[var(--muted)]">Your concerns</p>
           {data.myReports.map((report) => (
-            <div key={report.id} className="space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2">
+            <Link
+              key={report.id}
+              href={`/groups/${groupId}/concerns/${report.id}`}
+              className="block space-y-1 border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <ReportKindBadge kind={report.kind} />
@@ -107,7 +117,7 @@ export function ConcernsModule({
                 <p className="text-xs text-[var(--muted)]">Closed: {report.closureReason.replace(/_/g, " ")}</p>
               )}
               <p className="text-xs leading-5 text-[var(--soft-text)]">{report.description}</p>
-            </div>
+            </Link>
           ))}
         </div>
       )}

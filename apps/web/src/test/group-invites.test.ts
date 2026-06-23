@@ -191,6 +191,38 @@ test("revokeAllGroupInviteTokens revokes all active tokens", async () => {
   }
 });
 
+test("the raw token is persisted so the preview getter can re-display the full invite link (feedback #2)", async () => {
+  await cleanupFixture("gi_raw");
+  try {
+    const { membership, groupId } = await createFixture("gi_raw");
+    const gen = await generateGroupInviteToken(prisma, { groupId, createdByMembershipId: membership.id });
+    assert.equal(gen.ok, true);
+    if (!gen.ok) return;
+    const preview = await getActiveGroupInvitePreview(prisma, groupId);
+    assert.equal(preview?.rawToken, gen.rawToken, "the full raw token is retrievable for re-copy");
+  } finally {
+    await cleanupFixture("gi_raw");
+  }
+});
+
+test("a legacy invite with no stored raw token still resolves and degrades to null rawToken", async () => {
+  await cleanupFixture("gi_legacy");
+  try {
+    const { membership, groupId } = await createFixture("gi_legacy");
+    const gen = await generateGroupInviteToken(prisma, { groupId, createdByMembershipId: membership.id });
+    assert.equal(gen.ok, true);
+    if (!gen.ok) return;
+    await prisma.groupInviteToken.updateMany({ where: { groupId }, data: { rawToken: null } });
+    const resolved = await resolveGroupInviteToken(prisma, gen.rawToken);
+    assert.equal(resolved.ok, true, "the invite still validates by hash");
+    const preview = await getActiveGroupInvitePreview(prisma, groupId);
+    assert.notEqual(preview, null);
+    assert.equal(preview?.rawToken, null);
+  } finally {
+    await cleanupFixture("gi_legacy");
+  }
+});
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 async function createFixture(prefix: string) {

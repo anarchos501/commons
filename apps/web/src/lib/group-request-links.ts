@@ -43,7 +43,9 @@ export async function generateGroupRequestLink(
 
   const rawToken = randomBytes(32).toString("base64url");
   await prisma.groupRequestLink.create({
-    data: { tokenHash: hashToken(rawToken), tokenPreview: rawToken.slice(0, 8), groupId, createdByMembershipId },
+    // rawToken persisted so any active member can re-copy the full link (feedback #2);
+    // acceptable for a shareable bearer link (see the schema comment).
+    data: { tokenHash: hashToken(rawToken), tokenPreview: rawToken.slice(0, 8), rawToken, groupId, createdByMembershipId },
   });
   return { ok: true, rawToken };
 }
@@ -79,7 +81,9 @@ export async function requestLinkGrantsAccess(
   return resolved.ok && resolved.groupId === groupId;
 }
 
-export type ActiveRequestLinkPreview = { tokenPreview: string } | null;
+// rawToken is the full token for re-display; null on links created before the rawToken column
+// existed (those degrade to preview-only in the UI).
+export type ActiveRequestLinkPreview = { tokenPreview: string; rawToken: string | null } | null;
 
 export async function getActiveGroupRequestLinkPreview(
   prisma: PrismaClient,
@@ -87,7 +91,7 @@ export async function getActiveGroupRequestLinkPreview(
 ): Promise<ActiveRequestLinkPreview> {
   const record = await prisma.groupRequestLink.findFirst({
     where: { groupId, revokedAt: null },
-    select: { tokenPreview: true },
+    select: { tokenPreview: true, rawToken: true },
     orderBy: { createdAt: "desc" },
   });
   return record ?? null;

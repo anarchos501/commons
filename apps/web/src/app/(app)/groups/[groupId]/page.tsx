@@ -41,6 +41,8 @@ import {
 } from "../../../../lib/governance-categories";
 import { getActiveGroupInvitePreview } from "../../../../lib/group-invites";
 import { getActiveGroupRequestLinkPreview } from "../../../../lib/group-request-links";
+import { resolveCurrentNode, absoluteUrl } from "../../../../lib/node-context";
+import { headers } from "next/headers";
 import { computeAllParameterTemperatures } from "../../../../lib/governance-temperature";
 import {
   getPetitionDetail,
@@ -193,7 +195,7 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
           />
         )}
 
-        {present.has("discussion") && <DiscussionModule data={data} isActive={isActive} groupId={groupId} />}
+        {present.has("discussion") && <DiscussionModule data={data} isActive={isActive} groupId={groupId} viewerAccountId={session.accountId} />}
         {/* ══ Calendar ══════════════════════════════════════════════════ */}
         {present.has("calendar") && (
           <SpaceCalendar
@@ -645,12 +647,30 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
         )
       : [];
 
-    // Active invite preview (preview chars + expiry only — never the full token)
-    const invitePreview = await getActiveGroupInvitePreview(prisma, groupId);
-
-    // Active private request-link preview (private groups only) — preview chars only (#9).
-    const requestLinkPreview = group.visibility === "private"
+    // Active invite + private request links. The raw token is now stored, so we rebuild the full
+    // re-copyable URL server-side (feedback #2). Legacy links (no stored token) keep activeUrl null
+    // and the section falls back to preview + "regenerate". Only resolve node/host when there's a
+    // token to build, so the common (no-link) path stays cheap.
+    const inviteRow = await getActiveGroupInvitePreview(prisma, groupId);
+    const requestRow = group.visibility === "private"
       ? await getActiveGroupRequestLinkPreview(prisma, groupId)
+      : null;
+    const needsLinkOrigin = !!(inviteRow?.rawToken || requestRow?.rawToken);
+    const linkNodeDomain = needsLinkOrigin ? (await resolveCurrentNode(prisma))?.domain ?? null : null;
+    const linkHost = needsLinkOrigin ? (await headers()).get("host") : null;
+
+    const invitePreview = inviteRow
+      ? {
+          tokenPreview: inviteRow.tokenPreview,
+          expiresAt: inviteRow.expiresAt,
+          activeUrl: inviteRow.rawToken ? absoluteUrl(linkNodeDomain, linkHost, `/invite/${inviteRow.rawToken}`) : null,
+        }
+      : null;
+    const requestLinkPreview = requestRow
+      ? {
+          tokenPreview: requestRow.tokenPreview,
+          activeUrl: requestRow.rawToken ? absoluteUrl(linkNodeDomain, linkHost, `/request/${groupId}?k=${requestRow.rawToken}`) : null,
+        }
       : null;
 
     // Projects for entity selector in category proposal form
