@@ -5,7 +5,8 @@ import { FormWithNotice } from "../../../../../../components/shared/FormWithNoti
 import { formatTrustedByLabel, type TrustedProviderInfo } from "../../../../../../lib/trusted-providers";
 import type { CategoryForScope } from "../../../../../../lib/contribution-categories";
 import { proposeTrustedProviderStatusAction, proposeTrustedProviderRevocationAction } from "../_shared/trusted-provider-actions";
-import { proposeCategoryAction, proposeCategoryArchivalAction, toggleCustomRequestsAction } from "./actions";
+import { RequestLinkSection } from "../../../../../../components/shared/RequestLinkSection";
+import { proposeCategoryAction, proposeCategoryArchivalAction, proposeCustomRequestsToggleAction, generateRequestLinkAction, revokeRequestLinkAction } from "./actions";
 
 export type CategoryWithProviders = CategoryForScope & { trustedProviders: TrustedProviderInfo[] };
 
@@ -15,6 +16,7 @@ export type ContributionCategoriesModuleData = {
   groupMembers: Array<{ id: string; account: { displayName: string } }>;
   allProjects: Array<{ id: string; name: string }>;
   hasNoActiveCategories: boolean;
+  requestLinkPreview: { tokenPreview: string } | null;
 };
 
 export function ContributionCategoriesModule({
@@ -38,13 +40,35 @@ export function ContributionCategoriesModule({
                 ? "Custom requests are accepted. They appear as a support type on the request form when at least one member has marked themselves available for them."
                 : "Only your defined contribution categories can be requested. Enable custom requests to also accept free-text asks (members opt in to receiving them)."}
             </p>
-            <form action={toggleCustomRequestsAction} className="mt-3">
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Changing this is collective-wide, so it opens a petition rather than taking effect immediately.
+            </p>
+            <FormWithNotice action={proposeCustomRequestsToggleAction} className="mt-3">
               <input type="hidden" name="groupId" value={groupId} />
               <input type="hidden" name="accepts" value={data.group.acceptsCustomRequests ? "false" : "true"} />
               <SubmitButton variant="secondary">
-                {data.group.acceptsCustomRequests ? "Stop accepting custom requests" : "Accept custom requests"}
+                {data.group.acceptsCustomRequests ? "Propose stopping custom requests" : "Propose accepting custom requests"}
               </SubmitButton>
-            </form>
+            </FormWithNotice>
+          </div>
+        )}
+
+        {/* Private groups: offer support via an unlisted, revocable link without becoming public (feedback #9). */}
+        {data.group.visibility === "private" && isActive && (
+          <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+            <p className="text-sm font-medium text-[var(--text)]">Private request link</p>
+            <p className="mt-1 text-xs text-[var(--soft-text)]">
+              This collective is private, so its contribution categories are not listed publicly. Share an unlisted
+              link to let people request support without making the collective discoverable.
+            </p>
+            <div className="mt-3">
+              <RequestLinkSection
+                groupId={groupId}
+                linkPreview={data.requestLinkPreview}
+                generateAction={generateRequestLinkAction}
+                revokeAction={revokeRequestLinkAction}
+              />
+            </div>
           </div>
         )}
 
@@ -136,9 +160,10 @@ export function ContributionCategoriesModule({
                   ))}
                 </select>
               </div>
-              {data.group.visibility === "private" && data.hasNoActiveCategories && (
-                <p className="text-xs border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800">
-                  Approving this contribution category will make this collective publicly visible on the Find Collectives page.
+              {data.group.visibility === "private" && (
+                <p className="text-xs border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-[var(--soft-text)]">
+                  This collective is private, so this category stays unlisted. Members can still receive requests for it
+                  by sharing the private request link above — the collective does not become publicly discoverable.
                 </p>
               )}
               <SubmitButton>Open petition</SubmitButton>

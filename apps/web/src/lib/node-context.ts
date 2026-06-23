@@ -52,3 +52,31 @@ export async function resolveCurrentNode(prisma: PrismaClient) {
 
   return prisma.node.findFirst({ orderBy: { createdAt: "asc" } });
 }
+
+// Returns the public base origin (scheme + host, no trailing slash) for links shared
+// OUTSIDE the app (guest request links, invite links). Prefers the node's own canonical
+// `domain` — the multi-tenant identity — over the request Host header, which a reverse
+// proxy can mangle to `localhost:3000`. Falls back to the request host (which carries the
+// dev :port) only when the node domain is a localhost alias, so links stay clickable in
+// local development.
+export function resolvePublicBaseUrl(
+  nodeDomain: string | null | undefined,
+  requestHost: string | null | undefined,
+): string {
+  const domain = normalizeRequestHost(nodeDomain);
+  if (domain && !isLocalHostAlias(domain)) {
+    return `https://${domain}`;
+  }
+  const host = (requestHost ?? "").trim() || (nodeDomain ?? "").trim() || "localhost:3000";
+  const proto = isLocalHostAlias(host.split(":")[0]) ? "http" : "https";
+  return `${proto}://${host}`;
+}
+
+// Convenience: full absolute URL for a path, built on resolvePublicBaseUrl.
+export function absoluteUrl(
+  nodeDomain: string | null | undefined,
+  requestHost: string | null | undefined,
+  path: string,
+): string {
+  return `${resolvePublicBaseUrl(nodeDomain, requestHost)}${path.startsWith("/") ? path : `/${path}`}`;
+}

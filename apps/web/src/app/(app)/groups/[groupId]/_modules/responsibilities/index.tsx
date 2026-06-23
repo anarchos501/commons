@@ -63,11 +63,11 @@ export function ResponsibilitiesModule({
                 </span>
               </div>
               {isActive && !isHolder && (
-                <form action={volunteerForResponsibilityAction} className="mt-2">
+                <FormWithNotice action={volunteerForResponsibilityAction} className="mt-2">
                   <input type="hidden" name="groupId" value={groupId} />
                   <input type="hidden" name="type" value={r.type} />
                   <SubmitButton variant="secondary">Volunteer</SubmitButton>
-                </form>
+                </FormWithNotice>
               )}
               {isHolder && (
                 <form action={resignResponsibilityAction} className="mt-2">

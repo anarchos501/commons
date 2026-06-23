@@ -142,3 +142,82 @@ export async function applyGroupVisibilityFromPetition(
     data: { visibility: target },
   });
 }
+
+// ── Custom support requests (feedback #1) ─────────────────────────────────────
+// Accepting/declining free-text "custom" support requests is collective-wide, so it
+// must be petitioned rather than flipped by a single member. Encoded like visibility:
+// subjectId is `${groupId}:${"on"|"off"}` carrying the target state.
+export type ProposeCustomRequestsToggleResult =
+  | OpenPetitionResult
+  | { ok: false; reason: "already_set" };
+
+export async function proposeCustomRequestsToggle(
+  prisma: PrismaClient,
+  {
+    groupId,
+    createdByMembershipId,
+    accepts,
+  }: { groupId: string; createdByMembershipId: string; accepts: boolean },
+): Promise<ProposeCustomRequestsToggleResult> {
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { acceptsCustomRequests: true } });
+  if (group && group.acceptsCustomRequests === accepts) return { ok: false, reason: "already_set" };
+  return openPetition(prisma, {
+    groupId,
+    category: "group_settings",
+    subjectType: "custom_support_requests_toggle",
+    subjectId: `${groupId}:${accepts ? "on" : "off"}`,
+    createdByMembershipId,
+  });
+}
+
+export async function applyCustomRequestsToggleFromPetition(
+  prisma: Prisma.TransactionClient,
+  petitionId: string,
+): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "custom_support_requests_toggle");
+  const accepts = (petition.subjectId.split(":")[1] ?? "off") === "on";
+  await prisma.group.update({
+    where: { id: petition.groupId },
+    data: { acceptsCustomRequests: accepts },
+  });
+}
+
+// ── Membership policy (feedback #2) ───────────────────────────────────────────
+// Transition a group between open and application-based ("request_required") membership.
+// Petitioned under the membership category so it inherits membership thresholds.
+// subjectId is `${groupId}:${policy}`.
+export type ProposeMembershipPolicyChangeResult =
+  | OpenPetitionResult
+  | { ok: false; reason: "already_set" };
+
+export async function proposeMembershipPolicyChange(
+  prisma: PrismaClient,
+  {
+    groupId,
+    createdByMembershipId,
+    target,
+  }: { groupId: string; createdByMembershipId: string; target: GroupMembershipPolicy },
+): Promise<ProposeMembershipPolicyChangeResult> {
+  const policy = sanitizeMembershipPolicy(target);
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { membershipPolicy: true } });
+  if (group && group.membershipPolicy === policy) return { ok: false, reason: "already_set" };
+  return openPetition(prisma, {
+    groupId,
+    category: "membership",
+    subjectType: "membership_policy_change",
+    subjectId: `${groupId}:${policy}`,
+    createdByMembershipId,
+  });
+}
+
+export async function applyMembershipPolicyChangeFromPetition(
+  prisma: Prisma.TransactionClient,
+  petitionId: string,
+): Promise<void> {
+  const petition = await requireApprovedPetition(prisma, petitionId, "membership_policy_change");
+  const target = sanitizeMembershipPolicy(petition.subjectId.split(":")[1] ?? "request_required");
+  await prisma.group.update({
+    where: { id: petition.groupId },
+    data: { membershipPolicy: target },
+  });
+}

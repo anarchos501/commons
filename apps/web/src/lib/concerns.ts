@@ -74,6 +74,31 @@ export async function isEligibleReviewer(
 }
 
 /**
+ * Whether `accountId` may VIEW a concern at all (feedback #7). A concern is visible only to
+ * the reporter (who raised it) and to eligible reviewers — never to the wider collective or
+ * to the concern's subject. The decision is role/identity-derived (reporter + reviewer
+ * eligibility), deliberately NOT reading the stored `Report.visibility` flag, which has never
+ * been enforced and so cannot be trusted on legacy rows. Returns false for an unknown report
+ * or a group mismatch (fail closed).
+ */
+export async function canViewConcern(
+  prisma: PrismaClient,
+  accountId: string,
+  groupId: string,
+  reportId: string,
+): Promise<boolean> {
+  const report = await prisma.report.findUnique({
+    where: { id: reportId },
+    select: { reportedByAccountId: true, groupId: true },
+  });
+  if (!report || report.groupId !== groupId) return false;
+  // The reporter can always see the concern they raised.
+  if (report.reportedByAccountId === accountId) return true;
+  // Otherwise only an eligible reviewer (active seat + not the reporter/subject) may see it.
+  return isEligibleReviewer(prisma, accountId, groupId, reportId);
+}
+
+/**
  * True when the account currently holds an active reviewer seat in `groupId` that carries
  * `ability` now. Resolves the membership and routes through the term-bound ability check —
  * the per-action accountability gate (issue_findings, issue_action_proposals, etc.).

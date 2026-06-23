@@ -361,7 +361,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                 <SubmitButton variant="secondary">Check for matching requests</SubmitButton>
               </form>
               {data.notifications.length > 0 ? (
-                <div className="space-y-4">
+                // Cap the feed height so an active member's activity can't stretch the card
+                // indefinitely; it scrolls internally. Filters above stay fixed and visible.
+                <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1">
                   {data.notifications.map((notif) =>
                     notif.kind === "route" ? (
                       <RouteCard key={notif.id} route={notif} />

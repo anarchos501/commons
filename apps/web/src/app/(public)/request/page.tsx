@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { randomUUID } from "crypto";
 import { createPrismaClient } from "../../../lib/prisma";
-import { resolveCurrentNode } from "../../../lib/node-context";
+import { resolveCurrentNode, absoluteUrl } from "../../../lib/node-context";
 import { createSupportRequest, routeSupportRequest } from "../../../lib/capability-routing";
 import { buildRequestDescription } from "../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../lib/request-lifecycle";
@@ -25,9 +25,18 @@ export default async function RequestPage({ searchParams }: { searchParams: Sear
     const cookieStore = await cookies();
     const rawToken = cookieStore.get("pending_request_token")?.value ?? null;
     const headersList = await headers();
-    const host = headersList.get("host") ?? "";
-    const proto = headersList.get("x-forwarded-proto") ?? (host.split(":")[0] === "localhost" ? "http" : "https");
-    const privateLink = rawToken ? `${proto}://${host}/request/status/${rawToken}` : null;
+    // Build the guest link from the node's canonical domain (not the request Host, which a
+    // proxy can mangle to localhost:3000). Resolve the node just for its domain.
+    let nodeDomain: string | null = null;
+    if (rawToken) {
+      const linkPrisma = createPrismaClient();
+      try {
+        nodeDomain = (await resolveCurrentNode(linkPrisma))?.domain ?? null;
+      } finally {
+        await linkPrisma.$disconnect();
+      }
+    }
+    const privateLink = rawToken ? absoluteUrl(nodeDomain, headersList.get("host"), `/request/status/${rawToken}`) : null;
 
     return (
       <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">

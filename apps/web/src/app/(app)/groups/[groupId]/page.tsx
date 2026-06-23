@@ -40,6 +40,7 @@ import {
   resolveParameter,
 } from "../../../../lib/governance-categories";
 import { getActiveGroupInvitePreview } from "../../../../lib/group-invites";
+import { getActiveGroupRequestLinkPreview } from "../../../../lib/group-request-links";
 import { computeAllParameterTemperatures } from "../../../../lib/governance-temperature";
 import {
   getPetitionDetail,
@@ -465,9 +466,14 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           supportRequest: { select: { requestType: true, customNeed: true, status: true } },
         },
       }),
-      prisma.report.count({
-        where: { groupId, status: { in: ["open", "under_review", "findings_issued", "action_proposed"] } },
-      }),
+      // Only reviewers may know how many concerns are open — for a non-reviewer the count
+      // itself leaks concern existence (feedback #7). Skip the query entirely (don't compute
+      // then hide): a non-reviewer's page never runs it and the number never rides the payload.
+      hasReviewerRole
+        ? prisma.report.count({
+            where: { groupId, status: { in: ["open", "under_review", "findings_issued", "action_proposed"] } },
+          })
+        : Promise.resolve(0),
       prisma.contribution.groupBy({
         by: ["contributionType"],
         where: {
@@ -642,6 +648,11 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // Active invite preview (preview chars + expiry only — never the full token)
     const invitePreview = await getActiveGroupInvitePreview(prisma, groupId);
 
+    // Active private request-link preview (private groups only) — preview chars only (#9).
+    const requestLinkPreview = group.visibility === "private"
+      ? await getActiveGroupRequestLinkPreview(prisma, groupId)
+      : null;
+
     // Projects for entity selector in category proposal form
     const allProjects = present.has("contribution-categories")
       ? await prisma.project.findMany({
@@ -700,8 +711,12 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
         .map((r) => r.type),
     );
 
-    // Reviewer queue (hasReviewerRole computed above with the disclosure facts)
-    const reviewerQueue = hasReviewerRole
+    // Reviewer queue (hasReviewerRole computed above with the disclosure facts). The reporter
+    // is excluded in the query; the SUBJECT of a concern is excluded in code below — a reviewer
+    // who is the subject is not eligible to see it (RFC-002 / feedback #7). Filtering in memory
+    // (rather than in the WHERE) keeps null-subject concerns visible, which a `!= accountId`
+    // SQL predicate would wrongly drop. subjectAccountId is then stripped before leaving the server.
+    const reviewerQueueRaw = hasReviewerRole
       ? await prisma.report.findMany({
           where: {
             groupId,
@@ -715,6 +730,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
             status: true,
             createdAt: true,
             kind: true,
+            subjectAccountId: true,
             // Safe linked-request summary for request flags — NEVER the description (contact note).
             supportRequest: { select: { requestType: true, customNeed: true, status: true } },
             findings: { select: { outcome: true } },
@@ -722,6 +738,19 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
           },
         })
       : [];
+    const reviewerQueue = reviewerQueueRaw
+      .filter((r) => r.subjectAccountId !== accountId)
+      // Rebuild without subjectAccountId so it never reaches the client.
+      .map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        status: r.status,
+        createdAt: r.createdAt,
+        kind: r.kind,
+        supportRequest: r.supportRequest,
+        findings: r.findings,
+        actionProposals: r.actionProposals,
+      }));
 
     return {
       group,
@@ -753,6 +782,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       myResponsibilityTypes,
       hasNoActiveCategories: activeCategoryCount === 0,
       invitePreview,
+      requestLinkPreview,
       nodeState,
       nodeGroupOptions,
       view,

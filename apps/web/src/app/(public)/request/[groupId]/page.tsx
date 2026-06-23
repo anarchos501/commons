@@ -8,7 +8,8 @@ import { notFound, redirect } from "next/navigation";
 import { randomUUID } from "crypto";
 import { ArrowLeft, Clock, HelpCircle, Key, Languages, MapPin, Shield } from "lucide-react";
 import { createPrismaClient } from "../../../../lib/prisma";
-import { resolveCurrentNode } from "../../../../lib/node-context";
+import { resolveCurrentNode, absoluteUrl } from "../../../../lib/node-context";
+import { requestLinkGrantsAccess } from "../../../../lib/group-request-links";
 import { createSupportRequest, routeSupportRequest } from "../../../../lib/capability-routing";
 import { buildRequestDescription, trustPreferenceOptions } from "../../../../lib/support-form";
 import { generateGuestAccessToken } from "../../../../lib/request-lifecycle";
@@ -48,8 +49,14 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       }),
     ]);
 
-    // Private groups are not discoverable: never render a public request form for them.
-    if (!group || !node || group.nodeId !== node.id || group.visibility !== "public") {
+    // A private group is reachable only via a valid, non-revoked share link for THIS group
+    // (feedback #9) — a token for another group must not open this one. Public groups are
+    // always reachable. The same predicate gates the submit action below (defense in depth).
+    const accessToken = typeof resolvedSearch.k === "string" ? resolvedSearch.k : null;
+    if (!group || !node || group.nodeId !== node.id) {
+      notFound();
+    }
+    if (group.visibility !== "public" && !(await requestLinkGrantsAccess(prisma, group.id, accessToken))) {
       notFound();
     }
 
@@ -57,9 +64,8 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
       const cookieStore = await cookies();
       const rawToken = cookieStore.get("pending_request_token")?.value ?? null;
       const headersList = await headers();
-      const host = headersList.get("host") ?? "";
-      const proto = headersList.get("x-forwarded-proto") ?? (host.split(":")[0] === "localhost" ? "http" : "https");
-      const privateLink = rawToken ? `${proto}://${host}/request/status/${rawToken}` : null;
+      // Use the node's canonical domain so production links don't leak localhost from a proxy.
+      const privateLink = rawToken ? absoluteUrl(node.domain, headersList.get("host"), `/request/status/${rawToken}`) : null;
 
       return (
         <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
@@ -101,7 +107,7 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
               </div>
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 <Link
-                  href={`/request/${groupId}`}
+                  href={`/request/${groupId}${accessToken ? `?k=${encodeURIComponent(accessToken)}` : ""}`}
                   className="btn-secondary flex min-h-11 flex-1 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
                 >
                   Submit another request
@@ -159,6 +165,11 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
         redirect(`/request/${groupId}?error=1`);
       }
 
+      // Re-validate access on the POST, not just the render: the page-load gate and this action
+      // are separate server entries, so without this someone could POST a known private groupId
+      // directly. Same predicate as the render gate (feedback #9).
+      const formToken = typeof formData.get("k") === "string" ? (formData.get("k") as string) : null;
+
       const actionPrisma = createPrismaClient();
       let rawToken: string | null = null;
       try {
@@ -166,10 +177,13 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
         // Re-validate node ownership inside the action as defense in depth.
         const [actionNode, actionGroup] = await Promise.all([
           resolveCurrentNode(actionPrisma),
-          actionPrisma.group.findUnique({ where: { id: groupId }, select: { id: true, nodeId: true } }),
+          actionPrisma.group.findUnique({ where: { id: groupId }, select: { id: true, nodeId: true, visibility: true } }),
         ]);
 
         if (!actionGroup || !actionNode || actionGroup.nodeId !== actionNode.id) {
+          redirect("/request");
+        }
+        if (actionGroup.visibility !== "public" && !(await requestLinkGrantsAccess(actionPrisma, actionGroup.id, formToken))) {
           redirect("/request");
         }
 
@@ -220,7 +234,9 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           path: "/",
         });
       }
-      redirect(`/request/${groupId}?submitted=1`);
+      // Preserve the share token through the redirect so the private-group success page still
+      // passes the access gate (the token is already in the link the visitor arrived with).
+      redirect(`/request/${groupId}?submitted=1${formToken ? `&k=${encodeURIComponent(formToken)}` : ""}`);
     }
 
     return (
@@ -243,6 +259,8 @@ export default async function GroupScopedRequestPage({ params, searchParams }: P
           <div className="mt-6 grid gap-8 lg:grid-cols-[1fr_320px]">
           {/* Left — form */}
           <form action={submitGroupScopedRequest} className="flex flex-col gap-5 border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+            {/* Carry the share token so the POST can re-validate access for a private group. */}
+            {accessToken && <input type="hidden" name="k" value={accessToken} />}
             {categories.length > 0 || customAvailable ? (
               <SupportTypePicker
                 categories={categories.map((cat) => ({

@@ -342,6 +342,16 @@ export async function volunteerForResponsibility(
     select: { groupId: true },
   });
 
+  // Feedback #8: a member must not be able to open two confirmation petitions for the
+  // same role. Layer 1 — pre-check for the friendly message. Layer 2 (race-safe) is the
+  // partial unique index Petition_responsibility_volunteer_open_unique, which makes the
+  // losing concurrent insert throw P2002 → openPetition returns "petition_already_open".
+  const existing = await prisma.petition.findFirst({
+    where: { subjectType: "responsibility_proposal", subjectId: `${membershipId}:${type}`, status: "open" },
+    select: { id: true },
+  });
+  if (existing) return { ok: false as const, reason: "petition_already_open" as const };
+
   return openPetition(prisma, {
     groupId: membership.groupId,
     category: "responsibility",

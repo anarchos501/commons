@@ -480,7 +480,7 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
 
     // Active concerns: read-only view for active reviewer holders, mirroring
     // the group page's reviewer-queue pattern.
-    const activeConcerns =
+    const activeConcernsRaw =
       responsibility.type === "reviewer" && isHolder
         ? await prisma.report.findMany({
             where: {
@@ -493,10 +493,17 @@ async function getResponsibilitySpaceData(accountId: string, responsibilityId: s
               id: true,
               subject: true,
               status: true,
+              subjectAccountId: true,
               findings: { select: { outcome: true } },
             },
           })
         : [];
+    // A reviewer who is the SUBJECT of a concern may not see it (RFC-002 / feedback #7).
+    // Filter in memory so null-subject concerns stay visible; strip subjectAccountId after.
+    const activeConcerns = activeConcernsRaw
+      .filter((r) => r.subjectAccountId !== accountId)
+      // Rebuild without subjectAccountId so it never reaches the client.
+      .map((r) => ({ id: r.id, subject: r.subject, status: r.status, findings: r.findings }));
 
     // Publishing in a responsibility's own space is the responsibility acting (F1): the compose
     // forms appear only when the role carries the matching create_* ability (granted at proposal

@@ -43,18 +43,9 @@ export function DiscussionModule({
           <div className="border border-[var(--border)] p-3">
             {data.selectedThread ? (
               <>
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--text)]">{data.selectedThread.title}</p>
-                    <p className="text-xs text-[var(--muted)]">Messages expire automatically.</p>
-                  </div>
-                  {isActive && (
-                    <FormWithNotice action={openThreadClosurePetitionAction}>
-                      <input type="hidden" name="groupId" value={groupId} />
-                      <input type="hidden" name="threadId" value={data.selectedThread.id} />
-                      <SubmitButton variant="secondary">Propose closure</SubmitButton>
-                    </FormWithNotice>
-                  )}
+                <div className="mb-3">
+                  <p className="text-sm font-semibold text-[var(--text)]">{data.selectedThread.title}</p>
+                  <p className="text-xs text-[var(--muted)]">Messages expire automatically.</p>
                 </div>
                 {data.discussionMessages.length > 0 ? (
                   <div className="mb-3 max-h-72 space-y-3 overflow-y-auto pr-1">
@@ -79,6 +70,22 @@ export function DiscussionModule({
                   </form>
                 ) : (
                   <p className="text-xs text-[var(--muted)]">Quiet members can read discussion but cannot post.</p>
+                )}
+                {/* Closing a thread is a deliberate, low-prominence action: a small corner
+                    text link, not a button, so it can't be triggered by accident. */}
+                {isActive && (
+                  <div className="mt-3 flex justify-end">
+                    <FormWithNotice action={openThreadClosurePetitionAction}>
+                      <input type="hidden" name="groupId" value={groupId} />
+                      <input type="hidden" name="threadId" value={data.selectedThread.id} />
+                      <button
+                        type="submit"
+                        className="text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--soft-text)] hover:underline transition"
+                      >
+                        Propose closure
+                      </button>
+                    </FormWithNotice>
+                  </div>
                 )}
               </>
             ) : (

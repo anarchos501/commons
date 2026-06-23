@@ -16,7 +16,7 @@ import {
 } from "./trusted-providers";
 import { approveMembershipRequest } from "./group-membership";
 import { onEmergencyPetitionApproved } from "./emergency";
-import { applyGroupVisibilityFromPetition } from "./group-settings";
+import { applyGroupVisibilityFromPetition, applyCustomRequestsToggleFromPetition, applyMembershipPolicyChangeFromPetition } from "./group-settings";
 import { createProjectFromPetition } from "./projects";
 import { createResponsibilityFromProposal } from "./responsibility-proposals";
 import { onBulletinArchivalPetitionApproved } from "./bulletins";
@@ -133,6 +133,10 @@ async function applyApprovedPetition(
     await onPublicationEntryArchivalPetitionApproved(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
+  } else if (subjectType === "custom_support_requests_toggle") {
+    await applyCustomRequestsToggleFromPetition(tx, petitionId);
+  } else if (subjectType === "membership_policy_change") {
+    await applyMembershipPolicyChangeFromPetition(tx, petitionId);
   } else if (subjectType === "bulletin_creation") {
     await applyContentCreationDraft(tx, petitionId, "bulletin_creation");
   } else if (subjectType === "publication_creation") {
@@ -323,6 +327,24 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     });
     if (!group) return subjectId;
     return target === "private" ? `Make "${group.name}" private` : `Make "${group.name}" publicly visible`;
+  }
+
+  if (subjectType === "custom_support_requests_toggle") {
+    const [gid, state] = subjectId.split(":");
+    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+    if (!group) return subjectId;
+    return state === "on"
+      ? `"${group.name}" accepts custom support requests`
+      : `"${group.name}" stops accepting custom support requests`;
+  }
+
+  if (subjectType === "membership_policy_change") {
+    const [gid, policy] = subjectId.split(":");
+    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+    if (!group) return subjectId;
+    return policy === "open"
+      ? `"${group.name}" → open membership`
+      : `"${group.name}" → application-based membership`;
   }
 
   if (
@@ -550,6 +572,39 @@ export async function getPetitionDetail(prisma: PrismaClient, petition: Petition
     return { summary, proposer, outcome: frameOutcome(status, effect), fields };
   }
 
+  if (subjectType === "custom_support_requests_toggle") {
+    const [gid, state] = subjectId.split(":");
+    const accepts = state === "on";
+    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+    if (group) fields.push({ label: "Collective", value: group.name });
+    const summary = group
+      ? accepts
+        ? `Accept custom support requests in "${group.name}"`
+        : `Stop accepting custom support requests in "${group.name}"`
+      : familyLabel;
+    const effect = accepts
+      ? "this collective accepts free-text custom support requests (members opt in to receiving them)"
+      : "this collective no longer accepts free-text custom support requests";
+    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+  }
+
+  if (subjectType === "membership_policy_change") {
+    const [gid, policy] = subjectId.split(":");
+    const toOpen = policy === "open";
+    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+    if (group) fields.push({ label: "Collective", value: group.name });
+    fields.push({ label: "New membership model", value: toOpen ? "Open (anyone may join)" : "Application-based (requires approval)" });
+    const summary = group
+      ? toOpen
+        ? `Switch "${group.name}" to open membership`
+        : `Switch "${group.name}" to application-based membership`
+      : familyLabel;
+    const effect = toOpen
+      ? "anyone may join this collective directly"
+      : "joining this collective requires an approved membership application";
+    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+  }
+
   if (subjectType === "discussion_thread_close") {
     const thread = await prisma.discussionThread.findUnique({ where: { id: subjectId }, select: { title: true } });
     if (thread) fields.push({ label: "Thread", value: thread.title });
@@ -650,6 +705,8 @@ export function proposalFamilyLabel(subjectType: string) {
     case "trusted_provider_proposal": return "Trusted provider recognition";
     case "trusted_provider_revocation": return "Trusted provider revocation";
     case "group_visibility_proposal": return "Group visibility proposal";
+    case "custom_support_requests_toggle": return "Custom support requests";
+    case "membership_policy_change": return "Membership model change";
     case "bulletin_creation": return "Bulletin Creation";
     case "publication_creation": return "Publication Creation";
     case "publication_entry_creation": return "Publication Entry";

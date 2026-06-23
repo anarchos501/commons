@@ -56,7 +56,10 @@ export async function proposeResponsibilityAction(
   return { kind: "success", message: "Responsibility proposed — check Petitions." };
 }
 
-export async function volunteerForResponsibilityAction(formData: FormData) {
+export async function volunteerForResponsibilityAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const session = await getSession();
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
@@ -64,11 +67,19 @@ export async function volunteerForResponsibilityAction(formData: FormData) {
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    await volunteerForResponsibility(prisma, { membershipId: membership.id, type });
+    const result = await volunteerForResponsibility(prisma, { membershipId: membership.id, type });
+    if (!result.ok) {
+      // Both the pre-check and the unique-index P2002 path surface "petition_already_open".
+      if (result.reason === "petition_already_open") {
+        return { kind: "error", message: "You already have an open volunteer petition for this role." };
+      }
+      return { kind: "error", message: "You are not eligible to volunteer for this role." };
+    }
   } finally {
     await prisma.$disconnect();
   }
   revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Volunteer petition opened — check Petitions." };
 }
 
 export async function recallResponsibilityAction(formData: FormData) {

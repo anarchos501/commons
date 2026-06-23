@@ -494,6 +494,7 @@ model Group {
   trustedProviderRevocations     TrustedProviderRevocationRequest[]
   trustedProviderStatuses        TrustedProviderStatus[]
   inviteTokens                   GroupInviteToken[]
+  requestLinks                   GroupRequestLink[]
   contentCreationDrafts          ContentCreationDraft[]
   responsibilityProposalDrafts   ResponsibilityProposalDraft[]
 
@@ -743,6 +744,7 @@ model GroupMembership {
   trustedProviderRevocations    TrustedProviderRevocationRequest[]
   trustedProviderStatuses       TrustedProviderStatus[]
   createdInviteTokens           GroupInviteToken[]
+  createdRequestLinks           GroupRequestLink[]
 
   @@unique([accountId, groupId])
   @@index([accountId])
@@ -777,6 +779,24 @@ model GroupInviteToken {
   createdByMembershipId String
   createdAt             DateTime  @default(now())
   expiresAt             DateTime
+  revokedAt             DateTime?
+
+  group     Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy GroupMembership @relation(fields: [createdByMembershipId], references: [id])
+
+  @@index([groupId])
+}
+
+// Shareable, durable request link (feedback #9): lets a PRIVATE group receive support
+// requests via an unlisted link without becoming publicly discoverable. Unlike an invite,
+// it never expires — it stays valid until revoked (revocation is the only off-switch).
+model GroupRequestLink {
+  id                    String    @id @default(cuid())
+  tokenHash             String    @unique // SHA-256 of raw token; raw token is never stored
+  tokenPreview          String             // first 8 chars of raw token, shown so members know a link is active
+  groupId               String
+  createdByMembershipId String
+  createdAt             DateTime  @default(now())
   revokedAt             DateTime?
 
   group     Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)

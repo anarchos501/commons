@@ -8,6 +8,7 @@ import { getSession } from "../../../../../../lib/session";
 import { requiredString } from "../../../../../../lib/support-form";
 import { sponsorMembershipApplication, dismissMembershipApplication } from "../../../../../../lib/group-membership";
 import { generateGroupInviteToken, revokeAllGroupInviteTokens } from "../../../../../../lib/group-invites";
+import { resolveCurrentNode, absoluteUrl } from "../../../../../../lib/node-context";
 import type { FormState, InviteFormState } from "../../../../../../components/shared/form-state";
 import { requireMembership } from "../_shared/guards";
 
@@ -68,10 +69,9 @@ export async function generateInviteLinkAction(
     if (!result.ok) return { kind: "error", message: "Could not generate invite link." };
     revalidatePath(`/groups/${groupId}`);
     const hdrList = await headers();
-    const host = hdrList.get("host") ?? "localhost:3000";
-    const proto = process.env.NODE_ENV === "production"
-      ? (hdrList.get("x-forwarded-proto") ?? "https") : "http";
-    return { kind: "success", message: "", inviteUrl: `${proto}://${host}/invite/${result.rawToken}` };
+    // Prefer the node's canonical domain over the request Host (proxy-mangled to localhost in prod).
+    const nodeDomain = (await resolveCurrentNode(prisma))?.domain ?? null;
+    return { kind: "success", message: "", inviteUrl: absoluteUrl(nodeDomain, hdrList.get("host"), `/invite/${result.rawToken}`) };
   } finally {
     await prisma.$disconnect();
   }

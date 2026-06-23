@@ -3,10 +3,10 @@ import { SubmitButton } from "../../../../../../components/shared/SubmitButton";
 import { LocalTime } from "../../../../../../components/shared/LocalTime";
 import { GovernanceSignalForm } from "../../../../../../components/shared/GovernanceSignalForm";
 import { GovernanceMeter } from "../../../../../../components/shared/GovernanceMeter";
-import { governanceCategoryDescription, governanceSignalLabels, type GovernanceCategory } from "../../../../../../lib/governance-categories";
+import { CATEGORY_REGISTRY, governanceCategoryDescription, governanceSignalLabels, type GovernanceCategory } from "../../../../../../lib/governance-categories";
 import { governanceCategoryLabel } from "../../../../../../lib/petition-evaluation";
 import { COMPACT_DATE } from "../_shared/format";
-import { declareEmergencyAction, proposeGroupVisibilityAction, updateGovernanceSignalAction } from "./actions";
+import { declareEmergencyAction, proposeGroupVisibilityAction, proposeMembershipPolicyChangeAction, updateGovernanceSignalAction } from "./actions";
 
 const PARAM_LABELS: Record<string, string> = {
   threshold: "Approval Threshold",
@@ -42,7 +42,7 @@ export function GovernanceModule({
   isActive,
   groupId,
 }: {
-  group: { visibility: string };
+  group: { visibility: string; membershipPolicy: string };
   activeEmergency: { expiresAt: Date } | null;
   governanceSettings: GovernanceSettingItem[];
   isActive: boolean;
@@ -85,6 +85,42 @@ export function GovernanceModule({
           </div>
         )}
 
+        {/* Membership model — open vs application-based, changeable by petition (feedback #2).
+            Nested with Visibility as a collective-wide setting; the petition uses the group's
+            membership thresholds. */}
+        <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+          <p className="text-sm font-medium text-[var(--text)]">Membership model</p>
+          {group.membershipPolicy === "open" ? (
+            <>
+              <p className="mt-1 text-xs text-[var(--soft-text)]">
+                Anyone may join this collective directly.
+                {isActive && " Active members can petition to require an approved application to join."}
+              </p>
+              {isActive && (
+                <form action={proposeMembershipPolicyChangeAction} className="mt-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <input type="hidden" name="target" value="request_required" />
+                  <SubmitButton variant="secondary">Propose application-based membership</SubmitButton>
+                </form>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-[var(--soft-text)]">
+                Joining requires an approved membership application.
+                {isActive && " Active members can petition to switch to open membership."}
+              </p>
+              {isActive && (
+                <form action={proposeMembershipPolicyChangeAction} className="mt-3">
+                  <input type="hidden" name="groupId" value={groupId} />
+                  <input type="hidden" name="target" value="open" />
+                  <SubmitButton variant="secondary">Propose open membership</SubmitButton>
+                </form>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
         {governanceSettings.map((setting) => (
           <div key={setting.category} className="bg-[var(--subtle)] p-3">
@@ -123,13 +159,21 @@ export function GovernanceModule({
                 Characteristics
               </summary>
               <div className="mt-2 space-y-3 border-l border-[var(--border)] pl-3">
-                {setting.parameters.map((parameter) => (
+                {setting.parameters.map((parameter) => {
+                  // Anchors are [restrictive (−1), default (0), permissive (+1)]; label the gauge
+                  // ends with the factual extreme values rather than value-laden words.
+                  const anchors = CATEGORY_REGISTRY[setting.category]?.[parameter.name]?.anchors;
+                  return (
                   <div key={parameter.name} className="flex flex-col gap-1.5">
                     <span className="text-xs text-[var(--soft-text)]">
                       {PARAM_LABELS[parameter.name] ?? parameter.name} · {formatParamValue(parameter.name, parameter.value)}
                       {!parameter.hasOwnSignal && setting.categorySignal !== 0 ? " · using bulk vote" : ""}
                     </span>
-                    <GovernanceMeter temperature={parameter.temperature} />
+                    <GovernanceMeter
+                      temperature={parameter.temperature}
+                      minLabel={anchors ? formatParamValue(parameter.name, anchors[0]) : undefined}
+                      maxLabel={anchors ? formatParamValue(parameter.name, anchors[2]) : undefined}
+                    />
                     <GovernanceSignalForm
                       action={updateGovernanceSignalAction}
                       groupId={groupId}
@@ -139,7 +183,8 @@ export function GovernanceModule({
                       labels={governanceSignalLabels(setting.category as GovernanceCategory, parameter.name)}
                     />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </details>
           </div>

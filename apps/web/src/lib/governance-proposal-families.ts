@@ -40,6 +40,9 @@ export type ProposalFamily =
   | "trusted_provider_revocation"
   // RFC: Private-By-Default Groups
   | "group_visibility_proposal"
+  // Collective-wide settings that must be petitioned rather than flipped by one member.
+  | "custom_support_requests_toggle"
+  | "membership_policy_change"
   // RFC: Governed Publishing
   | "bulletin_creation"
   | "publication_creation"
@@ -84,6 +87,10 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   trusted_provider_proposal: "trusted_provider",
   trusted_provider_revocation: "trusted_provider",
   group_visibility_proposal: "group_settings",
+  custom_support_requests_toggle: "group_settings",
+  // Changing the membership model is a membership-weight decision, so it inherits the
+  // group's membership thresholds/duration (per feedback #2).
+  membership_policy_change: "membership",
   bulletin_creation: "publishing",
   publication_creation: "publishing",
   publication_entry_creation: "publishing",
@@ -132,6 +139,14 @@ export function deriveCompetitionKey(
     case "node_name_change_proposal":
     // Non-competing: making a group public is idempotent; multiple concurrent proposals are allowed
     case "group_visibility_proposal":
+    // Non-competing AND reversible: these settings flip back and forth over a group's life. A
+    // non-null key would make resolveCompetingPetitions treat a previously-approved toggle as a
+    // permanent "existing winner" and auto-reject every future opposite-direction petition without
+    // counting votes — locking the setting forever. The partial unique indexes
+    // (Petition_custom_requests_toggle_open_unique / Petition_membership_policy_change_open_unique)
+    // already enforce "only one open at a time", so no competition key is needed.
+    case "custom_support_requests_toggle":
+    case "membership_policy_change":
     // Non-competing: each event proposal is independent; coalition events open one petition
     // per member group sharing the same subjectId (proposalId) and must not compete.
     case "event_authorization":

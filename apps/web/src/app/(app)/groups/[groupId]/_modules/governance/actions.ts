@@ -6,7 +6,7 @@ import { createPrismaClient } from "../../../../../../lib/prisma";
 import { getSession } from "../../../../../../lib/session";
 import { requiredString } from "../../../../../../lib/support-form";
 import { openEmergencyPetition } from "../../../../../../lib/emergency";
-import { proposeGroupVisibility } from "../../../../../../lib/group-settings";
+import { proposeGroupVisibility, proposeMembershipPolicyChange } from "../../../../../../lib/group-settings";
 import { upsertGovernanceSignal } from "../../../../../../lib/governance-temperature";
 import type { GovernanceCategory } from "../../../../../../lib/governance-categories";
 import { requireMembership } from "../_shared/guards";
@@ -45,6 +45,21 @@ export async function proposeGroupVisibilityAction(formData: FormData) {
   const prisma = createPrismaClient();
   try {
     await proposeGroupVisibility(prisma, { groupId, createdByMembershipId: membership.id, target });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function proposeMembershipPolicyChangeAction(formData: FormData) {
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = formData.get("groupId") as string;
+  const target = formData.get("target") === "open" ? "open" : "request_required";
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    await proposeMembershipPolicyChange(prisma, { groupId, createdByMembershipId: membership.id, target });
   } finally {
     await prisma.$disconnect();
   }
