@@ -16,6 +16,7 @@ export type OpenProjectHostingProposalResult =
         | "not_eligible"
         | "project_not_adoptable"
         | "already_hosted"
+        | "proposal_already_open"
         | "empty_electorate"
         | "petition_error";
     };
@@ -161,26 +162,62 @@ export async function openProjectHostingProposal(
   ) {
     return { ok: false, reason: "not_eligible" };
   }
-  if (!project || project.status === "closed" || project.status === "completed" || project.pendingClosureAt === null) {
+  if (!project || project.status === "closed" || project.status === "completed") {
     return { ok: false, reason: "project_not_adoptable" };
   }
   if (activeHosting) return { ok: false, reason: "already_hosted" };
 
-  const hasAnyActiveHost = await prisma.projectHosting.count({ where: { projectId, endedAt: null } });
-  if (hasAnyActiveHost > 0) return { ok: false, reason: "project_not_adoptable" };
+  // One open proposal per (project, candidate group) pair — applies to both modes.
+  const openProposal = await prisma.projectHostingProposal.findFirst({
+    where: { projectId, candidateGroupId, status: "open" },
+    select: { id: true },
+  });
+  if (openProposal) return { ok: false, reason: "proposal_already_open" };
 
-  const frozenElectorate = project.pendingClosureElectorate as FrozenProjectElectorate | null;
-  if (!frozenElectorate || frozenElectorate.projectId !== projectId) {
-    return { ok: false, reason: "project_not_adoptable" };
-  }
-  if (frozenElectorate.projectMembershipIds.length === 0) return { ok: false, reason: "empty_electorate" };
-  if (
-    !projectCreator ||
-    projectCreator.projectId !== projectId ||
-    projectCreator.status !== "active" ||
-    !frozenElectorate.projectMembershipIds.includes(projectCreator.id)
-  ) {
+  // Two modes (feedback #7 — projects may have multiple concurrent hosts).
+  // Adoption mode (RFC-007): the project is pending closure; the FROZEN pre-closure
+  // electorate decides under the 30-day adoption clock.
+  // Additional-host mode: a not-closing project gains another concurrent host; the
+  // project side votes with the LIVE electorate and there is no adoption deadline.
+  const adoptionMode = project.pendingClosureAt !== null;
+
+  if (!projectCreator || projectCreator.projectId !== projectId || projectCreator.status !== "active") {
     return { ok: false, reason: "not_eligible" };
+  }
+
+  let frozenElectorate: FrozenProjectElectorate;
+  if (adoptionMode) {
+    const hasAnyActiveHost = await prisma.projectHosting.count({ where: { projectId, endedAt: null } });
+    if (hasAnyActiveHost > 0) return { ok: false, reason: "project_not_adoptable" };
+
+    const stored = project.pendingClosureElectorate as FrozenProjectElectorate | null;
+    if (!stored || stored.projectId !== projectId) {
+      return { ok: false, reason: "project_not_adoptable" };
+    }
+    if (stored.projectMembershipIds.length === 0) return { ok: false, reason: "empty_electorate" };
+    if (!stored.projectMembershipIds.includes(projectCreator.id)) {
+      return { ok: false, reason: "not_eligible" };
+    }
+    frozenElectorate = stored;
+  } else {
+    if (projectCreator.participationStatus !== "active") {
+      return { ok: false, reason: "not_eligible" };
+    }
+    // In additional-host mode the ProjectHostingProposal.frozenElectorate column name lies:
+    // this stores an INFORMATIONAL snapshot of the active membership at proposal time. The
+    // project-side petition below uses the live electorate (no frozen voterScope), and
+    // nothing reads this snapshot as an eligibility list. See the mode branch above.
+    const activeMembers = await prisma.projectMembership.findMany({
+      where: { projectId, status: "active", participationStatus: "active" },
+      select: { id: true, accountId: true },
+      orderBy: { joinedAt: "asc" },
+    });
+    frozenElectorate = {
+      projectId,
+      capturedAt: new Date().toISOString(),
+      projectMembershipIds: activeMembers.map((m) => m.id),
+      accountIds: activeMembers.map((m) => m.accountId),
+    };
   }
 
   const proposalId = randomUUID();
@@ -189,7 +226,9 @@ export async function openProjectHostingProposal(
     id: project.id,
     name: project.name,
     description: project.description,
-    pendingClosureAt: project.pendingClosureAt.toISOString(),
+    // null ⇒ additional-host mode; evaluation pins the mode from this stored value, so the
+    // proposal evaluates in the mode it was opened in even if the closure clock starts mid-vote.
+    pendingClosureAt: project.pendingClosureAt ? project.pendingClosureAt.toISOString() : null,
   };
   const candidateGroupSnapshot = {
     id: candidateGroup.id,
@@ -214,7 +253,11 @@ export async function openProjectHostingProposal(
     subjectType: "project_hosting_acceptance",
     subjectId: proposalId,
     createdByProjectMembershipId: projectCreatedByProjectMembershipId,
-    voterScope: { type: "project_frozen", scopeId: projectId, membershipIds: frozenElectorate.projectMembershipIds },
+    // Adoption votes with the frozen pre-closure electorate; additional-host mode omits the
+    // voterScope so openPetition falls back to the live project electorate.
+    voterScope: adoptionMode
+      ? { type: "project_frozen", scopeId: projectId, membershipIds: frozenElectorate.projectMembershipIds }
+      : undefined,
   });
   if (!projectPetition.ok) {
     await markPetitionsSuperseded(prisma, [groupPetition.petitionId]);
@@ -240,11 +283,15 @@ export async function openProjectHostingProposal(
     throw err;
   }
 
-  const deadline = new Date(project.pendingClosureAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-  await prisma.petition.updateMany({
-    where: { id: { in: [groupPetition.petitionId, projectPetition.petitionId] }, closesAt: { gt: deadline } },
-    data: { closesAt: deadline },
-  });
+  // Only adoption is raced against the closure clock; additional-host petitions keep their
+  // ordinary lifecycles.
+  if (adoptionMode && project.pendingClosureAt) {
+    const deadline = new Date(project.pendingClosureAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+    await prisma.petition.updateMany({
+      where: { id: { in: [groupPetition.petitionId, projectPetition.petitionId] }, closesAt: { gt: deadline } },
+      data: { closesAt: deadline },
+    });
+  }
 
   return {
     ok: true,
@@ -267,6 +314,7 @@ export async function evaluateProjectHostingProposal(
       groupPetitionId: true,
       projectPetitionId: true,
       status: true,
+      projectSnapshot: true,
       project: { select: { pendingClosureAt: true, status: true } },
     },
   });
@@ -297,16 +345,22 @@ export async function evaluateProjectHostingProposal(
   }
 
   if (children.every((petition) => petition!.status === "approved")) {
-    const deadline = proposal.project.pendingClosureAt
-      ? new Date(proposal.project.pendingClosureAt.getTime() + 30 * 24 * 60 * 60 * 1000)
-      : null;
-    if (
-      !deadline ||
-      proposal.project.status === "closed" ||
-      proposal.project.status === "completed" ||
-      children.some((petition) => !petition!.resolvedAt || petition!.resolvedAt > deadline)
-    ) {
+    // Mode is pinned by the snapshot stored at open time, NOT the project's current state —
+    // a proposal evaluates in the mode it was opened in even if the closure clock started
+    // (or was cancelled) mid-vote.
+    const snapshot = proposal.projectSnapshot as { pendingClosureAt?: string | null } | null;
+    const adoptionMode = (snapshot?.pendingClosureAt ?? null) !== null;
+
+    if (proposal.project.status === "closed" || proposal.project.status === "completed") {
       return failProjectHostingProposal(prisma, proposal, "failed-timeout");
+    }
+    if (adoptionMode) {
+      const deadline = proposal.project.pendingClosureAt
+        ? new Date(proposal.project.pendingClosureAt.getTime() + 30 * 24 * 60 * 60 * 1000)
+        : null;
+      if (!deadline || children.some((petition) => !petition!.resolvedAt || petition!.resolvedAt > deadline)) {
+        return failProjectHostingProposal(prisma, proposal, "failed-timeout");
+      }
     }
 
     const activeHosting = await prisma.projectHosting.findFirst({
@@ -318,17 +372,22 @@ export async function evaluateProjectHostingProposal(
         data: { projectId: proposal.projectId, groupId: proposal.candidateGroupId },
       });
     }
-    await prisma.project.update({
-      where: { id: proposal.projectId },
-      data: { pendingClosureAt: null, pendingClosureElectorate: Prisma.JsonNull },
-    });
+    if (adoptionMode) {
+      await prisma.project.update({
+        where: { id: proposal.projectId },
+        data: { pendingClosureAt: null, pendingClosureElectorate: Prisma.JsonNull },
+      });
+    } else {
+      // A host arrived — cancel any closure clock that may have started mid-vote.
+      await syncProjectHostingLifecycle(prisma, proposal.projectId);
+    }
     await prisma.projectHostingProposal.update({
       where: { id: proposal.id },
       data: { status: "succeeded", resolvedAt: new Date() },
     });
     await logAction(prisma, {
       groupId: proposal.candidateGroupId,
-      action: "project_hosting.adopted",
+      action: adoptionMode ? "project_hosting.adopted" : "project_hosting.added",
       targetType: "project",
       targetId: proposal.projectId,
       metadata: { proposalId: proposal.id },

@@ -596,6 +596,70 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           )}
 
           {isActive && (
+          <CollapsibleSection id="host-collectives" title="Host Collectives" eyebrow="Endorsement & support" storageKey={`project:${projectId}:section:hosts`} className="bg-[var(--surface)] p-5 sm:p-6">
+            <div className="space-y-4">
+              {data.hostGroups.length > 0 ? (
+                <div className="space-y-3">
+                  {data.hostGroups.map((group) => (
+                    <div key={group.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                      <a href={`/groups/${group.id}`} className="text-sm font-semibold text-[var(--accent)] hover:underline">
+                        {group.name}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No current host collective." />
+              )}
+              <p className="text-xs leading-5 text-[var(--muted)]">
+                Hosting is endorsement and support, not ownership — project members govern the project. A project may
+                have multiple concurrent hosts; adding one requires mutual consent: the candidate collective agrees to
+                host through its own petition, and this project&apos;s members agree to accept through theirs.
+              </p>
+              {project.pendingClosureAt !== null ? (
+                <p className="text-xs leading-5 text-[var(--muted)]">
+                  This project is pending closure — successor-host adoption runs from the Overview section above.
+                </p>
+              ) : data.eligibleAsProjectSponsor ? (
+                data.candidateHostGroups.length > 0 ? (
+                  <details>
+                    <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">
+                      Propose a host collective
+                    </summary>
+                    <FormWithNotice action={proposeProjectHostingAction} className="mt-3 space-y-3">
+                      <input type="hidden" name="projectId" value={projectId} />
+                      <input type="hidden" name="projectMembershipId" value={currentMembership?.id ?? ""} />
+                      <label className="block">
+                        <span className="field-label">Candidate collective</span>
+                        <select name="candidateMembershipId" required className="field-input">
+                          <option value="">Select a collective&hellip;</option>
+                          {data.candidateHostGroups.map((option) => (
+                            <option key={option.groupId} value={option.id}>{option.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="field-label">Rationale</span>
+                        <textarea name="content" required rows={3} className="field-input resize-none" placeholder="Why should this collective host the project?" />
+                      </label>
+                      <SubmitButton variant="secondary">Open hosting proposal</SubmitButton>
+                    </FormWithNotice>
+                  </details>
+                ) : (
+                  <p className="text-xs leading-5 text-[var(--muted)]">
+                    You don&apos;t hold active participation in any collective that could be proposed as a host.
+                  </p>
+                )
+              ) : (
+                <p className="text-xs leading-5 text-[var(--muted)]">
+                  Active project members can propose hosting from one of their own collectives.
+                </p>
+              )}
+            </div>
+          </CollapsibleSection>
+          )}
+
+          {isActive && (
           <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this project offers" storageKey={`project:${projectId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
             <div className="space-y-4">
               {data.contributionCategories.length > 0 ? (
@@ -669,12 +733,12 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
     });
     const hostGroups = hostings.map((h) => ({ id: h.groupId, name: h.group.name }));
 
-    // Pending-closure adoption (RFC-007 ProjectHostingProposal): the acting
-    // account can sponsor the project's side of an adoption only if its own
-    // ProjectMembership is part of the frozen pending-closure electorate (see
-    // openProjectHostingProposal) — and can sponsor a candidate group's side
-    // only where it holds active+active membership in a group that isn't
-    // already an active host.
+    // Hosting proposals (RFC-007 ProjectHostingProposal), two modes (feedback #7):
+    // pending-closure adoption — the acting account can sponsor the project's side only if
+    // its ProjectMembership is part of the frozen pending-closure electorate; additional
+    // host on a not-closing project — any active, actively-participating project member can
+    // sponsor. Either way, the candidate's side needs active+active membership in a group
+    // that isn't already an active host.
     let eligibleAsProjectSponsor = false;
     let candidateHostGroups: { id: string; groupId: string; name: string }[] = [];
     if (project.pendingClosureAt !== null) {
@@ -684,7 +748,10 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
         currentMembership.status === "active" &&
         frozenElectorate?.projectMembershipIds.includes(currentMembership.id)
       );
-
+    } else {
+      eligibleAsProjectSponsor = !!activeProjectMember;
+    }
+    if (eligibleAsProjectSponsor) {
       const hostGroupIds = hostings.map((h) => h.groupId);
       const candidateMemberships = await prisma.groupMembership.findMany({
         where: {
@@ -989,7 +1056,7 @@ async function proposeProjectHostingAction(_prev: FormState, formData: FormData)
     await prisma.$disconnect();
   }
   revalidatePath(`/projects/${projectId}`);
-  return { kind: "success", message: "Hosting proposal opened — both the candidate collective and the project's frozen membership will decide through their own petitions." };
+  return { kind: "success", message: "Hosting proposal opened — both the candidate collective and the project's members will decide through their own petitions." };
 }
 
 function projectHostingProposalFailureMessage(reason: string) {
@@ -997,6 +1064,7 @@ function projectHostingProposalFailureMessage(reason: string) {
     case "not_eligible": return "Both the candidate collective and the project sponsor must hold active, active-participation membership.";
     case "project_not_adoptable": return "This project is not currently open to successor-host adoption.";
     case "already_hosted": return "That collective is already an active host of this project.";
+    case "proposal_already_open": return "A hosting proposal between this project and that collective is already open.";
     case "empty_electorate": return "This project's frozen pre-closure membership is empty, so adoption cannot proceed — its remaining participants may found a new collective instead.";
     case "petition_error": return "This proposal could not be submitted.";
     default: return "This proposal could not be submitted.";

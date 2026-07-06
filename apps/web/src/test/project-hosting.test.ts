@@ -171,6 +171,102 @@ test("project hosting proposal rejects a pending-closure project with an empty e
   }
 });
 
+test("additional-host proposal succeeds on a hosted project and keeps the existing host", async () => {
+  const { group, candidateGroup, candidateMemberships, project, projectMemberships } = await createFixture("ph_addhost");
+  try {
+    // No makeHostless: the project is normally hosted by `group`, so this opens in
+    // additional-host mode (pendingClosureAt is null).
+    const result = await openProjectHostingProposal(prisma, {
+      projectId: project.id,
+      candidateGroupId: candidateGroup.id,
+      groupCreatedByMembershipId: candidateMemberships[0].id,
+      projectCreatedByProjectMembershipId: projectMemberships[0].id,
+      content: "Add a second host collective.",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    // The stored snapshot pins additional-host mode.
+    const proposalRow = await prisma.projectHostingProposal.findUniqueOrThrow({ where: { id: result.proposalId } });
+    assert.equal((proposalRow.projectSnapshot as { pendingClosureAt: string | null }).pendingClosureAt, null);
+
+    // Duplicate (project, group) pair is rejected while the first proposal is open.
+    const dup = await openProjectHostingProposal(prisma, {
+      projectId: project.id,
+      candidateGroupId: candidateGroup.id,
+      groupCreatedByMembershipId: candidateMemberships[1].id,
+      projectCreatedByProjectMembershipId: projectMemberships[1].id,
+      content: "Duplicate.",
+    });
+    assert.equal(dup.ok, false);
+    if (!dup.ok) assert.equal(dup.reason, "proposal_already_open");
+
+    for (const membership of candidateMemberships) {
+      await addPetitionSupport(prisma, { petitionId: result.groupPetitionId, actorAccountId: membership.accountId, membershipId: membership.id });
+    }
+    for (const membership of projectMemberships) {
+      await addPetitionSupport(prisma, { petitionId: result.projectPetitionId, actorAccountId: membership.accountId, projectMembershipId: membership.id });
+    }
+    await prisma.petition.updateMany({
+      where: { id: { in: [result.groupPetitionId, result.projectPetitionId] } },
+      data: { closesAt: new Date(Date.now() - 1000) },
+    });
+
+    // Cross-mode pin: the closure clock starts MID-VOTE (e.g. the existing host withdrew).
+    // Evaluation must still run the additional-host path — pinned by the stored snapshot —
+    // not auto-fail on the adoption deadline.
+    await prisma.project.update({
+      where: { id: project.id },
+      data: {
+        pendingClosureAt: new Date(),
+        pendingClosureElectorate: {
+          projectId: project.id,
+          capturedAt: new Date().toISOString(),
+          projectMembershipIds: projectMemberships.map((m) => m.id),
+          accountIds: projectMemberships.map((m) => m.accountId),
+        },
+      },
+    });
+
+    await evaluateAndApplyPetition(prisma, result.groupPetitionId);
+    await evaluateAndApplyPetition(prisma, result.projectPetitionId);
+
+    const proposal = await prisma.projectHostingProposal.findUniqueOrThrow({ where: { id: result.proposalId } });
+    assert.equal(proposal.status, "succeeded");
+
+    // Both hosts are active concurrently (multi-host decision, feedback #7).
+    const activeHostings = await prisma.projectHosting.findMany({
+      where: { projectId: project.id, endedAt: null },
+      select: { groupId: true },
+    });
+    const activeHostGroupIds = activeHostings.map((h) => h.groupId).sort();
+    assert.deepEqual(activeHostGroupIds, [group.id, candidateGroup.id].sort());
+
+    // The mid-vote closure clock was cancelled — the project is hosted again.
+    const updatedProject = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
+    assert.equal(updatedProject.pendingClosureAt, null);
+  } finally {
+    await cleanupFixture("ph_addhost");
+  }
+});
+
+test("additional-host proposal rejects a candidate that already hosts the project", async () => {
+  const { group, groupMemberships, project, projectMemberships } = await createFixture("ph_duphost");
+  try {
+    const result = await openProjectHostingProposal(prisma, {
+      projectId: project.id,
+      candidateGroupId: group.id,
+      groupCreatedByMembershipId: groupMemberships[0].id,
+      projectCreatedByProjectMembershipId: projectMemberships[0].id,
+      content: "Already hosting.",
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "already_hosted");
+  } finally {
+    await cleanupFixture("ph_duphost");
+  }
+});
+
 async function createFixture(prefix: string) {
   await cleanupFixture(prefix);
 
