@@ -11,16 +11,17 @@ import {
 import { createPrismaClient } from "../../../lib/prisma";
 import { getSession } from "../../../lib/session";
 import {
-  createContributionFromAcceptedRoute,
+  completeAcceptedRoute,
   createSupportRequest,
   decideRequestRoute,
   declareServiceCapability,
+  markRouteUnreachable,
   routeSupportRequest,
 } from "../../../lib/capability-routing";
 import { leaveGroup, requireGroupMembership, withdrawGroupApplication } from "../../../lib/group-membership";
 import { withdrawProjectJoinRequest } from "../../../lib/project-membership";
 import { buildRequestDescription, capitalize, optionalString, requiredString, serviceTypeLabel } from "../../../lib/support-form";
-import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
+import { deleteSupportRequest, fulfillSupportRequest, reopenSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
 import { addNodePetitionSupport, addPetitionSupport } from "../../../lib/petitions";
 import { evaluateAndApplyPetition, getPetitionDetail } from "../../../lib/petition-evaluation";
 import { resolveCurrentNode } from "../../../lib/node-context";
@@ -432,6 +433,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                           const statusLabel = REQUEST_STATUS_LABELS[request.status] ?? request.status;
                           const isActive = ["open", "routed", "matched"].includes(request.status);
                           const accessLog = data.contactAccessByRequest[request.id] ?? [];
+                          // Reopen is offered only when the match broke: the contributor reported
+                          // "unreachable" and no other route is still accepted (feedback #5).
+                          const canReopen =
+                            request.status === "matched" &&
+                            !request.routes.some((r) => r.status === "accepted") &&
+                            request.routes.some((r) => r.status === "unreachable");
 
                           async function fulfillMyRequest() {
                             "use server";
@@ -440,6 +447,18 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                             const p = createPrismaClient();
                             try { await fulfillSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId }); }
                             finally { await p.$disconnect(); }
+                            revalidatePath("/dashboard");
+                          }
+
+                          async function reopenMyRequest() {
+                            "use server";
+                            const s = await getSession();
+                            if (!s.accountId) redirect("/login");
+                            const p = createPrismaClient();
+                            try {
+                              await reopenSupportRequest(p, { supportRequestId: request.id, actorAccountId: s.accountId });
+                              await routeSupportRequest(p, { supportRequestId: request.id });
+                            } finally { await p.$disconnect(); }
                             revalidatePath("/dashboard");
                           }
 
@@ -464,9 +483,19 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                               <p className="mt-1 text-xs text-[var(--muted)]">
                                 Submitted <LocalTime value={request.createdAt.toISOString()} options={{ month: "short", day: "numeric" }} />
                               </p>
+                              {canReopen && (
+                                <p className="mt-2 border border-[var(--notice-border)] bg-[var(--notice)] px-2 py-1.5 text-xs text-[var(--notice-text)]">
+                                  The member who accepted couldn&rsquo;t reach you. You can reopen this request to look for support again.
+                                </p>
+                              )}
                               {(isActive || request.status !== "deleted") && (
                                 <div className="mt-2 flex gap-2">
-                                  {request.status === "matched" && (
+                                  {canReopen && (
+                                    <form action={reopenMyRequest}>
+                                      <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">Reopen request</button>
+                                    </form>
+                                  )}
+                                  {request.status === "matched" && !canReopen && (
                                     <form action={fulfillMyRequest}>
                                       <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">Mark support received</button>
                                     </form>
@@ -515,10 +544,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                     ) : (
                       <ul className="space-y-3">
                         {data.acceptedRequests.map((r) => (
-                          <li key={r.routeId}>
+                          <li key={r.routeId} className="border border-[var(--border)] bg-[var(--surface)]">
                             <Link
                               href={`/requests/accepted/${r.routeId}`}
-                              className="block border border-[var(--border)] bg-[var(--surface)] px-4 py-3 hover:bg-[var(--hover)]"
+                              className="block px-4 py-3 hover:bg-[var(--hover)]"
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <p className="text-sm font-medium">
@@ -534,6 +563,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                               </p>
                               <p className="mt-1 text-xs text-[var(--accent)]">View contact &amp; coordinate →</p>
                             </Link>
+                            <div className="flex gap-3 border-t border-[var(--border)] px-4 py-2">
+                              <form action={recordContributionAction}>
+                                <input type="hidden" name="routeId" value={r.routeId} />
+                                <button type="submit" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                                  Mark support provided
+                                </button>
+                              </form>
+                              <form action={markRouteUnreachableAction}>
+                                <input type="hidden" name="routeId" value={r.routeId} />
+                                <button type="submit" className="text-xs text-[var(--muted)] hover:text-[var(--text)] hover:underline">
+                                  Couldn&rsquo;t reach requester
+                                </button>
+                              </form>
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -730,6 +773,7 @@ async function getDashboardData(
               expiresAt: true,
               accountabilityEndsAt: true,
               services: { where: { serviceType: "category" }, select: { category: { select: { name: true } } }, take: 1 },
+              routes: { select: { status: true } },
             },
             take: 10,
           })
@@ -763,6 +807,7 @@ async function getDashboardData(
       customNeed: r.serviceType === "custom" ? r.supportRequest.customNeed ?? null : null,
       groupName: r.supportRequest.group.name,
       acceptedAtIso: r.decidedAt ? r.decidedAt.toISOString() : null,
+      requestStatus: r.supportRequest.status,
       requestStatusLabel: REQUEST_STATUS_LABELS[r.supportRequest.status] ?? r.supportRequest.status,
     }));
 
@@ -969,7 +1014,9 @@ async function getDashboardData(
         .filter((n) => n.category === "aboutYou")
         .map((n) => ({ key: `about:${n.id}`, kind: "about" as const, label: n.title, detail: n.detail, href: n.href ?? "#routes" })),
       ...acceptedRequests
-        .filter((r) => r.requestStatusLabel !== "Fulfilled")
+        // Compare raw status, not the display label (the fulfilled label is "Support
+        // completed", so a label comparison would never match).
+        .filter((r) => r.requestStatus !== "fulfilled")
         .map((r) => ({ key: `req:${r.routeId}`, kind: "request" as const, label: r.serviceType === "custom" ? `Custom request${r.customNeed ? `: ${r.customNeed}` : ""}` : capitalize(r.serviceType), detail: r.groupName, href: `/requests/accepted/${r.routeId}` })),
       ...petitionThreads,
     ];
@@ -1338,8 +1385,25 @@ async function recordContributionAction(formData: FormData) {
   try {
     const route = await prisma.requestRoute.findUniqueOrThrow({ where: { id: routeId }, select: { supportRequest: { select: { groupId: true } } } });
     await requireGroupMembership(prisma, session.accountId, route.supportRequest.groupId);
-    const existing = await prisma.contribution.findFirst({ where: { privacyEnvelope: { path: ["requestRouteId"], equals: routeId } } });
-    if (!existing) await createContributionFromAcceptedRoute(prisma, { routeId });
+    // Records the contribution (once) AND moves the route to `completed`, so the request
+    // leaves the contributor's inbox (feedback #5).
+    await completeAcceptedRoute(prisma, { routeId, contributorAccountId: session.accountId });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/dashboard");
+}
+
+async function markRouteUnreachableAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const routeId = requiredString(formData, "routeId");
+  const prisma = createPrismaClient();
+  try {
+    const route = await prisma.requestRoute.findUniqueOrThrow({ where: { id: routeId }, select: { supportRequest: { select: { groupId: true } } } });
+    await requireGroupMembership(prisma, session.accountId, route.supportRequest.groupId);
+    await markRouteUnreachable(prisma, { routeId, contributorAccountId: session.accountId });
   } finally {
     await prisma.$disconnect();
   }
@@ -1414,10 +1478,14 @@ function RouteCard({ route }: { route: RouteNotif }) {
                 <span className="inline-flex items-center gap-2"><HeartHandshake className="h-4 w-4" />Mark as supported</span>
               </SubmitButton>
             </form>
+            <form action={markRouteUnreachableAction}>
+              <input type="hidden" name="routeId" value={route.id} />
+              <SubmitButton variant="secondary">Couldn&rsquo;t reach requester</SubmitButton>
+            </form>
           </>
         ) : null}
       </div>
-      {accepted && <p className="mt-3 text-sm leading-6 text-[var(--accent)]">Accepted. Open “View contact &amp; coordinate” to reach the requester, then mark support given when finished.</p>}
+      {accepted && <p className="mt-3 text-sm leading-6 text-[var(--accent)]">Accepted. Open “View contact &amp; coordinate” to reach the requester, then mark support given when finished — or let them know you couldn&rsquo;t reach them.</p>}
       {declined && <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Declined. That is okay; no contribution or judgment is recorded.</p>}
     </article>
   );

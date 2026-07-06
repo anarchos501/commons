@@ -227,6 +227,75 @@ export async function deleteSupportRequest(
 }
 
 /**
+ * Requester-side reopen (feedback #5). Permitted only when the match is broken by the
+ * contributor: request is `matched`, no route is still `accepted`, and at least one route
+ * is `unreachable`. (A `completed` route resolves via requester confirmation —
+ * fulfillSupportRequest — not reopen.) Sets the request back to `open`; the caller then
+ * re-invokes routeSupportRequest() so ALL eligible contributors are re-notified, not just
+ * the contributor who previously accepted.
+ */
+export async function reopenSupportRequest(
+  prisma: PrismaClient,
+  {
+    supportRequestId,
+    actorAccountId,
+    rawToken,
+  }: {
+    supportRequestId: string;
+    actorAccountId?: string | null;
+    rawToken?: string | null;
+  },
+): Promise<void> {
+  const request = await prisma.supportRequest.findUnique({
+    where: { id: supportRequestId },
+    include: { guestAccessToken: true, routes: { select: { status: true } } },
+  });
+
+  if (!request) throw new Error("Support request not found.");
+  if (request.status === "open" || request.status === "routed") return; // idempotent
+  if (request.status !== "matched") {
+    throw new Error("Only a matched request can be reopened.");
+  }
+
+  // Same actor validation as fulfill/delete: the submitting account or a valid guest token.
+  if (actorAccountId) {
+    if (request.submittedByAccountId !== actorAccountId) {
+      throw new Error("Only the requester may reopen this request.");
+    }
+  } else if (rawToken) {
+    const tokenHash = hashToken(rawToken);
+    if (!request.guestAccessToken || request.guestAccessToken.tokenHash !== tokenHash) {
+      throw new Error("Access token does not match this request.");
+    }
+    if (request.guestAccessToken.revokedAt !== null) {
+      throw new Error("Access token has been revoked.");
+    }
+  } else {
+    throw new Error("Actor identity is required to reopen a request.");
+  }
+
+  const hasAccepted = request.routes.some((r) => r.status === "accepted");
+  const hasUnreachable = request.routes.some((r) => r.status === "unreachable");
+  if (hasAccepted || !hasUnreachable) {
+    throw new Error("This request can only be reopened after its contributor reported they could not reach you.");
+  }
+
+  await prisma.supportRequest.update({
+    where: { id: supportRequestId },
+    data: { status: "open" },
+  });
+
+  await logAction(prisma, {
+    actorAccountId: actorAccountId ?? null,
+    groupId: request.groupId,
+    projectId: request.projectId,
+    action: "request.reopened",
+    targetType: "support_request",
+    targetId: supportRequestId,
+  });
+}
+
+/**
  * Canonical privacy-cleanup boundary.
  *
  * Any SupportRequest field that stores vulnerability information must be

@@ -239,6 +239,13 @@ enum RequestRouteStatus {
   declined
   expired
   cancelled
+  // Contributor-side terminal states (feedback #5): the accepting contributor can clear a
+  // route from their inbox. `completed` = support provided (a Contribution is recorded; the
+  // request stays `matched` until the requester confirms via fulfillSupportRequest).
+  // `unreachable` = couldn't reach the requester (request stays `matched`; the requester is
+  // notified and may reopen it for re-routing to all eligible contributors).
+  completed
+  unreachable
 }
 
 enum MembershipStatus {

@@ -6,9 +6,11 @@ import {
   concernWindowEndsAt,
   deleteSupportRequest,
   fulfillSupportRequest,
+  reopenSupportRequest,
   REQUEST_STATUS_LABELS,
   validateGuestAccessToken,
 } from "../../../../../lib/request-lifecycle";
+import { routeSupportRequest } from "../../../../../lib/capability-routing";
 import { logAction } from "../../../../../lib/action-log";
 import { getContactAccessLog } from "../../../../../lib/request-access";
 import { LocalTime } from "../../../../../components/shared/LocalTime";
@@ -47,6 +49,17 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
     const now = new Date();
     const canReportConcern = concernDeadline !== null && concernDeadline > now;
 
+    // Reopen is offered only when the match broke: the accepting contributor reported
+    // "unreachable" and no other route is still accepted (feedback #5).
+    const routeStatuses = await prisma.requestRoute.findMany({
+      where: { supportRequestId: supportRequest.id },
+      select: { status: true },
+    });
+    const canReopen =
+      supportRequest.status === "matched" &&
+      !routeStatuses.some((r) => r.status === "accepted") &&
+      routeStatuses.some((r) => r.status === "unreachable");
+
     // Handle form submissions
     if (resolvedSearch.action === "fulfill") {
       async function fulfillAction() {
@@ -74,6 +87,46 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
             <form action={fulfillAction} className="flex flex-col gap-3">
               <button type="submit" className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
                 Yes, support was received
+              </button>
+              <Link href={`/request/status/${rawToken}`} className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
+                Cancel
+              </Link>
+            </form>
+          </section>
+        </main>
+      );
+    }
+
+    if (resolvedSearch.action === "reopen" && canReopen) {
+      async function reopenAction() {
+        "use server";
+        const actionPrisma = createPrismaClient();
+        try {
+          await reopenSupportRequest(actionPrisma, { supportRequestId: supportRequest.id, rawToken });
+          await routeSupportRequest(actionPrisma, { supportRequestId: supportRequest.id });
+        } finally {
+          await actionPrisma.$disconnect();
+        }
+        redirect(`/request/status/${rawToken}?notice=reopened`);
+      }
+
+      return (
+        <main className="flex-1 bg-[var(--page)] text-[var(--text)] px-4 py-8 sm:px-6 lg:px-8">
+          <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+            <header>
+              <Link href={`/request/status/${rawToken}`} className="inline-flex items-center gap-1 text-sm text-[var(--muted)] hover:text-[var(--text)]">
+                <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+                Back
+              </Link>
+              <h1 className="mt-4 text-2xl font-semibold">Reopen this request?</h1>
+              <p className="mt-2 text-sm text-[var(--soft-text)]">
+                The member who accepted your request couldn&rsquo;t reach you. Reopening looks for support again from
+                everyone who can help — not just the previous volunteer.
+              </p>
+            </header>
+            <form action={reopenAction} className="flex flex-col gap-3">
+              <button type="submit" className="btn-primary min-h-11 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]">
+                Yes, look for support again
               </button>
               <Link href={`/request/status/${rawToken}`} className="btn-secondary flex min-h-11 items-center justify-center border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
                 Cancel
@@ -225,6 +278,18 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               Concern submitted. Group members will review it.
             </div>
           )}
+          {notice === "reopened" && (
+            <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
+              <CheckCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden="true" />
+              Request reopened. We are looking for someone who can support you again.
+            </div>
+          )}
+          {canReopen && (
+            <div className="border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--soft-text)]">
+              The member who accepted your request couldn&rsquo;t reach you. You can reopen the request to look for
+              support again.
+            </div>
+          )}
 
           <div className="border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <dl className="flex flex-col gap-4 text-sm">
@@ -253,7 +318,15 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
             </dl>
 
             <div className="mt-6 flex flex-col gap-2">
-              {supportRequest.status === "matched" && (
+              {canReopen && (
+                <Link
+                  href={`/request/status/${rawToken}?action=reopen`}
+                  className="btn-primary flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
+                >
+                  Reopen request
+                </Link>
+              )}
+              {supportRequest.status === "matched" && !canReopen && (
                 <Link
                   href={`/request/status/${rawToken}?action=fulfill`}
                   className="btn-primary flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"

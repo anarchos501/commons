@@ -7,6 +7,7 @@ import { requireGroupMembership } from "../../../../../lib/group-membership";
 import { submitMemberConcern } from "../../../../../lib/concerns";
 import { logContactViewedOnce } from "../../../../../lib/request-access";
 import { capitalize, serviceTypeLabel } from "../../../../../lib/support-form";
+import { completeAcceptedRoute, markRouteUnreachable } from "../../../../../lib/capability-routing";
 import { FormWithNotice } from "../../../../../components/shared/FormWithNotice";
 import { SubmitButton } from "../../../../../components/shared/SubmitButton";
 import { LocalTime } from "../../../../../components/shared/LocalTime";
@@ -77,6 +78,33 @@ export default async function AcceptedRequestPage({ params }: PageProps) {
       await actionPrisma.$disconnect();
     }
     return { kind: "success", message: "Thanks — your report was sent to the collective's reviewers." };
+  }
+
+  async function completeRoute() {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const p = createPrismaClient();
+    try {
+      await completeAcceptedRoute(p, { routeId, contributorAccountId: s.accountId });
+    } finally {
+      await p.$disconnect();
+    }
+    // The route is no longer "accepted", so this page's authorization gate closes — go home.
+    redirect("/dashboard?myReqView=accepted");
+  }
+
+  async function reportUnreachable() {
+    "use server";
+    const s = await getSession();
+    if (!s.accountId) redirect("/login");
+    const p = createPrismaClient();
+    try {
+      await markRouteUnreachable(p, { routeId, contributorAccountId: s.accountId });
+    } finally {
+      await p.$disconnect();
+    }
+    redirect("/dashboard?myReqView=accepted");
   }
 
   const prisma = createPrismaClient();
@@ -152,6 +180,24 @@ export default async function AcceptedRequestPage({ params }: PageProps) {
                 : "Contact details are no longer available — the accountability period has ended."}
             </p>
           )}
+        </div>
+
+        {/* Contributor-side exits (feedback #5): clear this request from your inbox by marking
+            support provided, or by reporting that the requester could not be reached. */}
+        <div className="mt-6 border border-[var(--border)] bg-[var(--surface)] p-4">
+          <p className="text-sm font-medium text-[var(--text)]">Done coordinating?</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
+            Marking support provided records your contribution; the requester still confirms completion on their side.
+            If you could not reach the requester, let them know — they can choose to reopen the request for others.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <form action={completeRoute}>
+              <SubmitButton>Mark support provided</SubmitButton>
+            </form>
+            <form action={reportUnreachable}>
+              <SubmitButton variant="secondary">Couldn&rsquo;t reach requester</SubmitButton>
+            </form>
+          </div>
         </div>
 
         {/* Deliberate, non-targeted: a flag about the request, not an accusation about a person.

@@ -269,9 +269,10 @@ export async function routeSupportRequest(prisma: PrismaClient, input: RouteSupp
     }
 
     // Custom (free-text) request path: no category, no capability. Route to the group's active
-    // members — only for PUBLIC groups that opted in to accepting custom requests.
+    // members. Private groups participate too — their custom requests only ever arrive through
+    // the token-gated share link, so routing them leaks nothing publicly (feedback #12).
     if (requestedService.serviceType === "custom") {
-      if (!supportRequest.group.acceptsCustomRequests || supportRequest.group.visibility !== "public") {
+      if (!supportRequest.group.acceptsCustomRequests) {
         continue;
       }
       // Consent-based routing: free-text custom requests reach only members who opted in to
@@ -500,6 +501,81 @@ export async function createContributionFromAcceptedRoute(prisma: PrismaClient, 
   // Request remains "matched" — fulfillment requires explicit requester confirmation
   // via fulfillSupportRequest() in request-lifecycle.ts.
   return contribution;
+}
+
+/**
+ * Contributor-side "support provided" (feedback #5): records the Contribution (once) and
+ * moves the route to `completed`, clearing it from the contributor's inbox. The request
+ * stays `matched` — fulfillment still requires the requester's confirmation via
+ * fulfillSupportRequest(), preserving the existing authority split.
+ */
+export async function completeAcceptedRoute(
+  prisma: PrismaClient,
+  input: { routeId: string; contributorAccountId: string },
+) {
+  const route = await prisma.requestRoute.findUnique({
+    where: { id: input.routeId },
+    select: { id: true, status: true, contributorAccountId: true, serviceType: true, supportRequest: { select: { groupId: true } } },
+  });
+  if (!route || route.contributorAccountId !== input.contributorAccountId) {
+    throw new Error("Only the routed contributor can complete this route.");
+  }
+  if (route.status === "completed") return; // idempotent
+  if (route.status !== "accepted") {
+    throw new Error(`Route cannot be completed from status ${route.status}.`);
+  }
+
+  const existing = await prisma.contribution.findFirst({
+    where: { privacyEnvelope: { path: ["requestRouteId"], equals: route.id } },
+    select: { id: true },
+  });
+  if (!existing) await createContributionFromAcceptedRoute(prisma, { routeId: route.id });
+
+  await prisma.requestRoute.update({ where: { id: route.id }, data: { status: "completed", decidedAt: new Date() } });
+
+  await logAction(prisma, {
+    actorAccountId: input.contributorAccountId,
+    groupId: route.supportRequest?.groupId ?? null,
+    action: "route.completed",
+    targetType: "request_route",
+    targetId: route.id,
+    metadata: { serviceType: route.serviceType },
+  });
+}
+
+/**
+ * Contributor-side "couldn't reach the requester" (feedback #5): moves the route to
+ * `unreachable`, clearing it from the contributor's inbox. The request stays `matched` —
+ * the requester is notified (derived notification + dashboard/status-page notice) and
+ * chooses whether to reopen it via reopenSupportRequest(), which re-routes to ALL
+ * eligible contributors.
+ */
+export async function markRouteUnreachable(
+  prisma: PrismaClient,
+  input: { routeId: string; contributorAccountId: string },
+) {
+  const route = await prisma.requestRoute.findUnique({
+    where: { id: input.routeId },
+    select: { id: true, status: true, contributorAccountId: true, serviceType: true, supportRequest: { select: { groupId: true } } },
+  });
+  if (!route || route.contributorAccountId !== input.contributorAccountId) {
+    throw new Error("Only the routed contributor can update this route.");
+  }
+  if (route.status === "unreachable") return; // idempotent
+  if (route.status !== "accepted") {
+    throw new Error(`Route cannot be marked unreachable from status ${route.status}.`);
+  }
+
+  await prisma.requestRoute.update({ where: { id: route.id }, data: { status: "unreachable", decidedAt: new Date() } });
+
+  await logAction(prisma, {
+    actorAccountId: input.contributorAccountId,
+    groupId: route.supportRequest?.groupId ?? null,
+    action: "route.unreachable",
+    targetType: "request_route",
+    targetId: route.id,
+    metadata: { serviceType: route.serviceType },
+  });
 }
 
 type AvailabilityRecord = {

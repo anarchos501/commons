@@ -469,6 +469,32 @@ async function aboutYouNotifs(prisma: PrismaClient, accountId: string, viewer: V
   const myMemberships = await prisma.groupMembership.findMany({ where: { accountId, status: "active" }, select: { id: true } });
   const myMembershipIds = myMemberships.map((m) => m.id);
 
+  // A contributor reported they couldn't reach you on your support request (feedback #5).
+  // Person-targeted, but about the member's own request — they choose whether to reopen it.
+  const unreachableRoutes = await prisma.requestRoute.findMany({
+    where: {
+      status: "unreachable",
+      decidedAt: { gt: since },
+      supportRequest: { submittedByAccountId: accountId, status: "matched" },
+    },
+    select: { id: true, decidedAt: true, supportRequest: { select: { groupId: true, group: { select: { name: true } } } } },
+    orderBy: { decidedAt: "desc" },
+    take: 20,
+  });
+  for (const r of unreachableRoutes) {
+    if (!r.decidedAt) continue;
+    out.push({
+      id: `route-unreachable:${r.id}`,
+      category: "aboutYou",
+      title: "Your contributor couldn't reach you",
+      detail: `The member who accepted your request in ${r.supportRequest.group?.name ?? "a collective"} couldn't reach you. You can reopen the request from your dashboard to look for support again.`,
+      href: "/dashboard",
+      groupId: r.supportRequest.groupId,
+      ...iso(r.decidedAt),
+      isUnread: true,
+    });
+  }
+
   // Effective recall.
   const recalls = await prisma.responsibilityAssignment.findMany({
     where: { membership: { accountId }, endReason: "recall", endedAt: { gt: since } },
