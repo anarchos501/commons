@@ -149,6 +149,15 @@ export function LibraryModule({
                   <span className="field-label">Title</span>
                   <input name="title" type="text" required className="field-input" placeholder="e.g. Community Resources" />
                 </label>
+                <label className="block">
+                  <span className="field-label">Foundational text (optional)</span>
+                  <textarea
+                    name="body"
+                    rows={4}
+                    className="field-input resize-y"
+                    placeholder="Optionally include the publication's first entry — approved together in one petition."
+                  />
+                </label>
                 <SubmitButton variant="secondary">Propose publication</SubmitButton>
               </FormWithNotice>
             )}

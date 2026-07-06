@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createPrismaClient } from "../../../../../../lib/prisma";
 import { getSession } from "../../../../../../lib/session";
-import { requiredString } from "../../../../../../lib/support-form";
+import { optionalString, requiredString } from "../../../../../../lib/support-form";
 import { proposeBulletinCreation, openBulletinArchivalPetition } from "../../../../../../lib/bulletins";
 import { proposePublicationCreation, proposePubEntryCreation, openPublicationArchivalPetition } from "../../../../../../lib/publications";
 import { proposeLivingDocumentCreation, draftLivingDocumentRevision, openRevisionPetition } from "../../../../../../lib/living-documents";
@@ -88,10 +88,11 @@ export async function proposePublicationCreationAction(
   if (!session.accountId) redirect("/login");
   const groupId = requiredString(formData, "groupId");
   const title = requiredString(formData, "title");
+  const body = optionalString(formData, "body");
   const membership = await requireMembership(session.accountId, groupId);
   const prisma = createPrismaClient();
   try {
-    const result = await proposePublicationCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, createdByMembershipId: membership.id });
+    const result = await proposePublicationCreation(prisma, { spaceType: "group", spaceId: groupId, groupId, title, body, createdByMembershipId: membership.id });
     if (!result.ok) return { kind: "error", message: contentProposalFailureMessage(result.reason) };
   } finally {
     await prisma.$disconnect();

@@ -256,6 +256,18 @@ export async function applyContentCreationDraft(
             title: lockedDraft.title!,
           },
         });
+        // Foundational text (feedback #13): a series proposed with a body gets its first
+        // entry in the same transaction — one petition, both records.
+        if (lockedDraft.body) {
+          await prisma.publicationEntry.create({
+            data: {
+              publicationId: record.id,
+              authorId: lockedDraft.authorAccountId,
+              body: lockedDraft.body,
+              publishedAt: now,
+            },
+          });
+        }
         newId = record.id;
         break;
       }

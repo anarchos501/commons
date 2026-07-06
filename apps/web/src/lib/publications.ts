@@ -227,6 +227,9 @@ export async function proposePublicationCreation(
     createdByProjectMembershipId?: string;
     actingResponsibilityId?: string;
     title: string;
+    // Optional foundational text (feedback #13): approved together with the series, it
+    // becomes the publication's first entry.
+    body?: string;
   },
 ) {
   return proposeContentCreation(prisma, { ...opts, contentType: "publication" });

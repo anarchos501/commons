@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPrismaClient } from "../lib/prisma";
-import { addPublicationEntry, archivePublication, archivePublicationEntry, createPublication, getPublicationWithEntries, listPublications } from "../lib/publications";
+import { addPublicationEntry, archivePublication, archivePublicationEntry, createPublication, getPublicationWithEntries, listPublications, proposePublicationCreation } from "../lib/publications";
+import { addPetitionSupport } from "../lib/petitions";
+import { evaluateAndApplyPetition } from "../lib/petition-evaluation";
 
 const prisma = createPrismaClient();
 
@@ -150,6 +152,45 @@ test("getPublicationWithEntries filters entries by archivedAt by default", async
     assert.equal(full.entries.length, 2);
   } finally {
     await cleanupFixture("pub_filter");
+  }
+});
+
+test("publication proposed with a foundational text creates the series and its first entry together", async () => {
+  const prefix = "pub_foundational";
+  const { group, account } = await createFixture(prefix);
+  const membership = await prisma.groupMembership.create({
+    data: { id: `${prefix}_membership`, accountId: account.id, groupId: group.id, status: "active", participationStatus: "active" },
+  });
+  try {
+    const result = await proposePublicationCreation(prisma, {
+      spaceType: "group",
+      spaceId: group.id,
+      groupId: group.id,
+      title: "Foundations",
+      body: "The founding text of this series.",
+      createdByMembershipId: membership.id,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    await addPetitionSupport(prisma, { petitionId: result.petitionId, actorAccountId: account.id, membershipId: membership.id });
+    await prisma.petition.update({ where: { id: result.petitionId }, data: { closesAt: new Date(Date.now() - 1000) } });
+    await evaluateAndApplyPetition(prisma, result.petitionId);
+
+    const pub = await prisma.publication.findFirstOrThrow({
+      where: { spaceId: group.id, title: "Foundations" },
+      include: { entries: true },
+    });
+    assert.equal(pub.entries.length, 1);
+    assert.equal(pub.entries[0].body, "The founding text of this series.");
+    assert.equal(pub.entries[0].authorId, account.id);
+  } finally {
+    await prisma.contentCreationDraft.deleteMany({ where: { groupId: { startsWith: prefix } } });
+    await prisma.petitionSupport.deleteMany({ where: { petition: { groupId: { startsWith: prefix } } } });
+    await prisma.petition.deleteMany({ where: { groupId: { startsWith: prefix } } });
+    await prisma.actionLog.deleteMany({ where: { OR: [{ groupId: { startsWith: prefix } }, { actorAccountId: { startsWith: prefix } }] } });
+    await prisma.groupMembership.deleteMany({ where: { id: { startsWith: prefix } } });
+    await cleanupFixture(prefix);
   }
 });
 
