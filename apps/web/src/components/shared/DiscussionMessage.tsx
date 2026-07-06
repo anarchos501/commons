@@ -15,12 +15,16 @@ export function DiscussionMessage({
   authorId,
   viewerAccountId,
   createdAtIso,
+  isUnread = false,
 }: {
   body: string;
   authorName: string;
   authorId: string | null;
   viewerAccountId: string | null;
   createdAtIso?: string;
+  // New-to-the-viewer (posted after their last visit to this thread): bolder text and an
+  // accent edge. Purely the viewer's own watermark — never shown to anyone else.
+  isUnread?: boolean;
 }) {
   // Defensive: a null/absent author or viewer renders as "other" — never matches a null, never throws.
   const isOwn = !!viewerAccountId && authorId === viewerAccountId;
@@ -30,10 +34,10 @@ export function DiscussionMessage({
       <div
         className={`max-w-[85%] px-3 py-2 ${
           isOwn ? "bg-[var(--subtle)]" : "border border-[var(--notice-border)] bg-[var(--notice)]"
-        }`}
+        } ${isUnread ? "border-l-2 border-l-[var(--accent)]" : ""}`}
       >
         <p className={`text-sm font-semibold ${isOwn ? "text-[var(--text)]" : "text-[var(--notice-text)]"}`}>{authorName}</p>
-        <p className={`mt-0.5 text-sm leading-6 ${isOwn ? "text-[var(--soft-text)]" : "text-[var(--notice-text)]"}`}>{body}</p>
+        <p className={`mt-0.5 text-sm leading-6 ${isUnread ? "font-medium" : ""} ${isOwn ? "text-[var(--soft-text)]" : "text-[var(--notice-text)]"}`}>{body}</p>
         {createdAtIso && (
           <p className={`mt-1 text-xs ${isOwn ? "text-[var(--muted)]" : "text-[var(--notice-text)] opacity-70"}`}>
             <LocalTime value={createdAtIso} options={MESSAGE_TIME} />

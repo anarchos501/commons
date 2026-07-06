@@ -8,9 +8,12 @@ import { CreateThreadForm } from "../../../../../../components/shared/CreateThre
 import { createDiscussionThreadAction, postDiscussionMessageAction, openThreadClosurePetitionAction } from "./actions";
 
 export type DiscussionModuleData = {
-  discussionThreads: Array<{ id: string; title: string; messageCount: number; lastActivityAt: Date }>;
+  discussionThreads: Array<{ id: string; title: string; messageCount: number; lastActivityAt: Date; unread: boolean }>;
   selectedThread: { id: string; title: string } | null;
   discussionMessages: Array<{ id: string; body: string; authorId: string; author: { displayName: string }; createdAt: Date }>;
+  // The viewer's PREVIOUS read watermark for the selected thread (null = never opened it).
+  // Messages newer than this render as new-to-you. Viewer-private; see DiscussionThreadRead.
+  selectedThreadLastReadAtMs: number | null;
 };
 
 export function DiscussionModule({
@@ -34,6 +37,7 @@ export function DiscussionModule({
               title: thread.title,
               messageCount: thread.messageCount,
               lastActivityAtIso: thread.lastActivityAt.toISOString(),
+              unread: thread.unread,
             }))}
             selectedThreadId={data.selectedThread?.id ?? null}
           />
@@ -54,6 +58,10 @@ export function DiscussionModule({
                         authorId={msg.authorId}
                         viewerAccountId={viewerAccountId}
                         createdAtIso={msg.createdAt.toISOString()}
+                        isUnread={
+                          data.selectedThreadLastReadAtMs === null ||
+                          msg.createdAt.getTime() > data.selectedThreadLastReadAtMs
+                        }
                       />
                     ))}
                   </div>

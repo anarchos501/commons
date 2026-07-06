@@ -11,6 +11,9 @@ type ThreadItem = {
   title: string;
   messageCount: number;
   lastActivityAtIso: string;
+  // "New" = has activity the viewer hasn't seen. A boolean by design, never a count —
+  // see the DiscussionThreadRead privacy boundary in schema.prisma.
+  unread?: boolean;
 };
 
 export function ThreadList({
@@ -43,7 +46,14 @@ export function ThreadList({
                 : "border-[var(--border)]"
             }`}
           >
-            <span className="font-medium text-[var(--text)]">{thread.title}</span>
+            <span className={`text-[var(--text)] ${thread.unread ? "font-semibold" : "font-medium"}`}>
+              {thread.title}
+              {thread.unread && (
+                <span className="ml-2 align-middle border border-[var(--notice-border)] bg-[var(--notice)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--notice-text)]">
+                  New
+                </span>
+              )}
+            </span>
             <span className="mt-1 block text-xs text-[var(--muted)]">
               {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"} &middot;{" "}
               <LocalTime value={thread.lastActivityAtIso} options={THREAD_TIME} />

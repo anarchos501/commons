@@ -433,6 +433,7 @@ model Account {
   livingDocumentRevisions LivingDocumentRevision[]
   discussionThreadsCreated DiscussionThread[]
   discussionMessages       DiscussionMessage[]
+  discussionThreadReads    DiscussionThreadRead[]
   nodeHostRecords          NodeHost[]
   nodeGovernanceSignals    NodeGovernanceSignal[]
   nodePetitionSupport      NodePetitionSupport[]
@@ -1709,8 +1710,9 @@ model DiscussionThread {
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
-  creator  Account             @relation(fields: [createdByAccountId], references: [id])
+  creator  Account                @relation(fields: [createdByAccountId], references: [id])
   messages DiscussionMessage[]
+  reads    DiscussionThreadRead[]
 
   @@index([spaceType, spaceId])
   @@index([createdByAccountId])
@@ -1733,6 +1735,24 @@ model DiscussionMessage {
   @@index([authorId])
   @@index([expiresAt])
   @@index([createdAt])
+}
+
+// Per-account read watermark for discussion threads (feedback #10). PRIVACY BOUNDARY: like
+// GroupMembership.lastSeenAt, this is a private relational/temporal fact used only to render
+// the OWNING account's view ("New" badge on threads, brighter unread bubbles). It must never
+// be surfaced to other members (no "X has read this", no read receipts to authors) and never
+// aggregated into counts or engagement data — the badge is "New", not "7 unread".
+model DiscussionThreadRead {
+  id         String   @id @default(cuid())
+  accountId  String
+  threadId   String
+  lastReadAt DateTime @default(now())
+
+  account Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  thread  DiscussionThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, threadId])
+  @@index([threadId])
 }
 
 // --- RFC: Contribution Categories & Trusted Provider Status ---

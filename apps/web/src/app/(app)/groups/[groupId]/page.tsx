@@ -635,6 +635,33 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       ? await listDiscussionMessages(prisma, selectedThread.id)
       : [];
 
+    // Per-viewer read watermarks (feedback #10). Capture the PREVIOUS watermark of the
+    // selected thread first (it drives which messages render as new-to-you), then advance
+    // it — the same during-page-load write pattern as runGroupVisitEffects above. These
+    // watermarks only ever shape the viewer's own rendering; see DiscussionThreadRead's
+    // privacy boundary note in schema.prisma.
+    const threadReads = discussionThreads.length
+      ? await prisma.discussionThreadRead.findMany({
+          where: { accountId, threadId: { in: discussionThreads.map((t) => t.id) } },
+          select: { threadId: true, lastReadAt: true },
+        })
+      : [];
+    const lastReadByThread = new Map(threadReads.map((r) => [r.threadId, r.lastReadAt]));
+    const selectedThreadLastReadAt = selectedThread ? lastReadByThread.get(selectedThread.id) ?? null : null;
+    if (selectedThread) {
+      await prisma.discussionThreadRead.upsert({
+        where: { accountId_threadId: { accountId, threadId: selectedThread.id } },
+        create: { accountId, threadId: selectedThread.id },
+        update: { lastReadAt: new Date() },
+      });
+    }
+    const discussionThreadsWithUnread = discussionThreads.map((thread) => ({
+      ...thread,
+      unread:
+        thread.id !== selectedThread?.id &&
+        thread.lastActivityAt > (lastReadByThread.get(thread.id) ?? new Date(0)),
+    }));
+
     // Contribution categories (+ trusted providers) — present only when the Categories or
     // Trusted Providers card is shown; otherwise these heavy slices don't load.
     const contributionCategories = categoriesPresent ? await getAvailableCategoriesForScope(prisma, { groupId }) : [];
@@ -787,9 +814,10 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       groupContributions: groupContributions.map((c) => ({ type: c.contributionType, count: c._count.contributionType })),
       petitions,
       governanceSettings,
-      discussionThreads,
+      discussionThreads: discussionThreadsWithUnread,
       selectedThread,
       discussionMessages,
+      selectedThreadLastReadAtMs: selectedThreadLastReadAt ? selectedThreadLastReadAt.getTime() : null,
       coverageStatus: await getCoverageStatus(prisma, groupId),
       reviewerQueue,
       activeParticipantCount,
