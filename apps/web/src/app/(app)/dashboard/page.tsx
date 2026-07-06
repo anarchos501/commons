@@ -19,7 +19,7 @@ import {
 } from "../../../lib/capability-routing";
 import { leaveGroup, requireGroupMembership, withdrawGroupApplication } from "../../../lib/group-membership";
 import { withdrawProjectJoinRequest } from "../../../lib/project-membership";
-import { buildRequestDescription, capitalize, optionalString, requiredString } from "../../../lib/support-form";
+import { buildRequestDescription, capitalize, optionalString, requiredString, serviceTypeLabel } from "../../../lib/support-form";
 import { deleteSupportRequest, fulfillSupportRequest, REQUEST_STATUS_LABELS } from "../../../lib/request-lifecycle";
 import { addNodePetitionSupport, addPetitionSupport } from "../../../lib/petitions";
 import { evaluateAndApplyPetition, getPetitionDetail } from "../../../lib/petition-evaluation";
@@ -456,7 +456,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                           return (
                             <li key={request.id} className="border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                               <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-medium capitalize">{request.requestType}</p>
+                                <p className="text-sm font-medium">
+                                  {serviceTypeLabel(request.requestType, request.services[0]?.category?.name)}
+                                </p>
                                 <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
                               </div>
                               <p className="mt-1 text-xs text-[var(--muted)]">
@@ -522,7 +524,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                                 <p className="text-sm font-medium">
                                   {r.serviceType === "custom"
                                     ? `Custom Request${r.customNeed ? `: ${r.customNeed}` : ""}`
-                                    : capitalize(r.serviceType)}
+                                    : serviceTypeLabel(r.serviceType, r.categoryName)}
                                 </p>
                                 <span className="shrink-0 text-xs text-[var(--muted)]">{r.requestStatusLabel}</span>
                               </div>
@@ -591,6 +593,9 @@ type RouteNotif = {
   groupId: string;
   groupName: string;
   serviceType: string;
+  // For category requests: the resolved ContributionCategory name (serviceType is the
+  // literal sentinel "category", never a display string).
+  categoryName: string | null;
   // For custom requests: the requester's free-text need (shown as a secondary contribution type).
   // The contact note is NOT included here — it stays in the request description until acceptance.
   customNeed: string | null;
@@ -667,7 +672,12 @@ async function getDashboardData(
         where: { contributorAccountId: accountId },
         include: {
           contributor: true,
-          supportRequest: { include: { group: { select: { id: true, name: true } } } },
+          supportRequest: {
+            include: {
+              group: { select: { id: true, name: true } },
+              services: { where: { serviceType: "category" }, select: { category: { select: { name: true } } }, take: 1 },
+            },
+          },
         },
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
         take: 40,
@@ -712,7 +722,15 @@ async function getDashboardData(
         ? prisma.supportRequest.findMany({
             where: { submittedByAccountId: accountId, groupId, status: { notIn: ["deleted"] } },
             orderBy: { createdAt: "desc" },
-            select: { id: true, requestType: true, status: true, createdAt: true, expiresAt: true, accountabilityEndsAt: true },
+            select: {
+              id: true,
+              requestType: true,
+              status: true,
+              createdAt: true,
+              expiresAt: true,
+              accountabilityEndsAt: true,
+              services: { where: { serviceType: "category" }, select: { category: { select: { name: true } } }, take: 1 },
+            },
             take: 10,
           })
         : Promise.resolve([]),
@@ -727,12 +745,21 @@ async function getDashboardData(
         id: true,
         serviceType: true,
         decidedAt: true,
-        supportRequest: { select: { requestType: true, status: true, customNeed: true, group: { select: { name: true } } } },
+        supportRequest: {
+          select: {
+            requestType: true,
+            status: true,
+            customNeed: true,
+            group: { select: { name: true } },
+            services: { where: { serviceType: "category" }, select: { category: { select: { name: true } } }, take: 1 },
+          },
+        },
       },
     });
     const acceptedRequests = acceptedRoutesRaw.map((r) => ({
       routeId: r.id,
       serviceType: r.serviceType,
+      categoryName: r.supportRequest.services[0]?.category?.name ?? null,
       customNeed: r.serviceType === "custom" ? r.supportRequest.customNeed ?? null : null,
       groupName: r.supportRequest.group.name,
       acceptedAtIso: r.decidedAt ? r.decidedAt.toISOString() : null,
@@ -764,6 +791,7 @@ async function getDashboardData(
       groupId: r.supportRequest.groupId,
       groupName: r.supportRequest.group.name,
       serviceType: r.serviceType,
+      categoryName: r.supportRequest.services[0]?.category?.name ?? null,
       customNeed: r.serviceType === "custom" ? r.supportRequest.customNeed ?? null : null,
       status: r.status,
       urgencyLabel: urgencyLabel(r.supportRequest.urgency),
@@ -1330,7 +1358,7 @@ function RouteCard({ route }: { route: RouteNotif }) {
           {route.serviceType === "custom" ? (
             <h3 className="mt-0.5 font-semibold">Custom Request{route.customNeed ? `: ${route.customNeed}` : ""}</h3>
           ) : (
-            <h3 className="mt-0.5 font-semibold capitalize">{route.serviceType} requested</h3>
+            <h3 className="mt-0.5 font-semibold">{serviceTypeLabel(route.serviceType, route.categoryName)} requested</h3>
           )}
           <p className="mt-1 text-sm text-[var(--soft-text)]">Routed to you. {route.urgencyLabel}</p>
         </div>

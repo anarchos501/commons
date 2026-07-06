@@ -6,7 +6,7 @@ import { getSession } from "../../../../../lib/session";
 import { requireGroupMembership } from "../../../../../lib/group-membership";
 import { submitMemberConcern } from "../../../../../lib/concerns";
 import { logContactViewedOnce } from "../../../../../lib/request-access";
-import { capitalize } from "../../../../../lib/support-form";
+import { capitalize, serviceTypeLabel } from "../../../../../lib/support-form";
 import { FormWithNotice } from "../../../../../components/shared/FormWithNotice";
 import { SubmitButton } from "../../../../../components/shared/SubmitButton";
 import { LocalTime } from "../../../../../components/shared/LocalTime";
@@ -27,7 +27,14 @@ type PageProps = { params: Promise<{ routeId: string }> };
 async function authorizeAcceptedRoute(prisma: PrismaClient, routeId: string, accountId: string) {
   const route = await prisma.requestRoute.findUnique({
     where: { id: routeId },
-    include: { supportRequest: { include: { group: { select: { id: true, name: true } } } } },
+    include: {
+      supportRequest: {
+        include: {
+          group: { select: { id: true, name: true } },
+          services: { where: { serviceType: "category" }, select: { category: { select: { name: true } } }, take: 1 },
+        },
+      },
+    },
   });
   if (!route || route.contributorAccountId !== accountId || route.status !== "accepted") return null;
   return route;
@@ -105,8 +112,10 @@ export default async function AcceptedRequestPage({ params }: PageProps) {
         <p className="mt-1 text-sm text-[var(--muted)]">{route.supportRequest.group.name}</p>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
-          <span className="border border-[var(--border)] bg-[var(--subtle)] px-2 py-0.5 capitalize">
-            {route.serviceType === "custom" ? "Custom request" : capitalize(route.serviceType)}
+          <span className="border border-[var(--border)] bg-[var(--subtle)] px-2 py-0.5">
+            {route.serviceType === "custom"
+              ? "Custom request"
+              : serviceTypeLabel(route.serviceType, route.supportRequest.services[0]?.category?.name)}
           </span>
           <span className="capitalize">Urgency: {capitalize(req.urgency)}</span>
           {route.decidedAt && (
