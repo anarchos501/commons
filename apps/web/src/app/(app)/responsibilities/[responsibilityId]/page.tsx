@@ -13,6 +13,7 @@ import { CollapsibleSection } from "../../../../components/shared/CollapsibleSec
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../components/shared/EmptyState";
 import { DiscussionMessage } from "../../../../components/shared/DiscussionMessage";
+import { LocalTime } from "../../../../components/shared/LocalTime";
 import { AlphaNotice, Notice } from "../../../../components/shared/Notice";
 import { type FormState } from "../../../../components/shared/form-state";
 import { SpaceCalendar } from "../../../../components/shared/SpaceCalendar";
@@ -135,7 +136,9 @@ export default async function ResponsibilitySpacePage({ params, searchParams }: 
                   <span>{h.displayName}</span>
                   <div className="text-right">
                     <p className="text-xs capitalize text-[var(--muted)]">{h.participationStatus}</p>
-                    <p className="text-xs text-[var(--muted)]">expires {formatDate(h.expiresAt)}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      expires <LocalTime value={h.expiresAt.toISOString()} options={{ month: "short", day: "numeric", year: "numeric" }} />
+                    </p>
                   </div>
                 </div>
               ))}
@@ -713,6 +716,3 @@ async function proposeRevisionAction(formData: FormData) {
   revalidatePath(`/responsibilities/${responsibilityId}`);
 }
 
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}

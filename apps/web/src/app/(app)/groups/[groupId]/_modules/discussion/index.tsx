@@ -5,12 +5,7 @@ import { FormWithNotice } from "../../../../../../components/shared/FormWithNoti
 import { DiscussionMessage } from "../../../../../../components/shared/DiscussionMessage";
 import { ThreadList } from "../../../../../../components/shared/ThreadList";
 import { CreateThreadForm } from "../../../../../../components/shared/CreateThreadForm";
-import { COMPACT_DATE } from "../_shared/format";
 import { createDiscussionThreadAction, postDiscussionMessageAction, openThreadClosurePetitionAction } from "./actions";
-
-function formatRelativeDate(date: Date) {
-  return new Intl.DateTimeFormat("en", COMPACT_DATE).format(date);
-}
 
 export type DiscussionModuleData = {
   discussionThreads: Array<{ id: string; title: string; messageCount: number; lastActivityAt: Date }>;
@@ -38,7 +33,7 @@ export function DiscussionModule({
               id: thread.id,
               title: thread.title,
               messageCount: thread.messageCount,
-              lastActivityLabel: formatRelativeDate(thread.lastActivityAt),
+              lastActivityAtIso: thread.lastActivityAt.toISOString(),
             }))}
             selectedThreadId={data.selectedThread?.id ?? null}
           />

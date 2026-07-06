@@ -560,7 +560,8 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
                         <div>
                           <p className="text-sm font-semibold capitalize">{petition.subjectType.replace(/_/g, " ")}</p>
                           <p className="mt-1 text-xs text-[var(--muted)]">
-                            {petition.supportCount} / {petition.requiredSupport} supporters · closes {new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(petition.closesAt)}
+                            {petition.supportCount} / {petition.requiredSupport} supporters · closes{" "}
+                            <LocalTime value={petition.closesAt.toISOString()} options={{ month: "short", day: "numeric" }} />
                           </p>
                         </div>
                         <span className="border border-[var(--border)] bg-[var(--subtle)] px-2 py-1 text-xs capitalize text-[var(--soft-text)]">

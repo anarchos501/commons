@@ -460,7 +460,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
                                 <span className="shrink-0 text-xs text-[var(--muted)]">{statusLabel}</span>
                               </div>
                               <p className="mt-1 text-xs text-[var(--muted)]">
-                                Submitted {new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(request.createdAt)}
+                                Submitted <LocalTime value={request.createdAt.toISOString()} options={{ month: "short", day: "numeric" }} />
                               </p>
                               {(isActive || request.status !== "deleted") && (
                                 <div className="mt-2 flex gap-2">
@@ -1392,7 +1392,7 @@ function RouteCard({ route }: { route: RouteNotif }) {
 }
 
 function PetitionNotifCard({ petition }: { petition: PetitionNotif }) {
-  const closesLabel = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(petition.closesAt);
+  const closesLabel = <LocalTime value={petition.closesAt.toISOString()} options={{ month: "short", day: "numeric" }} />;
   return (
     <article className={`border p-4 ${petition.isUnread ? "border-[var(--accent)]" : "border-[var(--border)]"} bg-[var(--surface)]`}>
       <div className="flex items-start justify-between gap-3">

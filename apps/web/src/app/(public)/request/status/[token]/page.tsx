@@ -11,6 +11,9 @@ import {
 } from "../../../../../lib/request-lifecycle";
 import { logAction } from "../../../../../lib/action-log";
 import { getContactAccessLog } from "../../../../../lib/request-access";
+import { LocalTime } from "../../../../../components/shared/LocalTime";
+
+const DATE_ONLY: Intl.DateTimeFormatOptions = { year: "numeric", month: "short", day: "numeric" };
 
 export const dynamic = "force-dynamic";
 
@@ -232,19 +235,19 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
               {supportRequest.expiresAt && isActive && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Expires</dt>
-                  <dd className="mt-1 text-[var(--text)]">{supportRequest.expiresAt.toLocaleDateString()}</dd>
+                  <dd className="mt-1 text-[var(--text)]"><LocalTime value={supportRequest.expiresAt.toISOString()} options={DATE_ONLY} /></dd>
                 </div>
               )}
               {supportRequest.accountabilityEndsAt && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Accountability window open until</dt>
-                  <dd className="mt-1 text-[var(--text)]">{supportRequest.accountabilityEndsAt.toLocaleDateString()}</dd>
+                  <dd className="mt-1 text-[var(--text)]"><LocalTime value={supportRequest.accountabilityEndsAt.toISOString()} options={DATE_ONLY} /></dd>
                 </div>
               )}
               {concernDeadline && concernDeadline > now && !supportRequest.accountabilityEndsAt && (
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Concern reporting open until</dt>
-                  <dd className="mt-1 text-[var(--text)]">{concernDeadline.toLocaleDateString()}</dd>
+                  <dd className="mt-1 text-[var(--text)]"><LocalTime value={concernDeadline.toISOString()} options={DATE_ONLY} /></dd>
                 </div>
               )}
             </dl>
@@ -290,7 +293,7 @@ export default async function GuestRequestStatusPage({ params, searchParams }: P
             ) : (
               <ul className="mt-2 space-y-1 text-[var(--soft-text)]">
                 {contactAccessLog.map((entry, i) => (
-                  <li key={i}>{entry.accessorName} — {entry.viewedAt.toLocaleString()}</li>
+                  <li key={i}>{entry.accessorName} — <LocalTime value={entry.viewedAt.toISOString()} /></li>
                 ))}
               </ul>
             )}

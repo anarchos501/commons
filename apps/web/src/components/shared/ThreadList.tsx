@@ -1,12 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { LocalTime } from "./LocalTime";
+
+// Matches MESSAGE_TIME in DiscussionMessage so thread cards and bubbles read the same.
+const THREAD_TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 type ThreadItem = {
   id: string;
   title: string;
   messageCount: number;
-  lastActivityLabel: string;
+  lastActivityAtIso: string;
 };
 
 export function ThreadList({
@@ -41,7 +45,8 @@ export function ThreadList({
           >
             <span className="font-medium text-[var(--text)]">{thread.title}</span>
             <span className="mt-1 block text-xs text-[var(--muted)]">
-              {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"} &middot; {thread.lastActivityLabel}
+              {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"} &middot;{" "}
+              <LocalTime value={thread.lastActivityAtIso} options={THREAD_TIME} />
             </span>
           </Link>
         );

@@ -278,7 +278,7 @@ export default async function GuidePage() {
                 <ActionLink href="/dashboard" primary>Open dashboard</ActionLink>
                 <ActionLink href="/groups">Find collectives</ActionLink>
                 <ActionLink href="/groups/new">Create a collective</ActionLink>
-                <ActionLink href="/feedback?path=%2Fguide">Report feedback</ActionLink>
+                <ActionLink href="/feedback?path=%2Fguide" newTab>Report feedback</ActionLink>
               </>
             ) : (
               <>
@@ -349,15 +349,19 @@ function StatusCard({ title, body }: { title: string; body: string }) {
 function ActionLink({
   href,
   primary = false,
+  newTab = false,
   children,
 }: {
   href: string;
   primary?: boolean;
+  newTab?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
+      target={newTab ? "_blank" : undefined}
+      rel={newTab ? "noopener noreferrer" : undefined}
       className={
         primary
           ? "btn-primary inline-flex min-h-11 items-center justify-center bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"

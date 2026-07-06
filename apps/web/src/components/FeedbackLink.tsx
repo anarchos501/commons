@@ -9,7 +9,12 @@ export function FeedbackLink({ className = "" }: { className?: string }) {
   const query = searchParams.toString();
   const currentPath = `${pathname}${query ? `?${query}` : ""}`;
   return (
-    <Link href={`/feedback?path=${encodeURIComponent(currentPath)}`} className={className}>
+    <Link
+      href={`/feedback?path=${encodeURIComponent(currentPath)}`}
+      className={className}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
       Report Feedback
     </Link>
   );

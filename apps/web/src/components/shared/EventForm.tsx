@@ -33,6 +33,7 @@ export function EventForm({ action, allowMeeting, audiences }: Props) {
   const [startLocal, setStartLocal] = useState("");
   const [endLocal, setEndLocal] = useState("");
   const [timezone, setTimezone] = useState(defaultTz);
+  const [visibility, setVisibility] = useState<"host_only" | "audience" | "public">("host_only");
   const [audienceCount, setAudienceCount] = useState(0);
 
   const startIso = startLocal ? new Date(startLocal).toISOString() : "";
@@ -103,34 +104,54 @@ export function EventForm({ action, allowMeeting, audiences }: Props) {
 
         <fieldset className="space-y-1">
           <legend className="field-label text-xs text-[var(--muted)]">Who can see this</legend>
-          {[
-            { v: "host_only", l: "Host only" },
-            { v: "audience", l: "Host + audience spaces" },
-            { v: "public", l: "Public" },
-          ].map((o) => (
+          {(
+            [
+              { v: "public", l: "Public" },
+              { v: "host_only", l: "Host Entity Only" },
+              { v: "audience", l: "Host & Selected Audience" },
+            ] as const
+          ).map((o) => (
             <label key={o.v} className="flex items-center gap-1.5 text-sm">
-              <input type="radio" name="visibility" value={o.v} defaultChecked={o.v === "host_only"} />
+              <input
+                type="radio"
+                name="visibility"
+                value={o.v}
+                checked={visibility === o.v}
+                onChange={() => {
+                  setVisibility(o.v);
+                  // The audience picker unmounts when leaving "audience", clearing its
+                  // checkboxes — keep the count (and needsPetition) in sync.
+                  if (o.v !== "audience") setAudienceCount(0);
+                }}
+              />
               <span>{o.l}</span>
             </label>
           ))}
         </fieldset>
 
-        {audiences.length > 0 && (
-          <fieldset className="space-y-1">
-            <legend className="field-label text-xs text-[var(--muted)]">Also show on (audience spaces)</legend>
-            {audiences.map((a) => (
-              <label key={`${a.audienceType}:${a.audienceId}`} className="flex items-center gap-1.5 text-sm">
-                <input
-                  type="checkbox"
-                  name="audience"
-                  value={`${a.audienceType}:${a.audienceId}`}
-                  onChange={(e) => setAudienceCount((n) => n + (e.target.checked ? 1 : -1))}
-                />
-                <span>{a.label} <span className="text-[var(--muted)]">({a.audienceType})</span></span>
-              </label>
-            ))}
-          </fieldset>
-        )}
+        {visibility === "audience" &&
+          (audiences.length > 0 ? (
+            <fieldset className="space-y-1">
+              <legend className="field-label text-xs text-[var(--muted)]">Audience spaces</legend>
+              <p className="text-xs text-[var(--muted)]">
+                The event will also appear on these spaces&rsquo; calendars. Sharing with another space requires
+                collective authorization.
+              </p>
+              {audiences.map((a) => (
+                <label key={`${a.audienceType}:${a.audienceId}`} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    name="audience"
+                    value={`${a.audienceType}:${a.audienceId}`}
+                    onChange={(e) => setAudienceCount((n) => n + (e.target.checked ? 1 : -1))}
+                  />
+                  <span>{a.label} <span className="text-[var(--muted)]">({a.audienceType})</span></span>
+                </label>
+              ))}
+            </fieldset>
+          ) : (
+            <p className="text-xs text-[var(--muted)]">This space has no connected spaces to share the event with.</p>
+          ))}
 
         {needsPetition && (
           <p className="text-xs text-[var(--muted)]">

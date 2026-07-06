@@ -191,6 +191,13 @@ function iso(d: Date) {
   return { createdAt: d, createdAtIso: d.toISOString() };
 }
 
+// Notification text is a stored string, so it can't re-format in the viewer's timezone the
+// way <LocalTime> does. Format date-only in explicit UTC so the output is at least
+// deterministic (a day-boundary skew near midnight is the accepted limitation).
+function utcDateLabel(d: Date) {
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(d);
+}
+
 // ── Source: Outcomes ──────────────────────────────────────────────────────────
 async function outcomeNotifs(prisma: PrismaClient, accountId: string, viewer: ViewerSpaces, since: Date): Promise<DerivedNotif[]> {
   const myMemberships = await prisma.groupMembership.findMany({ where: { accountId, status: "active" }, select: { id: true } });
@@ -524,7 +531,7 @@ async function aboutYouNotifs(prisma: PrismaClient, accountId: string, viewer: V
         id: `recall-open:${p.id}`,
         category: "aboutYou",
         title: `A petition to recall you from ${a.responsibility.type} is open`,
-        detail: `Open until ${p.closesAt.toLocaleDateString()} in ${a.responsibility.group?.name ?? "a collective"}. You can respond while the window is open.`,
+        detail: `Open until ${utcDateLabel(p.closesAt)} in ${a.responsibility.group?.name ?? "a collective"}. You can respond while the window is open.`,
         href: `/groups/${a.responsibility.groupId}#petitions`,
         groupId: a.responsibility.groupId,
         ...iso(p.opensAt),
@@ -554,7 +561,7 @@ async function aboutYouNotifs(prisma: PrismaClient, accountId: string, viewer: V
           id: `tp-revoke-open:${p.id}`,
           category: "aboutYou",
           title: "A petition to revoke your trusted-provider status is open",
-          detail: `Open until ${p.closesAt.toLocaleDateString()} in ${req.group?.name ?? "a collective"}. You can respond while the window is open.`,
+          detail: `Open until ${utcDateLabel(p.closesAt)} in ${req.group?.name ?? "a collective"}. You can respond while the window is open.`,
           href: `/groups/${req.groupId}#petitions`,
           groupId: req.groupId,
           ...iso(p.opensAt),
