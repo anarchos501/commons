@@ -31,8 +31,9 @@ export function ContributionCategoriesModule({
   return (
     <CollapsibleSection id="contribution-categories" title="Contribution Categories" eyebrow="What this community offers" storageKey={`group:${groupId}:section:categories`} className="bg-[var(--surface)] p-5 sm:p-6">
       <div className="space-y-4">
-        {/* Custom support requests — public groups may opt in to free-text requests */}
-        {data.group.visibility === "public" && isActive && (
+        {/* Custom support requests — any group may opt in to free-text requests. For private
+            groups these are reachable only through the token-gated share link (feedback #12). */}
+        {isActive && (
           <div className="border border-[var(--border)] bg-[var(--subtle)] p-3">
             <p className="text-sm font-medium text-[var(--text)]">Custom support requests</p>
             <p className="mt-1 text-xs text-[var(--soft-text)]">

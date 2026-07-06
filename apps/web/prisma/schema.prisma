@@ -452,8 +452,9 @@ model Group {
   visibility            GroupVisibility @default(private)
   governancePreferences Json?
   privacyPreferences    Json?
-  // When true (public groups only), requesters may send a free-text "custom" support request even
-  // if the group has defined no contribution categories. Routed to the group's active members.
+  // When true, requesters may send a free-text "custom" support request even if the group has
+  // defined no contribution categories. Routed to the group's opted-in active members. For
+  // private groups this is reachable only via the token-gated share link — never public pages.
   acceptsCustomRequests Boolean         @default(false)
   // Set when a group loses its last active member. An archived group is hidden everywhere and is
   // eligible for hard deletion after a grace period (deletion itself is deferred — see roadmap).

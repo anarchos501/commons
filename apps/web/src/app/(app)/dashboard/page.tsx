@@ -886,10 +886,12 @@ async function getDashboardData(
     // Request form: only fulfillable categories + custom where available (report 4/5 gating).
     const requestServices = [...new Set(groupOptions.flatMap((g) => g.services))].sort();
 
-    // Per-collective custom-request opt-in options: public collectives that accept custom requests.
+    // Per-collective custom-request opt-in options: collectives that accept custom requests.
+    // Includes private collectives — their custom requests flow only through the token-gated
+    // share-link path, never through public enumeration (feedback report #12).
     // Each option carries the member's own membershipId and current opt-in state (revocable consent).
     const customOfferOptions = myGroupMemberships
-      .filter((m) => m.group.visibility === "public" && m.group.acceptsCustomRequests)
+      .filter((m) => m.group.acceptsCustomRequests)
       .map((m) => ({ membershipId: m.id, groupName: m.group.name, customAvailable: m.customAvailable }));
 
     // Pending applications the user submitted (group + project) — so they can track and withdraw them.
@@ -1175,10 +1177,12 @@ async function offerHelpAction(formData: FormData) {
   const prisma = createPrismaClient();
   let nothingToOffer = false;
   try {
-    // The member's active memberships in public collectives that accept custom requests — the set
+    // The member's active memberships in collectives that accept custom requests — the set
     // the custom checkboxes were rendered from. Drives per-collective set/unset (revocable consent).
+    // Private collectives are included: their custom availability is only ever consumed by the
+    // token-gated share-link flow, so opting in leaks nothing publicly (feedback report #12).
     const customEligible = await prisma.groupMembership.findMany({
-      where: { accountId, status: "active", group: { visibility: "public", acceptsCustomRequests: true } },
+      where: { accountId, status: "active", group: { acceptsCustomRequests: true } },
       select: { id: true },
     });
 
