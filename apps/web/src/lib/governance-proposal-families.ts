@@ -98,6 +98,11 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   event_authorization: "coordination",
 };
 
+// Runtime enumeration of every ProposalFamily. Derived from FAMILY_TO_CATEGORY, which
+// TypeScript already forces to be exhaustive over the union — so this list cannot drift
+// from the type. Used by the petition-detail coverage test.
+export const PROPOSAL_FAMILIES = Object.keys(FAMILY_TO_CATEGORY) as ProposalFamily[];
+
 export function isProposalFamily(value: string): value is ProposalFamily {
   return value in FAMILY_TO_CATEGORY;
 }

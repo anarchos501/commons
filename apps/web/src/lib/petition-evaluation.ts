@@ -31,6 +31,7 @@ import { evaluateEventProposalForPetition } from "./events";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
 import { evaluateNodeNameProposalForPetition } from "./node-name";
 import { responsibilityTypeLabel } from "./concern-reviewer";
+import type { ProposalFamily } from "./governance-proposal-families";
 
 // Must NOT be called from inside another $transaction — it opens its own.
 export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId: string): Promise<EvaluateResult> {
@@ -298,15 +299,16 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     });
     if (!application) return subjectId;
     const categoryIds = application.categoryIds as string[];
-    const firstCategory = await prisma.contributionCategory.findFirst({
+    const categories = await prisma.contributionCategory.findMany({
       where: { id: { in: categoryIds } },
-      select: { offeringEntityType: true, offeringEntityId: true },
+      select: { name: true, offeringEntityType: true, offeringEntityId: true },
     });
-    const entityLabel = firstCategory
-      ? await resolveOfferingEntityLabel(prisma, firstCategory.offeringEntityType, firstCategory.offeringEntityId)
+    const entityLabel = categories[0]
+      ? await resolveOfferingEntityLabel(prisma, categories[0].offeringEntityType, categories[0].offeringEntityId)
       : "";
-    const n = categoryIds.length;
-    return `${application.membership.account.displayName} — trusted provider for ${n} ${n === 1 ? "category" : "categories"} (${entityLabel})`;
+    const names = categories.map((c) => c.name).sort().join(", ");
+    const forWhat = names || `${categoryIds.length} ${categoryIds.length === 1 ? "category" : "categories"}`;
+    return `${application.membership.account.displayName} — trusted provider for ${forWhat}${entityLabel ? ` (${entityLabel})` : ""}`;
   }
 
   if (subjectType === "trusted_provider_revocation") {
@@ -377,6 +379,27 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return subjectType === "node_name_change"
       ? `Rename node to "${proposal.proposedName}"`
       : `Propose node name: "${proposal.proposedName}"`;
+  }
+
+  if (
+    subjectType === "coalition_formation" ||
+    subjectType === "coalition_join" ||
+    subjectType === "coalition_departure" ||
+    subjectType === "coalition_removal"
+  ) {
+    const proposal = await prisma.coalitionProposal.findUnique({
+      where: { id: subjectId },
+      select: { action: true, name: true, coalition: { select: { name: true } } },
+    });
+    if (!proposal) return proposalFamilyLabel(subjectType);
+    const coalitionName = proposal.name?.trim() || proposal.coalition?.name || "the coalition";
+    switch (proposal.action) {
+      case "formation": return `Form coalition "${coalitionName}"`;
+      case "join": return `Join coalition "${coalitionName}"`;
+      case "departure": return `Leave coalition "${coalitionName}"`;
+      case "removal": return `Remove a member from coalition "${coalitionName}"`;
+      default: return proposalFamilyLabel(subjectType);
+    }
   }
 
   // Never surface a raw identity code: fall back to the human-readable family label.
@@ -479,196 +502,422 @@ function formatEventWhen(start: Date, end: Date, timeZone: string): string {
   return `${startFmt.format(start)} – ${endFmt.format(end)}`;
 }
 
-export async function getPetitionDetail(prisma: PrismaClient, petition: PetitionDetailInput): Promise<PetitionDetail> {
-  const proposer = await resolvePetitionProposer(prisma, petition);
-  const { subjectType, subjectId, status } = petition;
-  const familyLabel = proposalFamilyLabel(subjectType);
+type PetitionDetailContext = { proposer: string | null; familyLabel: string };
+type PetitionDetailBuilder = (
+  prisma: PrismaClient,
+  petition: PetitionDetailInput,
+  ctx: PetitionDetailContext,
+) => Promise<PetitionDetail | null>;
+
+// ── Type-specific detail builders ─────────────────────────────────────────────
+// Every ProposalFamily must appear either in PETITION_DETAIL_BUILDERS or in
+// KNOWN_GENERIC_FAMILIES below — the coverage test (src/test/petition-detail-coverage.test.ts)
+// enforces the partition, so a new family cannot silently ship an empty Details panel.
+// A builder may return null (subject row missing) to fall back to the generic rendering,
+// which preserves the no-raw-id guarantee.
+
+const membershipRequestDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
   const fields: { label: string; value: string }[] = [];
+  const membership = await prisma.groupMembership.findUnique({
+    where: { id: subjectId },
+    select: { applicationNote: true, account: { select: { displayName: true } } },
+  });
+  const applicant = membership?.account.displayName ?? "the applicant";
+  fields.push({ label: "Applicant", value: applicant });
+  fields.push({ label: "Application message", value: membership?.applicationNote?.trim() || "—" });
+  const summary = membership ? applicant : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `${applicant} becomes a member of this group`), fields };
+};
 
-  if (subjectType === "membership_request") {
-    const membership = await prisma.groupMembership.findUnique({
-      where: { id: subjectId },
-      select: { applicationNote: true, account: { select: { displayName: true } } },
-    });
-    const applicant = membership?.account.displayName ?? "the applicant";
-    fields.push({ label: "Applicant", value: applicant });
-    fields.push({ label: "Application message", value: membership?.applicationNote?.trim() || "—" });
-    const summary = membership ? applicant : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `${applicant} becomes a member of this group`), fields };
-  }
-
-  if (subjectType === "project_proposal") {
-    const proposal = await prisma.proposal.findUnique({
-      where: { id: subjectId },
-      select: { title: true, body: true },
-    });
-    const title = proposal?.title ?? "the project";
-    fields.push({ label: "Project", value: title });
-    fields.push({ label: "Description", value: proposal?.body?.trim() || "—" });
-    const summary = proposal ? proposal.title : familyLabel;
-    return {
-      summary,
-      proposer,
-      outcome: frameOutcome(status, `the project "${title}" is created and hosted by this group`),
-      fields,
-    };
-  }
-
-  if (subjectType === "responsibility_creation_proposal") {
-    const draft = await prisma.responsibilityProposalDraft.findUnique({
-      where: { id: subjectId },
-      select: { type: true, description: true, abilities: true },
-    });
-    const label = responsibilityTypeLabel(draft?.type ?? "") || "the proposed role";
-    fields.push({ label: "Responsibility", value: label });
-    if (draft?.description) fields.push({ label: "Purpose", value: draft.description });
-    const abilities = Array.isArray(draft?.abilities)
-      ? (draft.abilities as { ability: string }[]).map((a) => a.ability.replace(/_/g, " "))
-      : [];
-    if (abilities.length > 0) fields.push({ label: "Abilities", value: abilities.join(", ") });
-    const summary = draft ? `Propose responsibility: ${label}` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `a new responsibility "${label}" is created`), fields };
-  }
-
-  if (subjectType === "responsibility_proposal") {
-    const [membershipId, type] = subjectId.split(":", 2);
-    const membership = await prisma.groupMembership.findUnique({
-      where: { id: membershipId },
-      select: { account: { select: { displayName: true } } },
-    });
-    const who = membership?.account.displayName ?? "the volunteer";
-    const role = responsibilityTypeLabel(type ?? "");
-    fields.push({ label: "Member", value: who });
-    fields.push({ label: "Role", value: role });
-    const summary = membership ? `${who} for ${role}` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `${who} holds the ${role} responsibility`), fields };
-  }
-
-  if (subjectType === "responsibility_recall") {
-    const assignment = await prisma.responsibilityAssignment.findUnique({
-      where: { id: subjectId },
-      select: { membership: { select: { account: { select: { displayName: true } } } }, responsibility: { select: { type: true } } },
-    });
-    const who = assignment?.membership.account.displayName ?? "the holder";
-    const role = responsibilityTypeLabel(assignment?.responsibility.type ?? "");
-    fields.push({ label: "Member", value: who });
-    fields.push({ label: "Role", value: role });
-    const summary = assignment ? `Recall ${who} from ${role}` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `${who} is recalled from the ${role} responsibility`), fields };
-  }
-
-  if (subjectType === "group_visibility_proposal") {
-    // subjectId is `${groupId}:${target}` (legacy: bare groupId → public).
-    const [gid, rawTarget] = subjectId.split(":");
-    const target = rawTarget === "private" ? "private" : "public";
-    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
-    if (group) fields.push({ label: "Collective", value: group.name });
-    const label = target === "private" ? `Make "${group?.name}" private` : `Make "${group?.name}" publicly visible`;
-    const summary = group ? label : familyLabel;
-    const effect =
-      target === "private"
-        ? "this collective becomes private and is no longer discoverable on this node"
-        : "this collective becomes publicly visible on this node";
-    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
-  }
-
-  if (subjectType === "custom_support_requests_toggle") {
-    const [gid, state] = subjectId.split(":");
-    const accepts = state === "on";
-    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
-    if (group) fields.push({ label: "Collective", value: group.name });
-    const summary = group
-      ? accepts
-        ? `Accept custom support requests in "${group.name}"`
-        : `Stop accepting custom support requests in "${group.name}"`
-      : familyLabel;
-    const effect = accepts
-      ? "this collective accepts free-text custom support requests (members opt in to receiving them)"
-      : "this collective no longer accepts free-text custom support requests";
-    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
-  }
-
-  if (subjectType === "membership_policy_change") {
-    const [gid, policy] = subjectId.split(":");
-    const toOpen = policy === "open";
-    const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
-    if (group) fields.push({ label: "Collective", value: group.name });
-    fields.push({ label: "New membership model", value: toOpen ? "Open (anyone may join)" : "Application-based (requires approval)" });
-    const summary = group
-      ? toOpen
-        ? `Switch "${group.name}" to open membership`
-        : `Switch "${group.name}" to application-based membership`
-      : familyLabel;
-    const effect = toOpen
-      ? "anyone may join this collective directly"
-      : "joining this collective requires an approved membership application";
-    return { summary, proposer, outcome: frameOutcome(status, effect), fields };
-  }
-
-  if (subjectType === "discussion_thread_close") {
-    const thread = await prisma.discussionThread.findUnique({ where: { id: subjectId }, select: { title: true } });
-    if (thread) fields.push({ label: "Thread", value: thread.title });
-    const summary = thread ? `Close "${thread.title}"` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, "this discussion thread is closed to new replies"), fields };
-  }
-
-  if (
-    subjectType === "bulletin_creation" ||
-    subjectType === "publication_creation" ||
-    subjectType === "publication_entry_creation" ||
-    subjectType === "living_document_creation"
-  ) {
-    const draft = await prisma.contentCreationDraft.findUnique({
-      where: { id: subjectId },
-      select: { contentType: true, title: true, body: true },
-    });
-    const typeLabel = (draft?.contentType ?? "").replace(/_/g, " ");
-    const title = draft?.title?.trim() || "(untitled)";
-    if (draft?.title) fields.push({ label: "Title", value: title });
-    if (draft?.body) fields.push({ label: "Proposed text", value: truncateBody(draft.body) });
-    const summary = draft ? `Propose ${typeLabel}: ${title}` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `this ${typeLabel} is published`), fields };
-  }
-
-  if (subjectType === "living_document_revision") {
-    const revision = await prisma.livingDocumentRevision.findUnique({
-      where: { id: subjectId },
-      select: { body: true, livingDocument: { select: { title: true } }, author: { select: { displayName: true } } },
-    });
-    const docTitle = revision?.livingDocument.title ?? "the document";
-    fields.push({ label: "Document", value: docTitle });
-    if (revision?.author?.displayName) fields.push({ label: "Author", value: revision.author.displayName });
-    if (revision?.body) fields.push({ label: "Proposed text", value: truncateBody(revision.body) });
-    const summary = revision ? `${docTitle} revision` : familyLabel;
-    return { summary, proposer, outcome: frameOutcome(status, `this revision to "${docTitle}" is adopted`), fields };
-  }
-
-  if (subjectType === "event_authorization") {
-    const proposal = await prisma.eventProposal.findUnique({
-      where: { id: subjectId },
-      select: { category: true, title: true, description: true, startTime: true, endTime: true, timezone: true, location: true },
-    });
-    if (proposal) {
-      fields.push({ label: "When", value: formatEventWhen(proposal.startTime, proposal.endTime, proposal.timezone) });
-      if (proposal.location) fields.push({ label: "Location", value: proposal.location });
-      if (proposal.description) fields.push({ label: "Description", value: truncateBody(proposal.description) });
-      return {
-        summary: `Authorize ${proposal.category}: ${proposal.title}`,
-        proposer,
-        outcome: frameOutcome(status, `the ${proposal.category} "${proposal.title}" is scheduled`),
-        fields,
-      };
-    }
-  }
-
-  // Other families: delegate the one-line summary to describePetitionSubject (its single
-  // caller path), and frame a generic outcome. No extra subject fetch for the rich types above.
-  const summary = await describePetitionSubject(prisma, subjectType, subjectId);
+const projectProposalDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const proposal = await prisma.proposal.findUnique({
+    where: { id: subjectId },
+    select: { title: true, body: true },
+  });
+  const title = proposal?.title ?? "the project";
+  fields.push({ label: "Project", value: title });
+  fields.push({ label: "Description", value: proposal?.body?.trim() || "—" });
+  const summary = proposal ? proposal.title : familyLabel;
   return {
     summary,
     proposer,
-    outcome: frameOutcome(status, `this ${familyLabel.toLowerCase()} takes effect`),
+    outcome: frameOutcome(status, `the project "${title}" is created and hosted by this group`),
     fields,
+  };
+};
+
+const responsibilityCreationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const draft = await prisma.responsibilityProposalDraft.findUnique({
+    where: { id: subjectId },
+    select: { type: true, description: true, abilities: true },
+  });
+  const label = responsibilityTypeLabel(draft?.type ?? "") || "the proposed role";
+  fields.push({ label: "Responsibility", value: label });
+  if (draft?.description) fields.push({ label: "Purpose", value: draft.description });
+  const abilities = Array.isArray(draft?.abilities)
+    ? (draft.abilities as { ability: string }[]).map((a) => a.ability.replace(/_/g, " "))
+    : [];
+  if (abilities.length > 0) fields.push({ label: "Abilities", value: abilities.join(", ") });
+  const summary = draft ? `Propose responsibility: ${label}` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `a new responsibility "${label}" is created`), fields };
+};
+
+const responsibilityVolunteerDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const [membershipId, type] = subjectId.split(":", 2);
+  const membership = await prisma.groupMembership.findUnique({
+    where: { id: membershipId },
+    select: { account: { select: { displayName: true } } },
+  });
+  const who = membership?.account.displayName ?? "the volunteer";
+  const role = responsibilityTypeLabel(type ?? "");
+  fields.push({ label: "Member", value: who });
+  fields.push({ label: "Role", value: role });
+  const summary = membership ? `${who} for ${role}` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `${who} holds the ${role} responsibility`), fields };
+};
+
+const responsibilityRecallDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const assignment = await prisma.responsibilityAssignment.findUnique({
+    where: { id: subjectId },
+    select: { membership: { select: { account: { select: { displayName: true } } } }, responsibility: { select: { type: true } } },
+  });
+  const who = assignment?.membership.account.displayName ?? "the holder";
+  const role = responsibilityTypeLabel(assignment?.responsibility.type ?? "");
+  fields.push({ label: "Member", value: who });
+  fields.push({ label: "Role", value: role });
+  const summary = assignment ? `Recall ${who} from ${role}` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `${who} is recalled from the ${role} responsibility`), fields };
+};
+
+const groupVisibilityDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  // subjectId is `${groupId}:${target}` (legacy: bare groupId → public).
+  const [gid, rawTarget] = subjectId.split(":");
+  const target = rawTarget === "private" ? "private" : "public";
+  const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+  if (group) fields.push({ label: "Collective", value: group.name });
+  const label = target === "private" ? `Make "${group?.name}" private` : `Make "${group?.name}" publicly visible`;
+  const summary = group ? label : familyLabel;
+  const effect =
+    target === "private"
+      ? "this collective becomes private and is no longer discoverable on this node"
+      : "this collective becomes publicly visible on this node";
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const customRequestsToggleDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const [gid, state] = subjectId.split(":");
+  const accepts = state === "on";
+  const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+  if (group) fields.push({ label: "Collective", value: group.name });
+  const summary = group
+    ? accepts
+      ? `Accept custom support requests in "${group.name}"`
+      : `Stop accepting custom support requests in "${group.name}"`
+    : familyLabel;
+  const effect = accepts
+    ? "this collective accepts free-text custom support requests (members opt in to receiving them)"
+    : "this collective no longer accepts free-text custom support requests";
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const membershipPolicyChangeDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const [gid, policy] = subjectId.split(":");
+  const toOpen = policy === "open";
+  const group = await prisma.group.findUnique({ where: { id: gid }, select: { name: true } });
+  if (group) fields.push({ label: "Collective", value: group.name });
+  fields.push({ label: "New membership model", value: toOpen ? "Open (anyone may join)" : "Application-based (requires approval)" });
+  const summary = group
+    ? toOpen
+      ? `Switch "${group.name}" to open membership`
+      : `Switch "${group.name}" to application-based membership`
+    : familyLabel;
+  const effect = toOpen
+    ? "anyone may join this collective directly"
+    : "joining this collective requires an approved membership application";
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const discussionThreadCloseDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const thread = await prisma.discussionThread.findUnique({ where: { id: subjectId }, select: { title: true } });
+  if (thread) fields.push({ label: "Thread", value: thread.title });
+  const summary = thread ? `Close "${thread.title}"` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, "this discussion thread is closed to new replies"), fields };
+};
+
+const contentCreationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const draft = await prisma.contentCreationDraft.findUnique({
+    where: { id: subjectId },
+    select: { contentType: true, title: true, body: true },
+  });
+  const typeLabel = (draft?.contentType ?? "").replace(/_/g, " ");
+  const title = draft?.title?.trim() || "(untitled)";
+  if (draft?.title) fields.push({ label: "Title", value: title });
+  if (draft?.body) fields.push({ label: "Proposed text", value: truncateBody(draft.body) });
+  const summary = draft ? `Propose ${typeLabel}: ${title}` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `this ${typeLabel} is published`), fields };
+};
+
+const livingDocumentRevisionDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer, familyLabel }) => {
+  const fields: { label: string; value: string }[] = [];
+  const revision = await prisma.livingDocumentRevision.findUnique({
+    where: { id: subjectId },
+    select: { body: true, livingDocument: { select: { title: true } }, author: { select: { displayName: true } } },
+  });
+  const docTitle = revision?.livingDocument.title ?? "the document";
+  fields.push({ label: "Document", value: docTitle });
+  if (revision?.author?.displayName) fields.push({ label: "Author", value: revision.author.displayName });
+  if (revision?.body) fields.push({ label: "Proposed text", value: truncateBody(revision.body) });
+  const summary = revision ? `${docTitle} revision` : familyLabel;
+  return { summary, proposer, outcome: frameOutcome(status, `this revision to "${docTitle}" is adopted`), fields };
+};
+
+const eventAuthorizationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const proposal = await prisma.eventProposal.findUnique({
+    where: { id: subjectId },
+    select: { category: true, title: true, description: true, startTime: true, endTime: true, timezone: true, location: true },
+  });
+  if (!proposal) return null;
+  const fields: { label: string; value: string }[] = [];
+  fields.push({ label: "When", value: formatEventWhen(proposal.startTime, proposal.endTime, proposal.timezone) });
+  if (proposal.location) fields.push({ label: "Location", value: proposal.location });
+  if (proposal.description) fields.push({ label: "Description", value: truncateBody(proposal.description) });
+  return {
+    summary: `Authorize ${proposal.category}: ${proposal.title}`,
+    proposer,
+    outcome: frameOutcome(status, `the ${proposal.category} "${proposal.title}" is scheduled`),
+    fields,
+  };
+};
+
+const COALITION_ROLE_LABELS: Record<string, string> = {
+  participant: "Participating collectives",
+  applicant: "Applicant collective",
+  departing: "Departing collective",
+  remaining_member: "Remaining member collectives",
+};
+
+const coalitionDetail: PetitionDetailBuilder = async (prisma, { subjectId, subjectType, status }, { proposer, familyLabel }) => {
+  const proposal = await prisma.coalitionProposal.findUnique({
+    where: { id: subjectId },
+    select: {
+      action: true,
+      name: true,
+      description: true,
+      content: true,
+      targetGroupId: true,
+      proposedByGroup: { select: { name: true } },
+      coalition: { select: { name: true } },
+      petitions: { select: { role: true, groupSnapshot: true } },
+    },
+  });
+  if (!proposal) return null;
+
+  const coalitionName = proposal.name?.trim() || proposal.coalition?.name || "the coalition";
+  const fields: { label: string; value: string }[] = [];
+  fields.push({ label: "Coalition", value: coalitionName });
+  fields.push({ label: "Proposing collective", value: proposal.proposedByGroup.name });
+  if (proposal.description?.trim()) fields.push({ label: "Description", value: proposal.description.trim() });
+
+  const namesByRole = new Map<string, string[]>();
+  for (const p of proposal.petitions) {
+    const name = (p.groupSnapshot as { name?: string } | null)?.name ?? "a collective";
+    const list = namesByRole.get(p.role) ?? [];
+    list.push(name);
+    namesByRole.set(p.role, list);
+  }
+  for (const [role, label] of Object.entries(COALITION_ROLE_LABELS)) {
+    const names = namesByRole.get(role);
+    if (names?.length) fields.push({ label, value: names.join(", ") });
+  }
+  if (proposal.content?.trim()) fields.push({ label: "Rationale", value: truncateBody(proposal.content) });
+
+  const applicant = namesByRole.get("applicant")?.[0];
+  const departing = namesByRole.get("departing")?.[0];
+  let summary = familyLabel;
+  let effect = `this ${familyLabel.toLowerCase()} takes effect`;
+  if (subjectType === "coalition_formation") {
+    summary = `Form coalition "${coalitionName}"`;
+    effect = `the coalition "${coalitionName}" is formed by the participating collectives`;
+  } else if (subjectType === "coalition_join") {
+    summary = `${applicant ?? "A collective"} joins "${coalitionName}"`;
+    effect = `${applicant ?? "the applicant collective"} joins the coalition "${coalitionName}"`;
+  } else if (subjectType === "coalition_departure") {
+    summary = `${departing ?? "A collective"} leaves "${coalitionName}"`;
+    effect = `${departing ?? "the departing collective"} leaves the coalition "${coalitionName}"`;
+  } else if (subjectType === "coalition_removal") {
+    const target = proposal.targetGroupId
+      ? (await prisma.group.findUnique({ where: { id: proposal.targetGroupId }, select: { name: true } }))?.name
+      : undefined;
+    if (target) fields.push({ label: "Collective proposed for removal", value: target });
+    summary = `Remove ${target ?? "a collective"} from "${coalitionName}"`;
+    effect = `${target ?? "the collective"} is removed from the coalition "${coalitionName}"`;
+  }
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const trustedProviderProposalDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const application = await prisma.trustedProviderApplication.findUnique({
+    where: { id: subjectId },
+    select: { categoryIds: true, membership: { select: { account: { select: { displayName: true } } } } },
+  });
+  if (!application) return null;
+  const who = application.membership.account.displayName;
+  const categoryIds = (application.categoryIds as string[]) ?? [];
+  const categories = categoryIds.length
+    ? await prisma.contributionCategory.findMany({
+        where: { id: { in: categoryIds } },
+        select: { name: true, offeringEntityType: true, offeringEntityId: true },
+      })
+    : [];
+  const names = categories.map((c) => c.name).sort().join(", ");
+  const fields: { label: string; value: string }[] = [{ label: "Nominee", value: who }];
+  if (names) fields.push({ label: "Contribution categories", value: names });
+  const first = categories[0];
+  if (first) {
+    fields.push({
+      label: "Offering space",
+      value: await resolveOfferingEntityLabel(prisma, first.offeringEntityType, first.offeringEntityId),
+    });
+  }
+  const summary = names ? `${who} — trusted provider for ${names}` : `${who} — trusted provider`;
+  const effect = names
+    ? `${who} is recognized as a trusted provider for ${names}`
+    : `${who} is recognized as a trusted provider`;
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const trustedProviderRevocationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const req = await prisma.trustedProviderRevocationRequest.findUnique({
+    where: { id: subjectId },
+    select: { statusIds: true, membership: { select: { account: { select: { displayName: true } } } } },
+  });
+  if (!req) return null;
+  const who = req.membership.account.displayName;
+  const statusIds = (req.statusIds as string[]) ?? [];
+  const statuses = statusIds.length
+    ? await prisma.trustedProviderStatus.findMany({ where: { id: { in: statusIds } }, select: { categoryId: true } })
+    : [];
+  const categoryIds = [...new Set(statuses.map((s) => s.categoryId))];
+  const categories = categoryIds.length
+    ? await prisma.contributionCategory.findMany({ where: { id: { in: categoryIds } }, select: { name: true } })
+    : [];
+  const names = categories.map((c) => c.name).sort().join(", ");
+  const fields: { label: string; value: string }[] = [{ label: "Member", value: who }];
+  if (names) fields.push({ label: "Contribution categories", value: names });
+  const effect = names
+    ? `${who}'s trusted-provider status for ${names} is revoked`
+    : `${who}'s trusted-provider status is revoked`;
+  return { summary: `Revoke trusted provider status for ${who}`, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const projectHostingDetail: PetitionDetailBuilder = async (prisma, { subjectId, subjectType, status }, { proposer }) => {
+  const proposal = await prisma.projectHostingProposal.findUnique({
+    where: { id: subjectId },
+    select: { content: true, projectSnapshot: true, candidateGroupSnapshot: true },
+  });
+  if (!proposal) return null;
+  const projectName = (proposal.projectSnapshot as { name?: string } | null)?.name ?? "the project";
+  const groupName = (proposal.candidateGroupSnapshot as { name?: string } | null)?.name ?? "the collective";
+  const fields: { label: string; value: string }[] = [
+    { label: "Project", value: projectName },
+    { label: "Candidate host collective", value: groupName },
+  ];
+  if (proposal.content?.trim()) fields.push({ label: "Rationale", value: truncateBody(proposal.content) });
+  const summary =
+    subjectType === "project_hosting_offer"
+      ? `Host the project "${projectName}"`
+      : `Accept "${groupName}" as a host collective`;
+  return {
+    summary,
+    proposer,
+    outcome: frameOutcome(status, `"${groupName}" becomes a host collective for the project "${projectName}"`),
+    fields,
+  };
+};
+
+const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBuilder>> = {
+  membership_request: membershipRequestDetail,
+  project_proposal: projectProposalDetail,
+  responsibility_creation_proposal: responsibilityCreationDetail,
+  responsibility_proposal: responsibilityVolunteerDetail,
+  responsibility_recall: responsibilityRecallDetail,
+  group_visibility_proposal: groupVisibilityDetail,
+  custom_support_requests_toggle: customRequestsToggleDetail,
+  membership_policy_change: membershipPolicyChangeDetail,
+  discussion_thread_close: discussionThreadCloseDetail,
+  bulletin_creation: contentCreationDetail,
+  publication_creation: contentCreationDetail,
+  publication_entry_creation: contentCreationDetail,
+  living_document_creation: contentCreationDetail,
+  living_document_revision: livingDocumentRevisionDetail,
+  event_authorization: eventAuthorizationDetail,
+  coalition_formation: coalitionDetail,
+  coalition_join: coalitionDetail,
+  coalition_departure: coalitionDetail,
+  coalition_removal: coalitionDetail,
+  trusted_provider_proposal: trustedProviderProposalDetail,
+  trusted_provider_revocation: trustedProviderRevocationDetail,
+  project_hosting_offer: projectHostingDetail,
+  project_hosting_acceptance: projectHostingDetail,
+};
+
+/** Families with a type-specific detail builder — exported for the coverage test. */
+export const PETITION_DETAILED_FAMILIES = Object.keys(PETITION_DETAIL_BUILDERS) as ProposalFamily[];
+
+/**
+ * Families that deliberately render the generic detail (describePetitionSubject summary +
+ * framed outcome, no fields). Adding a new ProposalFamily? Either give it a builder above
+ * or add it here consciously — the coverage test fails the suite otherwise.
+ */
+export const KNOWN_GENERIC_FAMILIES: ReadonlySet<ProposalFamily> = new Set<ProposalFamily>([
+  "project_hosting_withdrawal",
+  "node_steward_group_nomination",
+  "node_steward_candidate_consent",
+  "node_steward_appointment",
+  "node_steward_no_confidence_initiation",
+  "node_steward_no_confidence",
+  "node_steward_resignation",
+  "node_name_change_proposal",
+  "node_name_change",
+  "accountability_action",
+  "bulletin_archive",
+  "publication_archive",
+  "publication_entry_archive",
+  "living_document_archive",
+  "emergency_declaration",
+  "collective_support_request",
+  "collective_contribution_offer",
+  "contribution_category_proposal",
+  "contribution_category_archive",
+]);
+
+export async function getPetitionDetail(prisma: PrismaClient, petition: PetitionDetailInput): Promise<PetitionDetail> {
+  const proposer = await resolvePetitionProposer(prisma, petition);
+  const familyLabel = proposalFamilyLabel(petition.subjectType);
+
+  const builder = PETITION_DETAIL_BUILDERS[petition.subjectType as ProposalFamily];
+  if (builder) {
+    const detail = await builder(prisma, petition, { proposer, familyLabel });
+    if (detail) return detail;
+  }
+
+  // Known-generic families — and any builder whose subject row is missing: delegate the
+  // one-line summary to describePetitionSubject (never a raw id) and frame a generic outcome.
+  const summary = await describePetitionSubject(prisma, petition.subjectType, petition.subjectId);
+  return {
+    summary,
+    proposer,
+    outcome: frameOutcome(petition.status, `this ${familyLabel.toLowerCase()} takes effect`),
+    fields: [],
   };
 }
 
