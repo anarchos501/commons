@@ -881,13 +881,17 @@ model Coalition {
 model CoalitionMembership {
   id          String    @id @default(cuid())
   coalitionId String
-  groupId     String
+  // Nullable since F3(2): a cross-node coalition's remote member is a
+  // FederatedGroupPresence, not a local Group. App-level invariant (enforced
+  // in coalitions.ts, tested): exactly one of groupId / the presence link is
+  // set. Every LOCAL read path filters or narrows on groupId != null.
+  groupId     String?
   joinedAt    DateTime  @default(now())
   endedAt     DateTime?
   endReason   String?
 
   coalition Coalition @relation(fields: [coalitionId], references: [id])
-  group     Group     @relation(fields: [groupId], references: [id])
+  group     Group?    @relation(fields: [groupId], references: [id])
 
   @@index([coalitionId])
   @@index([groupId])

@@ -65,13 +65,14 @@ export async function proposeCoalitionJoinAction(_prev: FormState, formData: For
   try {
     const coalition = await prisma.coalition.findUnique({
       where: { id: coalitionId },
-      select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
+      // Local member groups only (cross-node members have null groupId, F3).
+      select: { memberships: { where: { endedAt: null, groupId: { not: null } }, select: { groupId: true } } },
     });
     if (!coalition) return { kind: "error", message: coalitionProposalFailureMessage("not_found") };
     const result = await openCoalitionJoinProposal(prisma, {
       coalitionId,
       applicant: { groupId, createdByMembershipId: membership.id },
-      memberSponsors: coalition.memberships.map((member) => ({ groupId: member.groupId })),
+      memberSponsors: coalition.memberships.flatMap((member) => (member.groupId ? [{ groupId: member.groupId }] : [])),
       content,
     });
     if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };

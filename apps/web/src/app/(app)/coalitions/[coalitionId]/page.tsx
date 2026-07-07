@@ -228,15 +228,19 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
             className="bg-[var(--surface)] p-5 sm:p-6"
           >
             <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
-              {data.coalition.memberships.map((membership) => (
-                <a
-                  key={membership.id}
-                  href={`/groups/${membership.group.id}`}
-                  className="block px-3 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
-                >
-                  {membership.group.name}
-                </a>
-              ))}
+              {data.coalition.memberships.flatMap((membership) =>
+                membership.group
+                  ? [
+                      <a
+                        key={membership.id}
+                        href={`/groups/${membership.group.id}`}
+                        className="block px-3 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+                      >
+                        {membership.group.name}
+                      </a>,
+                    ]
+                  : [],
+              )}
             </div>
             <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
               Coalition decisions are made separately by each participating collective. This space does not create a pooled electorate.
@@ -412,7 +416,11 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       ? await listDiscussionMessages(prisma, selectedThread.id)
       : [];
 
-    const currentGroupIds = coalition.memberships.map((membership) => membership.groupId);
+    // Local member groups only: cross-node members (null groupId, F3) are
+    // never sponsors of LOCAL bundle petitions through this page.
+    const currentGroupIds = coalition.memberships.flatMap((membership) =>
+      membership.groupId ? [membership.groupId] : [],
+    );
 
     // One active member-group participant may initiate a bundle; every affected
     // group still decides through its own petition.
@@ -428,19 +436,14 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
     const myMembershipIdByGroupId = new Map(myCurrentMemberMemberships.map((m) => [m.groupId, m.id]));
     const canSponsorCurrentMember = myCurrentMemberMemberships.length > 0;
 
-    const departureOptions = currentGroupIds
-      .filter((id) => myMembershipIdByGroupId.has(id))
-      .map((id) => {
-        const membership = coalition.memberships.find((m) => m.groupId === id)!;
-        return { groupId: id, groupName: membership.group.name };
-      });
+    const localMembers = coalition.memberships.flatMap((m) =>
+      m.groupId && m.group ? [{ groupId: m.groupId, groupName: m.group.name }] : [],
+    );
+    const departureOptions = localMembers.filter((member) => myMembershipIdByGroupId.has(member.groupId));
 
-    const removalOptions = currentGroupIds
-      .filter((targetId) => currentGroupIds.some((id) => id !== targetId && myMembershipIdByGroupId.has(id)))
-      .map((targetId) => {
-        const membership = coalition.memberships.find((m) => m.groupId === targetId)!;
-        return { groupId: targetId, groupName: membership.group.name };
-      });
+    const removalOptions = localMembers.filter((target) =>
+      currentGroupIds.some((id) => id !== target.groupId && myMembershipIdByGroupId.has(id)),
+    );
 
     // Offer only groups the acting member can already legitimately see (public, or private
     // groups they belong to). Private groups are never shown to non-members, so this is not a
@@ -521,7 +524,11 @@ async function joinCoalitionAction(_prev: FormState, formData: FormData): Promis
       select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
     });
     if (!coalition) return { kind: "error", message: coalitionProposalFailureMessage("not_found") };
-    const currentGroupIds = coalition.memberships.map((membership) => membership.groupId);
+    // Local member groups only: cross-node members (null groupId, F3) are
+    // never sponsors of LOCAL bundle petitions through this page.
+    const currentGroupIds = coalition.memberships.flatMap((membership) =>
+      membership.groupId ? [membership.groupId] : [],
+    );
 
     const myMemberships = await prisma.groupMembership.findMany({
       where: {
@@ -600,7 +607,11 @@ async function removeCoalitionMemberAction(_prev: FormState, formData: FormData)
       select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
     });
     if (!coalition) return { kind: "error", message: coalitionProposalFailureMessage("not_found") };
-    const currentGroupIds = coalition.memberships.map((membership) => membership.groupId);
+    // Local member groups only: cross-node members (null groupId, F3) are
+    // never sponsors of LOCAL bundle petitions through this page.
+    const currentGroupIds = coalition.memberships.flatMap((membership) =>
+      membership.groupId ? [membership.groupId] : [],
+    );
     const remainingGroupIds = currentGroupIds.filter((groupId) => groupId !== targetGroupId);
     if (remainingGroupIds.length === 0) {
       return { kind: "error", message: coalitionProposalFailureMessage("invalid_participants") };

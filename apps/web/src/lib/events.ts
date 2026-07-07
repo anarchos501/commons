@@ -1164,7 +1164,11 @@ export async function listConnectableAudiences(
       where: { coalitionId: hostId, endedAt: null, coalition: { status: "active" } },
       select: { group: { select: { id: true, name: true } } },
     });
-    for (const m of memberships) out.push({ audienceType: "group", audienceId: m.group.id, label: m.group.name });
+    for (const m of memberships) {
+      // Local member groups only: a cross-node member (null group, F3) gets
+      // its audience entry via federation delivery, not local fan-out.
+      if (m.group) out.push({ audienceType: "group", audienceId: m.group.id, label: m.group.name });
+    }
     return out;
   }
 
