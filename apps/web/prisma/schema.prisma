@@ -363,6 +363,7 @@ model Node {
   signedEvents        SignedEvent[]
   feedbackReports     FeedbackReport[]
   feedbackDigests     FeedbackDigest[]
+  keyPairs            NodeKeyPair[]
 
   @@index([stewardGroupId])
 }
@@ -393,6 +394,90 @@ model LinkedNodePresence {
   @@unique([portableIdentityId, nodeId])
   @@index([nodeId])
   @@index([status])
+}
+
+// --- Inter-node federation (F0: protocol & peering; register F-4, D-3) ---
+
+// This node's own signing keys. Multiple rows allow rotation (F5); a raw
+// partial unique index ("one active per node", retiredAt IS NULL) lives in
+// the migration because Prisma cannot express partial indexes.
+model NodeKeyPair {
+  id            String    @id @default(cuid())
+  nodeId        String
+  algorithm     String    @default("ed25519")
+  publicKey     String
+  privateKeyPem String
+  createdAt     DateTime  @default(now())
+  retiredAt     DateTime?
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+}
+
+// A peer node this node knows about. Trust is pinned to the key, not just
+// the domain (TOFU at proposal time, confirmed via /.well-known/commons).
+// domain is the canonical identity (portless, matches the peer's Node.domain
+// and envelope origin.domain); inboxUrl is the delivery address — they differ
+// in the two-node dev harness, where ports distinguish instances.
+model FederatedNode {
+  id             String    @id @default(cuid())
+  domain         String    @unique
+  displayName    String?
+  publicKey      String
+  inboxUrl       String?
+  status         String    @default("proposed") // proposed | active | suspended | ended
+  policySnapshot Json?
+  pinnedAt       DateTime  @default(now())
+  lastSeenAt     DateTime?
+  endedAt        DateTime?
+
+  outboxItems   FederationOutboxItem[]
+  inboundEvents FederationInboundEvent[]
+
+  @@index([status])
+}
+
+// Outbound delivery queue: enqueue inside the local transaction, deliver via
+// the instrumentation sweep with backoff — never synchronously in a request.
+model FederationOutboxItem {
+  id            String    @id @default(cuid())
+  eventId       String    @unique
+  peerId        String
+  eventType     String
+  envelope      Json
+  status        String    @default("pending") // pending | delivered | dead
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  peer FederatedNode @relation(fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([peerId])
+}
+
+// Inbound event ledger: the unique(origin, remoteEventId) pair is the replay
+// guard — insert-first, catch P2002 as "duplicate" (register F-4). outcome is
+// null until the handler transaction completes.
+model FederationInboundEvent {
+  id            String    @id @default(cuid())
+  originNodeId  String
+  remoteEventId String
+  eventType     String
+  envelope      Json
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+  outcome       String? // applied | rejected | duplicate | error
+  error         String?
+
+  origin FederatedNode @relation(fields: [originNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([originNodeId, remoteEventId])
+  @@index([originNodeId])
+  @@index([eventType])
 }
 
 model Account {

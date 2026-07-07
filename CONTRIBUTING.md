@@ -2,7 +2,7 @@
 
 Commons contributions should strengthen cooperation, consent, privacy, auditability, and local autonomy.
 
-Before proposing a major feature, read the [Commons Charter](docs/charter.md). Before implementing interface work, read the [Commons Experience Principles](docs/experience-principles.md).
+Before proposing a major feature, read the [Commons Charter](docs/charter.md). Before implementing interface work, read the [Commons Experience Principles](docs/experience-principles.md). Before changing anything that touches privacy, federation, or operator power, check the [Design & Decision Register](docs/register.md) — if a change would violate an entry, revisit the entry deliberately rather than letting the code drift.
 
 ## Project Boundary
 

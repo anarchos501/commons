@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Second-instance build dir used by the two-node federation dev harness:
+    ".next-node-b/**",
   ]),
 ]);
 

@@ -1,0 +1,147 @@
+# Commons — Design & Decision Register
+
+*Canonical, in-repo record of load-bearing design commitments and known limitations. Each entry is a promise or a boundary that must stay true as the code changes. When a change would violate an entry, that is a signal to stop and revisit the entry deliberately — not to quietly let the code drift.*
+
+**How to use this file.** Append-mostly. One entry per commitment or limitation, stable ID. `F-n` = architecture/authority direction; `D-n` = data/privacy boundary. When code enforces an entry, reference the entry ID in a comment at the enforcement point (same convention as the RFC references already in the code). This file is the **canonical** copy; exploratory analysis may happen elsewhere, but nothing is a commitment until it lands here.
+
+**Entry format:** Status (Committed / Open / Watch) · Decision (one sentence) · Context · Consequences · Links.
+
+---
+
+## F-1 — Content-blind host is the operator-sovereignty commitment
+
+**Status:** Committed (direction); Rung 1 targeted for beta, Rung 2 post-beta.
+**Decision:** A node operator must not be able to read the *content* of the community's life on their own server; the commitment is a content-blind host, not merely encryption of a narrow "vulnerability class."
+**Context:** The charter's "shared coordination should be visible and accountable" means visible **to the community**, never **to the operator**. The host currently reading every petition, chat log, and roster is an artifact of server-side rendering (the server renders, so it reads), not a designed decision. "No hidden admin power" carries no asterisk reading "except the host reads everything."
+**Consequences:** Rung 1 (beta gate) encrypts content across collective surfaces to member-held keys while structural metadata stays plaintext so lifecycle machinery runs. Rung 2 (post-beta) moves governance computation client-side (blind server). Redaction becomes key destruction. The honest residual is recorded in D-6 — this is a large narrowing of operator power, not its elimination.
+**Links:** federation-e2ee plan §6; D-1; D-6; F4.
+
+## F-2 — Federation is opportunity, never mandate; consent is collected once per layer
+
+**Status:** Committed.
+**Decision:** Federation between nodes creates only the *capability* to interact; no group, project, or person is exposed or obligated by it. Consent is collected once, at the layer that owns each decision, and never charged twice.
+**Context:** A node↔node agreement is a handshake (keys, peering, presence capability) that exposes nothing. Each scale has exactly one consent moment: a node consents to federation via steward appointment (F-5); a collective consents to each peer via a per-(collective, peer-node) grant (D-4); a member consents to each interaction via the normal petition/request machinery. Repeated attempts to add a second consent gate (a standing node-wide policy vote atop steward appointment; a per-group refuge application atop the agreement; a standing visibility grant atop a deliberate join) were each rejected as double-charging.
+**Consequences:** Every layer defaults **closed** and opts in per relationship. Every layer's power to *stop* (de-federation valve, recall, grant revocation) is cheaper than its power to start. Deliberate acts (joining a cross-node coalition) are their own consent and need no prior standing grant. This is the project's strongest articulation of "consent, not coercion" — it specifies *where* consent is collected and *how often*, which the charter does not.
+**Links:** plan §1, §2b; F-5; D-4.
+
+## F-3 — Federation extends the hostile-collective threat model (a peer node can be the hostile collective)
+
+**Status:** Watch.
+**Decision:** Treat a whole peer node as a potential hostile collective — capture, impersonation, payload abuse — not just individual bad actors.
+**Context:** The register's standing asymmetry: Commons is well-defended against a hostile *individual*, under-defended against a hostile *majority*. Federation raises the stakes on the weak side because it turns "a majority forms inside your node" into "a majority can *arrive*." Most hard federation questions (F-6 refuge-then-promote, node-scale removal, arrival weight) are hostile-collective problems.
+**Consequences:** Mitigations: mutual-consent agreements, pinned node keys (TOFU at proposal, confirmed via `/.well-known/commons`), per-agreement `mayFederate` allow-lists, unilateral departure, per-peer visibility grants defaulting closed. The counter-majoritarian safeguards (entrenchment, arrival-weight phase-in, protected exit) stop being theoretical at federation.
+**Links:** plan §9; F-5; F-6; D-4.
+
+## F-4 — The federation protocol is Commons' first API — a new attack and power surface
+
+**Status:** Committed.
+**Decision:** Introducing a node-to-node wire protocol ends the "no API" property; treat that end as a deliberate, defended decision.
+**Context:** Commons has had no API surface — its single existing route handler is a browser redirect (the invite join route), not a programmatic interface. The no-API simplicity was itself a safety property (a smaller surface to attack and to concentrate power in). Federation requires a server-to-server API.
+**Consequences:** The API is narrow, versioned, signed (Ed25519 envelopes), server-to-server only (browsers never call it), deny-by-default on data classes, replay-protected, and rate-limited (F5). Every inbound message verifies against a pinned key. This entry is the standing reminder that the surface must stay minimal. Identity and delivery address are distinct things and must never be conflated: a peer's `domain` (plus its pinned key) is the identity everything security-relevant keys off; its delivery address (`FederatedNode.inboxUrl`, self-reported via `/.well-known/commons`) is untrusted routing metadata — a peer pointing it elsewhere can at worst misdeliver its own traffic, never redirect trust or impersonate. Envelope signatures cover the origin domain, never the delivery address.
+**Links:** plan §4; F0; F5.
+
+## F-5 — Federation authority is delegated to the steward collective, granted at appointment
+
+**Status:** Committed.
+**Decision:** Per-peer federation agreements — and federation policy itself — are decided by the node steward collective; the node-wide mandate for this is granted when the steward collective is appointed, not by a separate policy vote. Node-wide petitions are reserved for *stopping* (end an agreement, disable federation).
+**Context:** A node-wide petition per peer is unworkable at scale (quorum failure or rubber-stamp fatigue). Two facts make delegation legitimate rather than a concentration of hidden power: (1) an agreement exposes nothing by itself (F-2), so it is low-stakes; (2) steward appointment is already an unavoidable node-wide two-step, so it *is* the consent moment — a second policy vote double-charges it. No steward ⇒ not federable (fail-closed), which also guarantees federation always rests on at least one node-wide decision.
+**Consequences:** Steward appointment becomes the single most consequential vote a node holds, and the steward collective becomes load-bearing for the first time. **Therefore (pre-F1 work, non-negotiable):** the appointment UI must state plainly that appointment grants federation authority, or the consent story is fiction; and the appointment/recall flows must be audited to current hardening standards before they carry this weight. Mitigations: steward recall, visible steward petitions, node-wide stop valves.
+**Links:** plan §2, Workstream A; F-2.
+
+## F-6 — Continuity is one home plus refuges, never multiple home nodes
+
+**Status:** Committed (structural); disaster activation Open.
+**Decision:** An entity has exactly one authoritative home node at a time; resilience against node death comes from cold refuge replicas plus a promotion/re-homing flow — not from multiple concurrent home nodes.
+**Context:** Multiple live authorities over one entity is the split-brain problem (two petition states, two rosters, two truths under partition), which no care makes coherent. Refuge hosting is a *term of the federation agreement* (not a per-group application, per F-2): within an active agreement any collective backs up to the peer by right, as cold ciphertext.
+**Consequences:** Refuges hold ciphertext + structure, never live authority; members hold keys, so a refuge operator gains no read access (backup does not multiply the F-1 problem). Re-homing has two entrances: graceful signed handoff, or disaster member-quorum activation on the refuge. **Capture vector (Watch):** a large group promoting onto a small node can dominate its electorate — see D-5 (arrival weight). Authority transfers only by signed handoff or member-quorum activation; a stale returning home must reconcile and demote. Disaster activation is the single hardest thing in the program; a defensible beta cut is graceful-handoff-only, with manual steward-mediated re-homing as the disaster stopgap.
+**Links:** plan §5b; D-5; F-3.
+
+---
+
+## D-1 — Privacy is currently by convention, not by construction
+
+**Status:** Watch (being closed by F-1/F4).
+**Decision:** Acknowledge that until Rung 1 ships, member privacy from the operator rests on operator goodwill and code discipline, not on cryptographic guarantee.
+**Context:** The server reads everything it renders. Alpha among trusted hosts made this acceptable; open beta among strangers running nodes for real communities does not. A commitment maintained only by convention rots the first time code drifts — which is why F-1's guarantees must be structural, and why this register is in-repo rather than convention-maintained elsewhere.
+**Consequences:** F4 (Rung 1) is a beta-entry gate specifically to convert this from convention to construction for content. The residual (metadata, membership) is recorded honestly in D-6.
+**Links:** F-1; F4; D-6.
+
+## D-6 — Honest ceilings: never claim more protection than exists
+
+**Status:** Committed.
+**Decision:** State exactly what each protection layer does and does not do; never imply anonymity, deletion, or invisibility beyond what the mechanism delivers.
+**Context:** False confidence is its own harm — a member who believes they are anonymous behaves differently than one who knows the true boundary. The exact wording of a limitation *is* the commitment.
+**Consequences — the boundary sentences that must appear in the UI and the guide, not only here:**
+- **On content vs. identity:** *"Commons hides what your community says from the host; it cannot fully hide who your community is from the host."*
+- **Membership/graph is not hideable from your own server.** The node authenticates accounts and routes messages, so it must know which accounts receive a collective's traffic — that is the roster, even with every payload opaque. Signal/Matrix/MLS share this. Hiding membership itself is research-grade and out of scope; never implied.
+- **Pseudonymity erodes under small-community correlation.** An account with an attached email is not pseudonymous to the host: email is a far stronger re-labeling key than traffic timing. Attaching email is a per-person choice with a per-person cost, stated where it is made. With names encrypted the host holds an unlabeled graph, but IPs, timing, group sizes, and meeting rhythms let a host who knows the community socially partially re-label it without breaking any crypto.
+- **The host serves the JavaScript that holds the keys.** Web-delivered E2EE defends against a *curious* operator (DB reads, backups, subpoenas), not a *malicious* one shipping a poisoned client. Closing that gap needs signed/reproducible builds or native clients (post-beta); never implied meanwhile.
+- **Rung/custody must be stated in-product.** The UI says which rung is active and what it does *not* protect against; at beta, keys are node-custodied (protects against remote nodes and honest-but-curious reads, not against your own malicious host).
+**Links:** F-1; D-1; D-2; F4.
+
+## D-2 — Accounts require no real-world identifier (lean into it deliberately)
+
+**Status:** Committed (make it stated policy).
+**Decision:** Login requires no real-world identifier: accounts may attach a verified email (login, recovery, opt-in notifications), but a handle-only account is a first-class, permanent option in every registration mode. Anti-flood protection comes from the node's registration mode (`open` + rate limiter, or `invite_only`) — never from mandatory identity: email verification is a weak Sybil defense (disposable domains), and requiring it would filter the vulnerable more effectively than bots.
+**Context:** Commons never integrated email. Most platforms leak identity at the front door before encryption matters; Commons does not have to. This is what makes pseudonymous membership (D-6) more than cosmetic.
+**Consequences:** State it as policy in docs. Note the operational tradeoffs it implies elsewhere (account recovery and person-targeted notification — e.g. the A-4 concern-subject right-of-reply — need a channel that reaches someone not currently in the app; solve on Commons' terms, not by quietly adding email and inheriting the re-engagement machinery the charter refuses). Verified email is the delivery channel for A-4 person-targeted notification and for self-service password reset; handle-only accounts knowingly forgo both (stated at registration). Attached emails are stored hash-for-login + encrypted-at-rest with the key outside the database — breach protection, honestly framed: it does not hide the address from the live operator (send path + mail logs reconstruct the mapping), and no cipher can, because the server must send to it. D-2's protection was always the *nonexistence* of the linkage; attaching email trades it away per-person, by choice, at the point of attachment. Registration mode is node-constitutional: set at creation, changed only by node-wide petition.
+**Links:** D-6; A-4; D-9.
+
+## D-3 — Federation moves data only through a deny-by-default class chokepoint
+
+**Status:** Committed.
+**Decision:** All cross-node data movement passes one predicate — `mayFederate(dataClass, agreement)` — that denies by default and structurally excludes the vulnerability class under every agreement.
+**Context:** Same architectural move as `canViewConcern`: one predicate, every path, rather than per-call-site checks that drift. Federation without content protection increases exposure (more copies on more servers), so the vulnerability class is excluded from payloads from day one, before any encryption exists.
+**Consequences:** A test asserts the vulnerability class can never pass under any agreement. Refuge replication, coalition coordination, and mediated actions all route through it. After Rung 1, ciphertext blobs may federate; plaintext vulnerability classes never. Deny-by-default has exactly one named exception: the `protocol` class tier (federation handshake — pings, agreement proposals and decisions) is the sole category permitted toward a `proposed` peer, because agreements cannot form if the proposal cannot reach a not-yet-active peer (the same bootstrapping care as F-5's fail-closed rule). It carries governance-handshake events only — never content, never coordination — and a test asserts nothing but protocol-class events pass pre-active. Do not widen this tier without amending this entry. Enforcement is at *enqueue*, upstream of the transport, and the transport is architecturally private to the outbox (asserted by test) — there is no path to the wire that bypasses the chokepoint.
+**Links:** plan §4; F0; F4.
+
+## D-4 — Every collective is closed toward every peer node by default; opening is a per-peer petition
+
+**Status:** Committed.
+**Decision:** An active agreement grants nothing toward any collective; each *public* collective opens itself toward a *specific* peer node by its own petition-backed visibility grant (`closed` / `visible` / `interactive`). Grant tiers apply to public groups only: private groups cannot hold a `visible`/`interactive` stance and are exposed cross-node only through deliberate shared acts (coalition membership, project co-hosting), with disclosure scoped to that shared entity's membership.
+**Context:** The instantiation of F-2 at the collective layer. An agreement adds a peer to every collective's "federated nodes" list and changes nothing else.
+**Consequences — including the honest scope that must be enforced in code, not only UI copy:** the grant governs the *federated* layer (discovery in peer listings, inbound requests, presence interaction). It does **not** govern the open web — a public group's page is already readable by anyone including a peer's members, and "closed toward node X" cannot retract that. The stance chokepoint must gate federated-surface serving specifically; public-web serving is a separate, unchanged path. A test should assert a public group set to "closed" toward a peer does not thereby imply its public page is hidden (D-6). Grant proposals for private groups are rejected in validation (`private_group_not_grantable`), which eliminates the "what does `visible` disclose for an encrypted-name group" question: nothing, ever, via grants. Grants suspend when the agreement ends (reversible; soft-archive, not deletion).
+**Links:** plan §2b; F-2; D-6.
+
+## D-5 — Re-homing arrival weight (capture control)
+
+**Status:** Open (must be decided before disaster activation ships).
+**Decision:** (To be set.) Newly re-homed members' node-wide governance weight must not let a promoting group instantly dominate a smaller refuge node's electorate.
+**Context:** Cold refuge replication is inert and safe; *promotion* makes a group live on the refuge, and its members become constituents carrying node-wide weight — a 200-member group activating onto a 30-member node is suddenly ~87% of its electorate (F-6, F-3).
+**Consequences:** Leading candidate is arrival-weight phase-in via the existing participation-weighting machinery. Whatever is chosen must be a decided answer, not a discovered one; this entry blocks F-6 disaster activation.
+**Links:** F-6; F-3.
+
+## D-7 — No server-side search over encrypted classes at beta
+
+**Status:** Committed (beta scope).
+**Decision:** At Rung 1, the server performs no search or content-indexing over encrypted classes; searchability of encrypted content is a client-side / post-beta concern.
+**Context:** A server cannot index what it cannot read. Providing "search" by keeping a plaintext shadow index would silently defeat F-1.
+**Consequences:** Scope search to plaintext structural metadata at beta, or move it client-side later. Never reintroduce a plaintext index of an encrypted class.
+**Links:** F-1; F4.
+
+## D-8 — Rung 2 must not be foreclosed by F0–F5 decisions
+
+**Status:** Open (guard now, build post-beta).
+**Decision:** No pre-beta decision may make the blind-server destination unreachable; keep the relocation seams intact.
+**Context:** Rung 2 moves decryption and governance computation client-side. That stays possible only if the boundaries are kept movable.
+**Consequences:** `IdentityKeyCustody` is a *movable* custody boundary (node-held at beta, client-held later); `decryptForViewer` is the single seam Rung 2 relocates client-side; **no server feature may grow a new dependency on content plaintext after F4** (optional CI guard: reject new plaintext columns for registered classes). Named Rung-2 problems: key backup/recovery, member-removal rotation, guest keys, liveness redesign (client-evaluated resolution), poisoned-client mitigation. Per-group forward secrecy is foreclosed as a default (history-on-join is the system's shape); custody keys must never become password-derived without a recovery design (forgotten password must not mean lost history).
+**Links:** F-1; F4; F6.
+
+## D-9 — Email carries existence, not content
+
+**Status:** Committed.
+**Decision:** No notification email may contain member content; bodies and subjects carry the fact of activity plus a link.
+**Context:** Email traverses third-party servers in plaintext; content in email would defeat F-1/F4 through a side channel and is the single easiest way to silently break the content-blind-host guarantee.
+**Consequences:** fixture test asserts no encrypted-class content in any rendered email; applies to all future channels (push, SMS) identically.
+**Links:** F-1; F4; D-6.
+
+---
+
+## Standing items awaiting fold-in (from prior review cycles — distill and place)
+
+These were identified in earlier patch reviews and are recorded here so they are not lost; each should be promoted to a proper entry or folded into an existing one.
+
+- **A-2 / concern history is not a public scorecard** — a concern must never accrete into a durable, visible per-person reputation record; `request_flag` binds no per-person subject row. (The harm-side twin of the "count the gift" tension.)
+- **A-4 / concern subject notification & right-of-reply** — the review workflow is now fully actionable (findings can be substantiated, actions proposed) while the subject is never told; person-targeted action must eventually pierce and afford reply. Sharpened, not closed, by making review actionable; needs a delivery channel (see D-2).
+- **administrative_closure is effectively universal** — every auto-provisioned reviewer seat carries all four abilities, so the ability check does not currently differentiate; record as a known governance posture (who may unilaterally close a concern), not an accident.
+- **request retention is redaction, not deletion** — after the accountability window, request content is redacted but a coarse attributable record (requester id, type, timing) persists; the "contribution kept, vulnerability not archived" asymmetry is real but softer than "no record at all." (Candidate to reconcile against F-1: key-destruction redaction can strengthen this.)

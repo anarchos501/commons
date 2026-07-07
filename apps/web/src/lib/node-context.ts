@@ -5,6 +5,9 @@ function isLocalHostAlias(host: string): boolean {
   const normalized = host.toLowerCase();
   return (
     normalized === "localhost" ||
+    // RFC 6761 reserves *.localhost for loopback — the two-node federation
+    // dev harness relies on it (node-a.localhost / node-b.localhost).
+    normalized.endsWith(".localhost") ||
     normalized === "127.0.0.1" ||
     normalized === "::1" ||
     normalized.startsWith("192.168.") ||

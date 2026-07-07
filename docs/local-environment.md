@@ -31,3 +31,30 @@ Check local Docker separation:
 docker ps -a --format "{{.Names}} {{.Status}}"
 docker volume ls
 ```
+
+## Two-node federation harness
+
+Federation development needs two Commons instances talking to each other. They must use **distinct hostnames**, not just distinct ports: host normalization strips ports, so two instances on plain `localhost` would resolve to the same node identity. The harness uses the RFC 6761 `*.localhost` names, which resolve to loopback:
+
+- Node A: `http://node-a.localhost:3000`, database from `.env`
+- Node B: `http://node-b.localhost:3001`, database from `.env.node-b`
+
+Setup (all from `apps/web`):
+
+```bash
+cp .env.node-b.example .env.node-b   # then adjust DATABASE_URL host/credentials to match your .env
+pnpm db:setup:node-b                 # creates the commons_node_b database on the same server
+pnpm db:migrate:node-b               # applies migrations to it
+pnpm dev:node-a                      # first instance on :3000
+pnpm dev:node-b                      # second instance on :3001 (separate terminal)
+```
+
+If `node-a.localhost` does not resolve on your system, add both names to your hosts file:
+
+```
+127.0.0.1 node-a.localhost node-b.localhost
+```
+
+Register each node's first account **through its own hostname** (`http://node-a.localhost:3000/register`, `http://node-b.localhost:3001/register`) — Commons records the first-registration hostname as the node's permanent domain, and federation identifies peers by that domain. Registering via `localhost:3000` would mint the wrong identity.
+
+Cross-node deliveries flow through the federation outbox (a 30-second sweep); watch each instance's console for `[federation]` lines. `/.well-known/commons` on each instance shows what a peer sees when pinning it.

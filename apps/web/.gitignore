@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-node-b/
 /out/
 
 # production
@@ -34,6 +35,7 @@ yarn-error.log*
 .env*
 !.env.example
 !.env.production.example
+!.env.node-b.example
 
 # vercel
 .vercel
