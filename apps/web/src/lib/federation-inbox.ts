@@ -5,6 +5,8 @@ import {
   verifyFederationEnvelope,
   type FederationEnvelope,
 } from "./federation-envelope";
+import { handleMediatedAction } from "./federation-actions";
+import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
   enqueueGovernanceEvent,
@@ -167,6 +169,9 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   federation_proposal_decision: handleProposalDecision,
   federation_agreement_ended: handleAgreementEnded,
   federation_suspension_notice: handleSuspensionNotice,
+  presence_establish: applyPresenceEstablish,
+  presence_revoke: applyPresenceRevoke,
+  mediated_action: handleMediatedAction,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

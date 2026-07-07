@@ -242,6 +242,36 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
               </div>
             )}
 
+            {data.federation.myPresences.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Your presences</p>
+                {data.federation.myPresences.map((presence) => (
+                  <p key={presence.id} className="text-xs text-[var(--soft-text)]">
+                    Your identity is vouched to <span className="font-medium text-[var(--text)]">{presence.nodeLabel}</span>{" "}
+                    ({presence.nodeDomain}) · <span className="capitalize">{presence.status}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {data.federation.hostedPresences.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Visiting presences</p>
+                <p className="text-xs text-[var(--muted)]">
+                  People from federated nodes whose home node vouches for them here. A presence carries no
+                  password and no local authority — this node&apos;s own rules decide anything they may do.
+                </p>
+                {data.federation.hostedPresences.map((presence) => (
+                  <p key={presence.id} className="text-xs text-[var(--soft-text)]">
+                    <span className="font-medium text-[var(--text)]">{presence.label}</span>
+                    {presence.homeNodeDomain ? ` from ${presence.homeNodeDomain}` : ""} ·{" "}
+                    <span className="capitalize">{presence.status}</span>
+                    {presence.lastSeenAt ? ` · seen ${presence.lastSeenAt}` : ""}
+                  </p>
+                ))}
+              </div>
+            )}
+
             {data.federation.peers.length > 0 && (
               <div className="mt-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Known nodes</p>
@@ -414,7 +444,7 @@ async function getNodePageData(accountId: string) {
       where: { id: node.id },
       select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true },
     });
-    const [peers, federations, federationProposals] = await Promise.all([
+    const [peers, federations, federationProposals, hostedPresences, myPresences] = await Promise.all([
       prisma.federatedNode.findMany({
         select: { id: true, domain: true, displayName: true, status: true, lastSeenAt: true, publicKey: true },
         orderBy: { pinnedAt: "asc" },
@@ -441,6 +471,20 @@ async function getNodePageData(accountId: string) {
           decisions: true,
           closesAt: true,
         },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      // Presences hosted HERE: remote people this node's communities can see.
+      prisma.linkedNodePresence.findMany({
+        where: { nodeId: node.id },
+        select: { id: true, handle: true, displayName: true, homeNodeDomain: true, status: true, lastSeenAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      // This account's own presences on peer nodes (the home-side mirror).
+      prisma.linkedNodePresence.findMany({
+        where: { portableIdentity: { accounts: { some: { id: accountId } } }, nodeId: { not: node.id } },
+        select: { id: true, status: true, node: { select: { domain: true, name: true } } },
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
@@ -545,6 +589,19 @@ async function getNodePageData(accountId: string) {
                 membership.participationStatus === "active",
             ),
         ),
+        hostedPresences: hostedPresences.map((presence) => ({
+          id: presence.id,
+          label: presence.displayName ?? presence.handle,
+          homeNodeDomain: presence.homeNodeDomain,
+          status: presence.status,
+          lastSeenAt: presence.lastSeenAt?.toISOString().slice(0, 10) ?? null,
+        })),
+        myPresences: myPresences.map((presence) => ({
+          id: presence.id,
+          nodeLabel: presence.node.name,
+          nodeDomain: presence.node.domain,
+          status: presence.status,
+        })),
       },
     };
   } finally {

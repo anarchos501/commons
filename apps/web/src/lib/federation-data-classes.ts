@@ -13,6 +13,7 @@ export type FederationDataClass =
   | "concern_record"
   | "federation_governance"
   | "federation_ping"
+  | "cross_node_action"
   | "coalition_coordination"
   | "refuge_structural"
   | "refuge_content_blob";
@@ -48,6 +49,12 @@ export const FEDERATION_CLASS_RULES: Record<FederationDataClass, FederationClass
   governance_preference: "active_agreement",
   portable_identity: "active_agreement",
   linked_node_presence: "active_agreement",
+  // Pattern-1 mediated actions (F2). The wire class covers the mediation
+  // envelope; what an action may DO is bounded by the receiver's action
+  // registry (federation-actions.ts) and its local authorization — the
+  // vulnerability class cannot ride this because no registered action
+  // carries it.
+  cross_node_action: "active_agreement",
   coalition_coordination: "active_agreement",
   refuge_structural: "active_agreement",
 

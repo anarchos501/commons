@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — implementation in progress. F0 (protocol & peering) and Workstreams A (steward hardening + appointment legibility) and B (the design & decision register) are implemented; F1 (federation governance) is implemented behind the two-node harness; F2–F6 and Workstream C are specified here and tracked in the implementation program. **Read the phase table before treating any section as a description of current behavior: everything marked "Specified" — including both encryption rungs, the F4 decisions, and the email workstream — is design that does not exist in code yet.** The canonical commitments this RFC rests on live in [docs/register.md](../register.md) — where this RFC and the register differ, the register wins and this RFC must be amended.
+Accepted — implementation in progress. F0 (protocol & peering) and Workstreams A (steward hardening + appointment legibility) and B (the design & decision register) are implemented; F1 (federation governance) and F2 (identity, presence, and Pattern-1 mediated actions) are implemented behind the two-node harness; F3–F6 and Workstream C are specified here and tracked in the implementation program. **Read the phase table before treating any section as a description of current behavior: everything marked "Specified" — including both encryption rungs, the F4 decisions, and the email workstream — is design that does not exist in code yet.** The canonical commitments this RFC rests on live in [docs/register.md](../register.md) — where this RFC and the register differ, the register wins and this RFC must be amended.
 
 ## Purpose
 
@@ -122,7 +122,7 @@ Independent of federation, gating beta alongside F4 (it is the delivery channel 
 | A | Steward appointment/recall audit + hardening; appointment-mandate legibility | Implemented |
 | B | `docs/register.md` — the canonical decision register | Implemented |
 | F1 | Agreement models, mutual-consent protocol, steward-managed policy, node-wide STOP valves, federation petitions + details, node-page surface | Implemented |
-| F2 | `PortableIdentity` activation (`did:key`, custody), `LinkedNodePresence`, Pattern-1 mediated actions | Specified |
+| F2 | `PortableIdentity` activation (`did:key`, custody), `LinkedNodePresence`, Pattern-1 mediated actions | Implemented |
 | F3 | Visibility grants (first), cross-node coalitions (hub topology), node tags + home aggregation, refuge designation + structural replication | Specified |
 | F4 | Rung 1: content-blind host — vulnerability class → collective content → names + attribution audit; refuge ciphertext replication | Specified (beta gate) |
 | C | Registration modes, optional verified email, opt-in existence-only notifications | Specified (beta gate) |

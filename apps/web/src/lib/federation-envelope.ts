@@ -13,7 +13,10 @@ export type FederationWireEventType =
   | "federation_proposal_opened"
   | "federation_proposal_decision"
   | "federation_agreement_ended"
-  | "federation_suspension_notice";
+  | "federation_suspension_notice"
+  | "presence_establish"
+  | "presence_revoke"
+  | "mediated_action";
 
 export type FederationEnvelope = {
   version: number;

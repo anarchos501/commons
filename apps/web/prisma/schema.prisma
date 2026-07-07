@@ -200,6 +200,7 @@ enum SignedEventType {
   identity_presence_updated
   governance_preference_changed
   migration_prepared
+  mediated_action_requested
 }
 
 enum DataClass {
@@ -377,6 +378,23 @@ model PortableIdentity {
   accounts            Account[]
   linkedNodePresences LinkedNodePresence[]
   signedEvents        SignedEvent[]
+  keyCustody          IdentityKeyCustody?
+}
+
+// Node-custodied member keys (register D-8: a MOVABLE custody boundary — the
+// private-key columns are isolated here so Rung 2 relocates custody by nulling
+// them and adding a client wrap, never by reshaping content tables). The
+// X25519 encryption pair is provisioned now so F4 needs no re-keying.
+model IdentityKeyCustody {
+  id                      String    @id @default(cuid())
+  portableIdentityId      String    @unique
+  signingPrivateKeyPem    String
+  encryptionPublicKey     String?
+  encryptionPrivateKeyPem String?
+  createdAt               DateTime  @default(now())
+  revokedAt               DateTime?
+
+  portableIdentity PortableIdentity @relation(fields: [portableIdentityId], references: [id], onDelete: Cascade)
 }
 
 model LinkedNodePresence {
@@ -384,6 +402,8 @@ model LinkedNodePresence {
   portableIdentityId String
   nodeId             String
   handle             String
+  displayName        String?
+  homeNodeDomain     String?
   status             LinkedPresenceStatus @default(active)
   createdAt          DateTime             @default(now())
   lastSeenAt         DateTime?

@@ -126,6 +126,32 @@ export async function getPeerByDomain(prisma: DbClient, domain: string): Promise
   return prisma.federatedNode.findUnique({ where: { domain: domain.toLowerCase() } });
 }
 
+// A minimal Node row for a known peer. The spine designed presences and
+// accounts to reference Node rows (LinkedNodePresence.nodeId,
+// Account.homeNodeId), so a remote node this DB must describe gets one —
+// identity metadata only; peering state and the pinned key stay on
+// FederatedNode. Inert for local resolution: resolveCurrentNode matches the
+// request host or falls back to the OLDEST node, and the local node always
+// predates any peer row.
+export async function ensurePeerNodeRow(
+  prisma: DbClient,
+  input: { domain: string; name?: string | null },
+): Promise<{ id: string }> {
+  const domain = input.domain.toLowerCase();
+  const existing = await prisma.node.findUnique({ where: { domain }, select: { id: true } });
+  if (existing) return existing;
+  try {
+    return await prisma.node.create({
+      data: { domain, name: input.name?.trim() || domain },
+      select: { id: true },
+    });
+  } catch (error) {
+    const raced = await prisma.node.findUnique({ where: { domain }, select: { id: true } });
+    if (raced) return raced;
+    throw error;
+  }
+}
+
 export async function touchPeerLastSeen(prisma: PrismaClient, peerId: string): Promise<void> {
   await prisma.federatedNode.update({ where: { id: peerId }, data: { lastSeenAt: new Date() } });
 }

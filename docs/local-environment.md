@@ -49,7 +49,10 @@ pnpm dev:node-a                      # first instance on :3000
 pnpm dev:node-b                      # second instance on :3001 (separate terminal)
 ```
 
-If `node-a.localhost` does not resolve on your system, add both names to your hosts file:
+Add both names to your hosts file — this is effectively required, not optional: browsers and curl
+resolve `*.localhost` themselves, but Node's own DNS lookup (which federation delivery between the
+two instances uses) does not, so without these entries cross-node delivery fails with `ENOTFOUND`
+even while the pages load fine. Devcontainers reset `/etc/hosts` on rebuild; re-add after rebuilds.
 
 ```
 127.0.0.1 node-a.localhost node-b.localhost

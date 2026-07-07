@@ -8,6 +8,7 @@ import {
   type FederationDecisionOutcome,
   type FederationDecisionsMap,
 } from "./federation-consent";
+import type { FederationDataClass } from "./federation-data-classes";
 import { createFederationEnvelope } from "./federation-envelope";
 import { enqueueFederationEvent } from "./federation-outbox";
 import { getPeerByDomain } from "./federation-peers";
@@ -605,14 +606,15 @@ export async function resolveExpiredFederationProposals(
 
 // ── Shared enqueue helper ─────────────────────────────────────────────────────
 
-// All governance-handshake traffic flows through the D-3 chokepoint with the
-// federation_governance class (protocol tier: deliverable to proposed peers).
-export async function enqueueGovernanceEvent(
+// Node-signed enqueue through the D-3 chokepoint: every cross-node event a
+// node emits about itself flows through here with an explicit data class.
+export async function enqueueSignedNodeEvent(
   client: Prisma.TransactionClient | PrismaClient,
   selfNode: { id: string; domain: string },
   peerDomain: string,
   eventType: string,
   payload: Record<string, unknown>,
+  dataClass: FederationDataClass,
 ): Promise<boolean> {
   const peer = await getPeerByDomain(client, peerDomain);
   if (!peer) return false;
@@ -625,10 +627,17 @@ export async function enqueueGovernanceEvent(
     signer: signer.provider,
     publicKey: signer.publicKey,
   });
-  const result = await enqueueFederationEvent(client, {
-    peer,
-    envelope,
-    dataClass: "federation_governance",
-  });
+  const result = await enqueueFederationEvent(client, { peer, envelope, dataClass });
   return result.ok;
+}
+
+// Governance-handshake traffic (protocol tier: deliverable to proposed peers).
+export async function enqueueGovernanceEvent(
+  client: Prisma.TransactionClient | PrismaClient,
+  selfNode: { id: string; domain: string },
+  peerDomain: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  return enqueueSignedNodeEvent(client, selfNode, peerDomain, eventType, payload, "federation_governance");
 }
