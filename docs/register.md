@@ -45,8 +45,8 @@
 **Status:** Committed.
 **Decision:** Per-peer federation agreements — and federation policy itself — are decided by the node steward collective; the node-wide mandate for this is granted when the steward collective is appointed, not by a separate policy vote. Node-wide petitions are reserved for *stopping* (end an agreement, disable federation).
 **Context:** A node-wide petition per peer is unworkable at scale (quorum failure or rubber-stamp fatigue). Two facts make delegation legitimate rather than a concentration of hidden power: (1) an agreement exposes nothing by itself (F-2), so it is low-stakes; (2) steward appointment is already an unavoidable node-wide two-step, so it *is* the consent moment — a second policy vote double-charges it. No steward ⇒ not federable (fail-closed), which also guarantees federation always rests on at least one node-wide decision.
-**Consequences:** Steward appointment becomes the single most consequential vote a node holds, and the steward collective becomes load-bearing for the first time. **Therefore (pre-F1 work, non-negotiable):** the appointment UI must state plainly that appointment grants federation authority, or the consent story is fiction; and the appointment/recall flows must be audited to current hardening standards before they carry this weight. Mitigations: steward recall, visible steward petitions, node-wide stop valves.
-**Links:** plan §2, Workstream A; F-2.
+**Consequences:** Steward appointment becomes the single most consequential vote a node holds, and the steward collective becomes load-bearing for the first time. **Therefore (pre-F1 work, non-negotiable):** the appointment UI must state plainly that appointment grants federation authority, or the consent story is fiction; and the appointment/recall flows must be audited to current hardening standards before they carry this weight. Mitigations: steward recall, visible steward petitions, node-wide stop valves. **Recall must stay suppressible by nobody** (Workstream A finding A3, fixed pre-F1): the one-open-recall mutex was node-wide and therefore squattable — any member could park a never-approved initiation and block every other group's and the host's recall for its full duration, then reopen. The mutex is now scoped per initiator. Recorded residual: this trades suppression for bounded amplification — up to one node-stage recall petition per group per steward era, which the competition machinery collapses into a single decision at resolution (one winner, the rest auto-rejected under one advisory lock); flooding it requires capturing that many group majorities, the hostile-majority case F-3 already tracks.
+**Links:** plan §2, Workstream A; F-2; F-3; F-7.
 
 ## F-6 — Continuity is one home plus refuges, never multiple home nodes
 
@@ -55,6 +55,14 @@
 **Context:** Multiple live authorities over one entity is the split-brain problem (two petition states, two rosters, two truths under partition), which no care makes coherent. Refuge hosting is a *term of the federation agreement* (not a per-group application, per F-2): within an active agreement any collective backs up to the peer by right, as cold ciphertext.
 **Consequences:** Refuges hold ciphertext + structure, never live authority; members hold keys, so a refuge operator gains no read access (backup does not multiply the F-1 problem). Re-homing has two entrances: graceful signed handoff, or disaster member-quorum activation on the refuge. **Capture vector (Watch):** a large group promoting onto a small node can dominate its electorate — see D-5 (arrival weight). Authority transfers only by signed handoff or member-quorum activation; a stale returning home must reconcile and demote. Disaster activation is the single hardest thing in the program; a defensible beta cut is graceful-handoff-only, with manual steward-mediated re-homing as the disaster stopgap.
 **Links:** plan §5b; D-5; F-3.
+
+## F-7 — Petition single-open invariants are not DB-enforced (standing caution)
+
+**Status:** Watch.
+**Decision:** Any flow that assumes "at most one open petition per key" must either add a family-specific partial unique index (the `Petition_custom_requests_toggle_open_unique` precedent) or a conscious application-level guard — never assume the competition key enforces it at open time.
+**Context:** The partial unique index on open competition keys was deliberately dropped (migration `20260603000400_fix_petition_duplicate_constraint`). Since then, multiple open petitions can share a competition key; the machinery serializes and collapses them **at resolution** (`resolveCompetingPetitions`: one advisory lock, one winner, the rest rejected), not at open. This sharp edge has bitten twice — the steward double-escalation race (audit A2: a duplicate node vote orphaned by re-entry could win the competition and burn a passed appointment) and the reasoning around the recall mutex (A3) — and the third feature to assume a DB constraint enforces single-open is the one that ships the bug to beta.
+**Consequences:** New petition families (F2, F3, and beyond) declare their single-open story explicitly at design time: partial unique index, application guard + advisory lock, or "competition-collapse at resolution is sufficient." Reviews of petition-family code check this line item.
+**Links:** Workstream A (A2, A3); F-5.
 
 ---
 
@@ -108,7 +116,7 @@
 **Status:** Open (must be decided before disaster activation ships).
 **Decision:** (To be set.) Newly re-homed members' node-wide governance weight must not let a promoting group instantly dominate a smaller refuge node's electorate.
 **Context:** Cold refuge replication is inert and safe; *promotion* makes a group live on the refuge, and its members become constituents carrying node-wide weight — a 200-member group activating onto a 30-member node is suddenly ~87% of its electorate (F-6, F-3).
-**Consequences:** Leading candidate is arrival-weight phase-in via the existing participation-weighting machinery. Whatever is chosen must be a decided answer, not a discovered one; this entry blocks F-6 disaster activation.
+**Consequences:** Leading candidate is arrival-weight phase-in via the existing participation-weighting machinery. Whatever is chosen must be a decided answer, not a discovered one; this entry blocks F-6 disaster activation. **Adjacent open item (named here so it is decided with, not discovered by, the arrival-weight design):** node-wide votes use a LIVE electorate denominator at evaluation time (`getActiveNodeVoterCount`), consistent between appointment and recall but not frozen the way project votes can be — so re-homed members entering the electorate mid-vote would shift quorum on votes already open. The arrival-weight decision must say whether phase-in applies to the denominator as well as the vote weight.
 **Links:** F-6; F-3.
 
 ## D-7 — No server-side search over encrypted classes at beta

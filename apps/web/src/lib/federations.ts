@@ -562,6 +562,12 @@ export async function dissolveFederationLocally(
   // F-2: de-federation is reversible). "ended" stays reserved for actual
   // peer severance (F5 suspension/compromise), which the outbox refuses to
   // deliver to.
+  //
+  // proposed-after-dissolve must stay equivalent to proposed-fresh: every
+  // agreement-scoped state is closed here (memberships ended, federation
+  // dissolved), so nothing may infer "never federated" from peer status.
+  // F3: suspend visibility grants toward these peers HERE (register D-4),
+  // and resume must key off the NEW agreement — never off peer status.
   for (const domain of remoteDomains) {
     await tx.federatedNode.updateMany({
       where: { domain, status: "active" },

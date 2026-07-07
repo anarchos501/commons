@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — implementation in progress. F0 (protocol & peering) and Workstreams A (steward hardening + appointment legibility) and B (the design & decision register) are implemented; F1 (federation governance) is implemented behind the two-node harness; F2–F6 and Workstream C are specified here and tracked in the implementation program. The canonical commitments this RFC rests on live in [docs/register.md](../register.md) — where this RFC and the register differ, the register wins and this RFC must be amended.
+Accepted — implementation in progress. F0 (protocol & peering) and Workstreams A (steward hardening + appointment legibility) and B (the design & decision register) are implemented; F1 (federation governance) is implemented behind the two-node harness; F2–F6 and Workstream C are specified here and tracked in the implementation program. **Read the phase table before treating any section as a description of current behavior: everything marked "Specified" — including both encryption rungs, the F4 decisions, and the email workstream — is design that does not exist in code yet.** The canonical commitments this RFC rests on live in [docs/register.md](../register.md) — where this RFC and the register differ, the register wins and this RFC must be amended.
 
 ## Purpose
 
