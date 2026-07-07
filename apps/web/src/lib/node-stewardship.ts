@@ -5,8 +5,10 @@ import {
   openNodePetition,
   openPetition,
   openSystemGroupPetition,
+  requireApprovedPetition,
 } from "./petitions";
 import { requireActiveNodeHost } from "./node-governance";
+import { assertWithinTransaction } from "./prisma";
 
 type ProposalStatus =
   | "open"
@@ -71,7 +73,7 @@ export async function openGroupStewardNomination(
   });
   if (!initiatingGroup) return { ok: false, reason: "not_found" };
   if (initiatingGroup.nodeId !== nodeId) return { ok: false, reason: "wrong_node" };
-  if (await openProposalExists(prisma, nodeId, "appointment", candidateGroupId)) {
+  if (await openProposalExists(prisma, nodeId, "appointment", candidateGroupId, { initiatingGroupId })) {
     return { ok: false, reason: "proposal_already_open" };
   }
 
@@ -129,7 +131,7 @@ export async function openHostStewardNomination(
   }
   const context = await validateAppointmentContext(prisma, nodeId, candidateGroupId);
   if (!context.ok) return context;
-  if (await openProposalExists(prisma, nodeId, "appointment", candidateGroupId)) {
+  if (await openProposalExists(prisma, nodeId, "appointment", candidateGroupId, { origin: "host" })) {
     return { ok: false, reason: "proposal_already_open" };
   }
   const proposalId = randomUUID();
@@ -187,7 +189,7 @@ export async function openGroupNoConfidence(
   });
   if (!initiatingGroup) return { ok: false, reason: "not_found" };
   if (initiatingGroup.nodeId !== nodeId) return { ok: false, reason: "wrong_node" };
-  if (await openProposalExists(prisma, nodeId, "no_confidence", context.stewardGroupId)) {
+  if (await openProposalExists(prisma, nodeId, "no_confidence", context.stewardGroupId, { initiatingGroupId })) {
     return { ok: false, reason: "proposal_already_open" };
   }
   const proposalId = randomUUID();
@@ -242,7 +244,7 @@ export async function openHostNoConfidence(
   }
   const context = await validateNoConfidenceContext(prisma, nodeId);
   if (!context.ok) return context;
-  if (await openProposalExists(prisma, nodeId, "no_confidence", context.stewardGroupId)) {
+  if (await openProposalExists(prisma, nodeId, "no_confidence", context.stewardGroupId, { origin: "host" })) {
     return { ok: false, reason: "proposal_already_open" };
   }
   const proposalId = randomUUID();
@@ -292,7 +294,7 @@ export async function openStewardResignation(
   ) {
     return { ok: false, reason: "not_eligible" };
   }
-  if (await openProposalExists(prisma, nodeId, "resignation", context.stewardGroupId)) {
+  if (await openProposalExists(prisma, nodeId, "resignation", context.stewardGroupId, { initiatingGroupId: context.stewardGroupId })) {
     return { ok: false, reason: "proposal_already_open" };
   }
   const proposalId = randomUUID();
@@ -329,11 +331,20 @@ export async function openStewardResignation(
   return { ok: true, proposalId, petitionId: petition.petitionId };
 }
 
+const NODE_STEWARD_FAMILIES = [
+  "node_steward_group_nomination",
+  "node_steward_candidate_consent",
+  "node_steward_appointment",
+  "node_steward_no_confidence_initiation",
+  "node_steward_no_confidence",
+  "node_steward_resignation",
+] as const;
+
 export async function evaluateNodeStewardProposalForPetition(
   prisma: Prisma.TransactionClient,
   petitionId: string,
 ): Promise<EvaluateNodeStewardProposalResult | null> {
-  const proposal = await prisma.nodeStewardProposal.findFirst({
+  let probe = await prisma.nodeStewardProposal.findFirst({
     where: {
       OR: [
         { groupInitiationPetitionId: petitionId },
@@ -341,8 +352,35 @@ export async function evaluateNodeStewardProposalForPetition(
         { nodePetitionId: petitionId },
       ],
     },
+    select: { id: true, nodeId: true },
   });
-  if (!proposal) return null;
+  if (!probe) {
+    // Audit A5: the open flows are non-transactional, so a crash between
+    // proposal-create and the petition-link update leaves a proposal none of
+    // the three link columns can find. subjectId IS the proposalId for every
+    // steward family, so fall back to it — recovering the orphan instead of
+    // silently never evaluating it. The link is healed below after the lock.
+    const petition = await prisma.petition.findUnique({
+      where: { id: petitionId },
+      select: { subjectId: true, subjectType: true },
+    });
+    if (!petition || !(NODE_STEWARD_FAMILIES as readonly string[]).includes(petition.subjectType)) return null;
+    probe = await prisma.nodeStewardProposal.findUnique({
+      where: { id: petition.subjectId },
+      select: { id: true, nodeId: true },
+    });
+    if (!probe) return null;
+  }
+  assertWithinTransaction(prisma, "evaluateNodeStewardProposalForPetition");
+
+  // Audit A2: the 60s sweep and on-load resolution can evaluate the same
+  // petition concurrently, and both re-enter this hook even when their own
+  // transaction resolved nothing. Serialize per node and re-read AFTER the
+  // lock so the second arrival sees the first one's committed escalation
+  // instead of a stale "open" proposal (which would double-open the next
+  // petition and orphan a live node vote).
+  await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${probe.nodeId}:node_steward_proposal`}, 0))`;
+  const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: probe.id } });
   if (proposal.status === "succeeded") return { outcome: "succeeded" };
   if (proposal.status.startsWith("failed-")) {
     return { outcome: proposal.status as "failed-rejected" | "failed-withdrawn" | "failed-stale" };
@@ -352,6 +390,26 @@ export async function evaluateNodeStewardProposalForPetition(
     where: { id: petitionId },
     select: { status: true, subjectType: true },
   });
+
+  // Audit A5 (continued): heal a lost link — but only into an EMPTY column.
+  // If the column already points at a different petition, this one is a stray
+  // duplicate (e.g. a pre-fix double-escalation orphan) and must not become
+  // the proposal's gate: report pending and let the linked petition decide.
+  if (petition) {
+    const linkColumn =
+      petition.subjectType === "node_steward_candidate_consent"
+        ? ("candidateConsentPetitionId" as const)
+        : petition.subjectType === "node_steward_appointment" || petition.subjectType === "node_steward_no_confidence"
+          ? ("nodePetitionId" as const)
+          : ("groupInitiationPetitionId" as const);
+    if (proposal[linkColumn] === null) {
+      await prisma.nodeStewardProposal.update({ where: { id: proposal.id }, data: { [linkColumn]: petitionId } });
+      proposal[linkColumn] = petitionId;
+    } else if (proposal[linkColumn] !== petitionId) {
+      return { outcome: "pending" };
+    }
+  }
+
   if (!petition || petition.status === "withdrawn" || petition.status === "superseded") {
     return failProposal(prisma, proposal.id, "failed-withdrawn");
   }
@@ -363,7 +421,13 @@ export async function evaluateNodeStewardProposalForPetition(
     return failProposal(prisma, proposal.id, "failed-stale");
   }
 
+  // Audit A2 stage guards: each escalation may fire exactly once. A re-entry
+  // after escalation sees the advanced status / linked petition id and treats
+  // the step as already taken.
   if (petition.subjectType === "node_steward_group_nomination") {
+    if (proposal.status !== "open" || proposal.candidateConsentPetitionId || proposal.nodePetitionId) {
+      return { outcome: "pending" };
+    }
     if (proposal.initiatingGroupId === proposal.candidateGroupId) {
       const next = await openNodeDecision(prisma, proposal.id, "appointment", proposal.nodeId, null, proposal.candidateGroupId);
       return next.ok ? { outcome: "pending" } : failProposal(prisma, proposal.id, "failed-withdrawn");
@@ -372,10 +436,16 @@ export async function evaluateNodeStewardProposalForPetition(
     return next.ok ? { outcome: "pending" } : failProposal(prisma, proposal.id, "failed-withdrawn");
   }
   if (petition.subjectType === "node_steward_candidate_consent") {
+    if (proposal.status !== "awaiting_candidate_consent" || proposal.nodePetitionId) {
+      return { outcome: "pending" };
+    }
     const next = await openNodeDecision(prisma, proposal.id, "appointment", proposal.nodeId, null, proposal.candidateGroupId);
     return next.ok ? { outcome: "pending" } : failProposal(prisma, proposal.id, "failed-withdrawn");
   }
   if (petition.subjectType === "node_steward_no_confidence_initiation") {
+    if (proposal.status !== "open" || proposal.nodePetitionId) {
+      return { outcome: "pending" };
+    }
     const next = await openNodeDecision(prisma, proposal.id, "no_confidence", proposal.nodeId, null, proposal.candidateGroupId);
     return next.ok ? { outcome: "pending" } : failProposal(prisma, proposal.id, "failed-withdrawn");
   }
@@ -443,19 +513,40 @@ async function applyProposal(
   prisma: Prisma.TransactionClient,
   proposalId: string,
 ): Promise<EvaluateNodeStewardProposalResult> {
+  assertWithinTransaction(prisma, "applyProposal");
   const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: proposalId } });
+
+  // Audit A6: re-assert the gating petition really is approved with the right
+  // family before mutating node state — the documented handler discipline,
+  // rather than trusting caller ordering. Throws (rolling the tx back) on an
+  // invariant breach.
+  const gatePetitionId = proposal.action === "resignation" ? proposal.groupInitiationPetitionId : proposal.nodePetitionId;
+  const gateFamily =
+    proposal.action === "appointment"
+      ? "node_steward_appointment"
+      : proposal.action === "no_confidence"
+        ? "node_steward_no_confidence"
+        : "node_steward_resignation";
+  if (!gatePetitionId) return failProposal(prisma, proposalId, "failed-stale");
+  await requireApprovedPetition(prisma, gatePetitionId, gateFamily);
+
   if (!(await proposalContextStillValid(prisma, proposal))) {
     return failProposal(prisma, proposalId, "failed-stale");
   }
-  await prisma.node.update({
-    where: { id: proposal.nodeId },
+  // Audit A4: atomic staleness — the revision guard in the WHERE clause makes
+  // check-then-act impossible: a concurrent apply (e.g. resignation racing a
+  // no-confidence vote, neither holding the other's competition lock) bumps
+  // the revision first and this update matches zero rows → failed-stale.
+  const nodeUpdated = await prisma.node.updateMany({
+    where: { id: proposal.nodeId, stewardRevision: proposal.baselineStewardRevision },
     data: {
       stewardGroupId: proposal.action === "appointment" ? proposal.candidateGroupId : null,
       stewardRevision: { increment: 1 },
     },
   });
-  await prisma.nodeStewardProposal.update({
-    where: { id: proposalId },
+  if (nodeUpdated.count === 0) return failProposal(prisma, proposalId, "failed-stale");
+  await prisma.nodeStewardProposal.updateMany({
+    where: { id: proposalId, status: { in: ["open", "awaiting_candidate_consent", "awaiting_node_vote"] } },
     data: { status: "succeeded", resolvedAt: new Date() },
   });
   await logAction(prisma, {
@@ -519,11 +610,20 @@ async function proposalContextStillValid(
 ): Promise<boolean> {
   const [node, candidate] = await Promise.all([
     prisma.node.findUnique({ where: { id: proposal.nodeId }, select: { stewardGroupId: true, stewardRevision: true } }),
-    prisma.group.findUnique({ where: { id: proposal.candidateGroupId }, select: { nodeId: true } }),
+    prisma.group.findUnique({
+      where: { id: proposal.candidateGroupId },
+      select: { nodeId: true, visibility: true, archivedAt: true },
+    }),
   ]);
   if (!node || candidate?.nodeId !== proposal.nodeId) return false;
   if (node.stewardRevision !== proposal.baselineStewardRevision) return false;
-  if (proposal.action === "appointment") return node.stewardGroupId === proposal.baselineStewardGroupId;
+  if (proposal.action === "appointment") {
+    // Audit A1: the open-time transparency invariant ("a private group must
+    // never become node steward") must hold at APPLY time too — a candidate
+    // that went private or was archived mid-vote cannot be installed.
+    if (candidate.visibility !== "public" || candidate.archivedAt !== null) return false;
+    return node.stewardGroupId === proposal.baselineStewardGroupId;
+  }
   return (
     node.stewardGroupId === proposal.baselineStewardGroupId &&
     proposal.baselineStewardGroupId === proposal.candidateGroupId
@@ -540,12 +640,18 @@ async function validateAppointmentContext(
 > {
   const [node, candidate] = await Promise.all([
     prisma.node.findUnique({ where: { id: nodeId }, select: { name: true, stewardGroupId: true, stewardRevision: true } }),
-    prisma.group.findUnique({ where: { id: candidateGroupId }, select: { name: true, nodeId: true, visibility: true } }),
+    prisma.group.findUnique({
+      where: { id: candidateGroupId },
+      select: { name: true, nodeId: true, visibility: true, archivedAt: true },
+    }),
   ]);
   if (!node || !candidate) return { ok: false, reason: "not_found" };
   if (candidate.nodeId !== nodeId) return { ok: false, reason: "wrong_node" };
   // A private group must never become node steward — the steward is a transparency-bearing role.
-  if (candidate.visibility !== "public") return { ok: false, reason: "candidate_not_public" };
+  // Archived (defunct) groups are equally ineligible (audit A1).
+  if (candidate.visibility !== "public" || candidate.archivedAt !== null) {
+    return { ok: false, reason: "candidate_not_public" };
+  }
   if (node.stewardGroupId) return { ok: false, reason: "steward_already_set" };
   return { ok: true, nodeName: node.name, candidateName: candidate.name, stewardRevision: node.stewardRevision };
 }
@@ -578,17 +684,27 @@ async function validateNoConfidenceContext(
   };
 }
 
+// Audit A3: the duplicate check is scoped to the INITIATOR, not the node.
+// A node-wide mutex was squattable — any member could park a never-approved
+// initiation petition and block every other group's (and the host's) recall
+// or nomination for its whole duration, then reopen. One open proposal per
+// (initiating group | host origin) suffices: the node-stage competition keys
+// already serialize the actual decision.
 async function openProposalExists(
   prisma: PrismaClient,
   nodeId: string,
   action: string,
   candidateGroupId: string,
+  initiator: { initiatingGroupId: string } | { origin: "host" },
 ): Promise<boolean> {
   const count = await prisma.nodeStewardProposal.count({
     where: {
       nodeId,
       action,
       candidateGroupId,
+      ...("initiatingGroupId" in initiator
+        ? { initiatingGroupId: initiator.initiatingGroupId }
+        : { origin: "host" }),
       status: { in: ["open", "awaiting_candidate_consent", "awaiting_node_vote"] },
     },
   });

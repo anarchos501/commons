@@ -25,6 +25,17 @@ import {
 import { addNodePetitionSupport, withdrawNodePetitionSupport } from "../../../lib/petitions";
 import { evaluateAndApplyPetition, proposalFamilyLabel } from "../../../lib/petition-evaluation";
 import { listNodeGroupLabelsForAccount, labelNodeGroupForAccount } from "../../../lib/node-privacy";
+import { pinPeer } from "../../../lib/federation-peers";
+import {
+  openFederationDepartureProposal,
+  openFederationFormationProposal,
+} from "../../../lib/federations";
+import {
+  proposeFederationDisable,
+  proposeFederationPolicyChange,
+  proposeFederationTermination,
+} from "../../../lib/federation-policy";
+import { requireActiveNodeUser } from "../../../lib/node-governance";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +68,20 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
               <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
                 The server operator controls host status. Community governance appoints or removes only the steward collective.
               </p>
+              {/* register F-5: the mandate is legible where the role is displayed and where it is granted. */}
+              <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                The steward collective holds this node&apos;s federation authority: it decides, through its own
+                visible petitions, which other Commons nodes this node federates with. Node-wide votes can
+                always end an agreement or disable federation, and the steward collective is recallable.
+              </p>
+              {!data.steward && (
+                <p className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
+                  This node cannot federate: no steward collective is appointed. There is no body to
+                  receive or propose federation agreements, so other nodes see an honest
+                  &ldquo;federation unavailable&rdquo; rather than a silent timeout. Appointing a steward
+                  collective (below) is what makes federation possible.
+                </p>
+              )}
             </div>
           </div>
 
@@ -159,6 +184,143 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
             )}
           </CollapsibleSection>
 
+          <CollapsibleSection id="federation" title="Federation" eyebrow="Between nodes" storageKey="node:section:federation" className="bg-[var(--surface)] p-5 sm:p-6">
+            <p className="text-xs leading-5 text-[var(--muted)]">
+              Federation is a relationship between communities, decided by mutual consent: both nodes&apos;
+              steward collectives must approve. An agreement by itself exposes nothing — every collective
+              stays closed toward a peer node until it opens itself by its own petition. Any member can
+              petition node-wide to end an agreement or disable federation entirely.
+            </p>
+            <p className="mt-2 text-xs text-[var(--soft-text)]">
+              Policy: <span className="font-medium text-[var(--text)]">{data.federation.policy}</span>
+              {!data.steward && <span> · Not federable: no steward collective is appointed.</span>}
+            </p>
+
+            {data.federation.agreements.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Agreements</p>
+                {data.federation.agreements.map((agreement) => (
+                  <div key={agreement.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-[var(--text)]">{agreement.name}</p>
+                      <span className="text-xs capitalize text-[var(--muted)]">{agreement.status}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--muted)]">Peer: {agreement.peerDomains.join(", ") || "—"}</p>
+                    {agreement.status === "active" && data.participationStatus === "active" && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <form action={departFederationAction}>
+                          <input type="hidden" name="nodeId" value={data.node.id} />
+                          <input type="hidden" name="federationId" value={agreement.id} />
+                          <SubmitButton variant="secondary">Ask stewards to leave</SubmitButton>
+                        </form>
+                        <form action={terminateFederationAction}>
+                          <input type="hidden" name="nodeId" value={data.node.id} />
+                          <input type="hidden" name="federationId" value={agreement.id} />
+                          <SubmitButton variant="secondary">Open node-wide vote to end</SubmitButton>
+                        </form>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {data.federation.proposals.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Proposals</p>
+                {data.federation.proposals.map((proposal) => (
+                  <div key={proposal.id} className="border border-[var(--border)] bg-[var(--subtle)] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium capitalize text-[var(--text)]">{proposal.action}</p>
+                      <span className="text-xs capitalize text-[var(--muted)]">{proposal.status.replaceAll("-", " ")}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      {proposal.decisionSummary} · initiated by {proposal.initiatedByDomain} · closes {proposal.closesAt}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {data.federation.peers.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Known nodes</p>
+                {data.federation.peers.map((peer) => (
+                  <div key={peer.id} className="flex flex-wrap items-center justify-between gap-2 border border-[var(--border)] p-2">
+                    <span className="text-sm text-[var(--text)]">{peer.displayName ?? peer.domain}</span>
+                    <span className="text-xs text-[var(--muted)]">
+                      {peer.domain} · key …{peer.keyFingerprint} · <span className="capitalize">{peer.status}</span>
+                      {peer.lastSeenAt ? ` · seen ${peer.lastSeenAt.slice(0, 10)}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {data.participationStatus === "active" && (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <form action={pinPeerAction} className="space-y-3 border border-[var(--border)] p-3">
+                  <input type="hidden" name="nodeId" value={data.node.id} />
+                  <label className="block">
+                    <span className="field-label">Look up a node</span>
+                    <input name="address" type="text" required className="field-input" placeholder="commons.example.org" />
+                    <span className="mt-1 block text-xs text-[var(--muted)]">
+                      Fetches the node&apos;s identity and pins its signing key. Pinning alone grants nothing.
+                    </span>
+                  </label>
+                  <SubmitButton variant="secondary">Look up &amp; pin</SubmitButton>
+                </form>
+                {data.steward && data.federation.policy !== "disabled" && (
+                  <form action={proposeFederationAction} className="space-y-3 border border-[var(--border)] p-3">
+                    <input type="hidden" name="nodeId" value={data.node.id} />
+                    <label className="block">
+                      <span className="field-label">Propose federation with</span>
+                      <select name="peerDomain" className="field-input" required>
+                        {data.federation.peers
+                          .filter((peer) => peer.status === "proposed" || peer.status === "active")
+                          .map((peer) => (
+                            <option key={peer.id} value={peer.domain}>{peer.displayName ?? peer.domain}</option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Why federate?</span>
+                      <textarea name="content" required rows={2} className="field-input" />
+                    </label>
+                    <p className="text-xs text-[var(--muted)]">
+                      Opens a petition before this node&apos;s steward collective; the peer&apos;s stewards decide
+                      independently. Both must approve.
+                    </p>
+                    <SubmitButton variant="secondary">Request federation</SubmitButton>
+                  </form>
+                )}
+                {data.federation.isStewardMember && (
+                  <form action={federationPolicyAction} className="space-y-3 border border-[var(--border)] p-3">
+                    <input type="hidden" name="nodeId" value={data.node.id} />
+                    <label className="block">
+                      <span className="field-label">Propose federation policy (steward collective)</span>
+                      <select name="target" className="field-input" required defaultValue="allowlisted">
+                        {["open", "allowlisted", "project_level", "read_only", "emergency_only", "disabled"].map((policy) => (
+                          <option key={policy} value={policy}>{policy}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <SubmitButton variant="secondary">Open policy petition</SubmitButton>
+                  </form>
+                )}
+                {data.federation.policy !== "disabled" && (
+                  <form action={disableFederationAction} className="space-y-3 border border-[var(--border)] p-3">
+                    <input type="hidden" name="nodeId" value={data.node.id} />
+                    <p className="text-sm text-[var(--soft-text)]">
+                      Ask the whole node whether to disable federation entirely. Ends every agreement.
+                    </p>
+                    <SubmitButton variant="secondary">Open node-wide disable vote</SubmitButton>
+                  </form>
+                )}
+              </div>
+            )}
+          </CollapsibleSection>
+
           <CollapsibleSection id="petitions" title="Node Petitions" eyebrow="One account, one vote" storageKey="node:section:petitions" className="bg-[var(--surface)] p-5 sm:p-6">
             {data.nodePetitions.length > 0 ? (
               <div className="space-y-3">
@@ -168,6 +330,19 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                       <p className="text-sm font-medium text-[var(--text)]">{proposalFamilyLabel(petition.subjectType)}</p>
                       <span className="text-xs capitalize text-[var(--muted)]">{petition.status}</span>
                     </div>
+                    {/* register F-5: a voter must see what the vote confers, on the card itself. */}
+                    {petition.subjectType === "node_steward_appointment" && (
+                      <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                        Approving appoints the candidate as steward collective — including federation
+                        authority: deciding which other nodes this node federates with.
+                      </p>
+                    )}
+                    {petition.subjectType === "node_steward_no_confidence" && (
+                      <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                        Approving removes the steward collective. Federation authority is vacated — the
+                        node cannot enter new agreements until a new steward is appointed.
+                      </p>
+                    )}
                     <p className="mt-1 text-xs text-[var(--muted)]">{petition.supportCount} support</p>
                     {petition.status === "open" && data.participationStatus === "active" && (
                       petition.supportedByCurrentAccount ? (
@@ -237,8 +412,39 @@ async function getNodePageData(accountId: string) {
     if (!participationStatus && !isHost) redirect("/dashboard");
     const nodeWithSteward = await prisma.node.findUniqueOrThrow({
       where: { id: node.id },
-      select: { id: true, name: true, stewardGroupId: true },
+      select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true },
     });
+    const [peers, federations, federationProposals] = await Promise.all([
+      prisma.federatedNode.findMany({
+        select: { id: true, domain: true, displayName: true, status: true, lastSeenAt: true, publicKey: true },
+        orderBy: { pinnedAt: "asc" },
+        take: 50,
+      }),
+      prisma.federation.findMany({
+        where: { memberships: { some: { isSelf: true } } },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          memberships: { where: { endedAt: null }, select: { memberDomain: true, isSelf: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      prisma.federationProposal.findMany({
+        select: {
+          id: true,
+          action: true,
+          status: true,
+          initiatedByDomain: true,
+          participantSnapshot: true,
+          decisions: true,
+          closesAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+    ]);
     const [steward, memberships, proposals, nodePetitions] = await Promise.all([
       labelNodeGroupForAccount(prisma, nodeWithSteward.stewardGroupId, accountId),
       prisma.groupMembership.findMany({
@@ -301,6 +507,45 @@ async function getNodePageData(accountId: string) {
         supportedByCurrentAccount: petition.nodeSupport.length > 0,
       })),
       currentSignal: currentSignal?.signal ?? 0,
+      federation: {
+        policy: nodeWithSteward.federationPolicy,
+        peers: peers.map((peer) => ({
+          id: peer.id,
+          domain: peer.domain,
+          displayName: peer.displayName,
+          status: peer.status,
+          lastSeenAt: peer.lastSeenAt?.toISOString() ?? null,
+          keyFingerprint: peer.publicKey.replace(/-----[^-]+-----|\s/g, "").slice(-16),
+        })),
+        agreements: federations.map((federation) => ({
+          id: federation.id,
+          name: federation.name,
+          status: federation.status,
+          peerDomains: federation.memberships.filter((m) => !m.isSelf).map((m) => m.memberDomain),
+        })),
+        proposals: federationProposals.map((proposal) => {
+          const snapshot = proposal.participantSnapshot as { domains?: string[] } | null;
+          const decisions = (proposal.decisions ?? {}) as Record<string, string>;
+          return {
+            id: proposal.id,
+            action: proposal.action,
+            status: proposal.status,
+            initiatedByDomain: proposal.initiatedByDomain,
+            decisionSummary: (snapshot?.domains ?? [])
+              .map((domain) => `${domain}: ${decisions[domain] ?? "pending"}`)
+              .join(" · "),
+            closesAt: proposal.closesAt.toISOString().slice(0, 10),
+          };
+        }),
+        isStewardMember: Boolean(
+          nodeWithSteward.stewardGroupId &&
+            memberships.some(
+              (membership) =>
+                membership.groupId === nodeWithSteward.stewardGroupId &&
+                membership.participationStatus === "active",
+            ),
+        ),
+      },
     };
   } finally {
     await prisma.$disconnect();
@@ -321,6 +566,111 @@ async function activeMembershipForGroup(accountId: string, groupId: string) {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+async function pinPeerAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const address = requiredString(formData, "address");
+  const prisma = createPrismaClient();
+  try {
+    await requireActiveNodeUser(prisma, nodeId, session.accountId);
+    await pinPeer(prisma, address);
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function proposeFederationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const peerDomain = requiredString(formData, "peerDomain");
+  const content = requiredString(formData, "content");
+  const prisma = createPrismaClient();
+  try {
+    await openFederationFormationProposal(prisma, {
+      nodeId,
+      peerDomain,
+      content,
+      requestedByAccountId: session.accountId,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function departFederationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const federationId = requiredString(formData, "federationId");
+  const prisma = createPrismaClient();
+  try {
+    await openFederationDepartureProposal(prisma, {
+      nodeId,
+      federationId,
+      content: "Departure requested from the node governance page.",
+      requestedByAccountId: session.accountId,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function terminateFederationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const federationId = requiredString(formData, "federationId");
+  const prisma = createPrismaClient();
+  try {
+    await proposeFederationTermination(prisma, { nodeId, federationId, requestedByAccountId: session.accountId });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function disableFederationAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const prisma = createPrismaClient();
+  try {
+    await proposeFederationDisable(prisma, { nodeId, requestedByAccountId: session.accountId });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function federationPolicyAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const target = requiredString(formData, "target");
+  const prisma = createPrismaClient();
+  try {
+    const node = await prisma.node.findUnique({ where: { id: nodeId }, select: { stewardGroupId: true } });
+    if (node?.stewardGroupId) {
+      const membershipId = await activeMembershipForGroup(session.accountId, node.stewardGroupId);
+      await proposeFederationPolicyChange(prisma, { nodeId, target, createdByMembershipId: membershipId });
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
 }
 
 async function hostNominateAction(formData: FormData) {

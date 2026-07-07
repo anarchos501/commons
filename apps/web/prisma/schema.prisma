@@ -432,10 +432,95 @@ model FederatedNode {
   lastSeenAt     DateTime?
   endedAt        DateTime?
 
-  outboxItems   FederationOutboxItem[]
-  inboundEvents FederationInboundEvent[]
+  outboxItems           FederationOutboxItem[]
+  inboundEvents         FederationInboundEvent[]
+  federationMemberships FederationMembership[]
 
   @@index([status])
+}
+
+// --- Inter-node federation (F1: governance — agreements & mutual consent) ---
+
+// A federation agreement (register F-2, F-5). id is shared across nodes: the
+// formation proposal's UUID becomes the agreement's id, so both databases
+// converge on the same identifier with no coordinator.
+model Federation {
+  id          String    @id
+  name        String
+  status      String    @default("active") // active | dissolved
+  terms       Json
+  createdAt   DateTime  @default(now())
+  dissolvedAt DateTime?
+
+  memberships FederationMembership[]
+  proposals   FederationProposal[]
+
+  @@index([status])
+}
+
+model FederationMembership {
+  id              String    @id @default(cuid())
+  federationId    String
+  memberDomain    String
+  federatedNodeId String? // null when this row is this node itself
+  isSelf          Boolean   @default(false)
+  joinedAt        DateTime  @default(now())
+  endedAt         DateTime?
+  endReason       String?
+
+  federation    Federation     @relation(fields: [federationId], references: [id], onDelete: Cascade)
+  federatedNode FederatedNode? @relation(fields: [federatedNodeId], references: [id], onDelete: SetNull)
+
+  @@unique([federationId, memberDomain])
+  @@index([federatedNodeId])
+  @@index([endedAt])
+}
+
+// Cross-node sibling of CoalitionProposal. id is the shared proposal UUID
+// minted by the initiating node; each participating node holds its own row
+// plus ONE steward-group petition, and the decisions map converges through
+// signed federation_proposal_decision events — decisions are monotonic
+// (pending → terminal, never back) and each side applies independently on
+// unanimity. No distributed locks, no coordinator.
+model FederationProposal {
+  id                  String    @id
+  federationId        String?
+  action              String // formation | join | departure | removal
+  initiatedByDomain   String
+  name                String?
+  content             String
+  terms               Json
+  participantSnapshot Json // { capturedAt, domains: string[] }
+  decisions           Json // { [domain]: "pending" | "approved" | "rejected" }
+  status              String    @default("open") // open | awaiting_remote | succeeded | failed-rejected | failed-withdrawn | failed-timeout
+  closesAt            DateTime
+  createdAt           DateTime  @default(now())
+  resolvedAt          DateTime?
+
+  federation Federation?                  @relation(fields: [federationId], references: [id])
+  petitions  FederationProposalPetition[]
+
+  @@index([federationId])
+  @@index([action])
+  @@index([status, closesAt])
+}
+
+// Links this node's steward petition to the shared proposal — exact sibling
+// of CoalitionProposalPetition. A node's database only ever holds its OWN
+// petition row; remote nodes' petitions are visible only as decisions.
+model FederationProposalPetition {
+  id         String   @id @default(cuid())
+  proposalId String
+  petitionId String   @unique
+  nodeDomain String
+  role       String // participant | applicant | departing | remaining_member
+  snapshot   Json
+  createdAt  DateTime @default(now())
+
+  proposal FederationProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, nodeDomain])
+  @@index([proposalId])
 }
 
 // Outbound delivery queue: enqueue inside the local transaction, deliver via

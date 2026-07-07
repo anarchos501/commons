@@ -1,4 +1,5 @@
 import type { FederatedNode, Prisma, PrismaClient } from "../generated/prisma/client";
+type DbClient = Prisma.TransactionClient | PrismaClient;
 
 // Loopback detection for peer addresses, including the RFC 6761 *.localhost
 // TLD the two-node dev harness uses (node-a.localhost / node-b.localhost).
@@ -121,7 +122,7 @@ export async function pinPeer(
   return { ok: true, peer, wellKnown };
 }
 
-export async function getPeerByDomain(prisma: PrismaClient, domain: string): Promise<FederatedNode | null> {
+export async function getPeerByDomain(prisma: DbClient, domain: string): Promise<FederatedNode | null> {
   return prisma.federatedNode.findUnique({ where: { domain: domain.toLowerCase() } });
 }
 

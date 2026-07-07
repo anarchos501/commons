@@ -967,6 +967,10 @@ test("evaluateAndApplyPetition: competing node-steward winner is dispatched via 
   const prefix = "pet_eval_steward";
   const { node, group, memberships } = await createFixture(prefix, 5);
   try {
+    // Steward candidates must be public and unarchived — the apply-time
+    // transparency guard (steward audit A1) re-checks this even for directly
+    // crafted proposals, so the fixture must satisfy the invariant.
+    await prisma.group.update({ where: { id: group.id }, data: { visibility: "public" } });
     const snapshot = { threshold: 0.5, petitionDuration: 7 };
     const opensAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
     const closesAt = new Date(Date.now() - 1000);

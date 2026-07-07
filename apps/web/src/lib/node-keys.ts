@@ -5,8 +5,10 @@ import {
   sign as cryptoSign,
   verify as cryptoVerify,
 } from "node:crypto";
-import type { NodeKeyPair, PrismaClient } from "../generated/prisma/client";
+import type { NodeKeyPair, Prisma, PrismaClient } from "../generated/prisma/client";
 import type { SigningProvider } from "./signed-events";
+
+type DbClient = Prisma.TransactionClient | PrismaClient;
 
 export const NODE_KEY_ALGORITHM = "ed25519";
 
@@ -38,7 +40,7 @@ export function verifyWithPublicKeyPem(publicKeyPem: string, payloadHash: string
 // Generate-on-first-use. The partial unique index NodeKeyPair_active_per_node_unique
 // (one row per node where retiredAt IS NULL) makes the create race-safe: a
 // concurrent loser recovers by re-reading the winner's row.
-export async function ensureNodeKeyPair(prisma: PrismaClient, nodeId: string): Promise<NodeKeyPair> {
+export async function ensureNodeKeyPair(prisma: DbClient, nodeId: string): Promise<NodeKeyPair> {
   const active = await prisma.nodeKeyPair.findFirst({ where: { nodeId, retiredAt: null } });
   if (active) return active;
 
@@ -60,7 +62,7 @@ export type NodeSigner = {
   provider: SigningProvider;
 };
 
-export async function nodeSigningProvider(prisma: PrismaClient, nodeId: string): Promise<NodeSigner> {
+export async function nodeSigningProvider(prisma: DbClient, nodeId: string): Promise<NodeSigner> {
   const key = await ensureNodeKeyPair(prisma, nodeId);
   return {
     keyId: key.id,

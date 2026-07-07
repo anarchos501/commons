@@ -27,6 +27,12 @@ import {
   onProjectHostingWithdrawalPetitionApproved,
 } from "./project-hosting";
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
+import { evaluateFederationProposalForPetition } from "./federations";
+import {
+  applyFederationDisableFromPetition,
+  applyFederationPolicyFromPetition,
+  applyFederationTerminationFromPetition,
+} from "./federation-policy";
 import { evaluateEventProposalForPetition } from "./events";
 import { evaluateNodeStewardProposalForPetition } from "./node-stewardship";
 import { evaluateNodeNameProposalForPetition } from "./node-name";
@@ -77,6 +83,7 @@ async function applyResolvedPetition(
 ): Promise<void> {
   if (await evaluateProjectHostingProposalForPetition(tx, petitionId)) return;
   if (await evaluateCoalitionProposalForPetition(tx, petitionId)) return;
+  if (await evaluateFederationProposalForPetition(tx, petitionId)) return;
   if (await evaluateEventProposalForPetition(tx, petitionId)) return;
   if (await evaluateNodeStewardProposalForPetition(tx, petitionId)) return;
   if (await evaluateNodeNameProposalForPetition(tx, petitionId)) return;
@@ -132,6 +139,12 @@ async function applyApprovedPetition(
     await onPublicationArchivalPetitionApproved(tx, petitionId);
   } else if (subjectType === "publication_entry_archive") {
     await onPublicationEntryArchivalPetitionApproved(tx, petitionId);
+  } else if (subjectType === "federation_policy_change") {
+    await applyFederationPolicyFromPetition(tx, petitionId);
+  } else if (subjectType === "federation_termination") {
+    await applyFederationTerminationFromPetition(tx, petitionId);
+  } else if (subjectType === "federation_disable") {
+    await applyFederationDisableFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -400,6 +413,42 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
       case "removal": return `Remove a member from coalition "${coalitionName}"`;
       default: return proposalFamilyLabel(subjectType);
     }
+  }
+
+  if (
+    subjectType === "federation_formation" ||
+    subjectType === "federation_join" ||
+    subjectType === "federation_departure" ||
+    subjectType === "federation_removal"
+  ) {
+    const proposal = await prisma.federationProposal.findUnique({
+      where: { id: subjectId },
+      select: { action: true, participantSnapshot: true, initiatedByDomain: true, federation: { select: { name: true } } },
+    });
+    if (!proposal) return proposalFamilyLabel(subjectType);
+    const snapshot = proposal.participantSnapshot as { domains?: string[] } | null;
+    const peers = (snapshot?.domains ?? []).join(" + ") || "another node";
+    switch (proposal.action) {
+      case "formation": return `Federate: ${peers}`;
+      case "departure": return `Leave federation "${proposal.federation?.name ?? "the federation"}"`;
+      case "join": return `Join federation "${proposal.federation?.name ?? "the federation"}"`;
+      case "removal": return `Remove a node from "${proposal.federation?.name ?? "the federation"}"`;
+      default: return proposalFamilyLabel(subjectType);
+    }
+  }
+
+  if (subjectType === "federation_policy_change") {
+    const target = subjectId.split(":")[1];
+    return target ? `Set federation policy to "${target}"` : proposalFamilyLabel(subjectType);
+  }
+
+  if (subjectType === "federation_termination") {
+    const federation = await prisma.federation.findUnique({ where: { id: subjectId }, select: { name: true } });
+    return `End federation agreement${federation ? ` "${federation.name}"` : ""}`;
+  }
+
+  if (subjectType === "federation_disable") {
+    return "Disable federation for this node";
   }
 
   // Never surface a raw identity code: fall back to the human-readable family label.
@@ -764,6 +813,185 @@ const coalitionDetail: PetitionDetailBuilder = async (prisma, { subjectId, subje
   return { summary, proposer, outcome: frameOutcome(status, effect), fields };
 };
 
+// Federation petitions decide relationships between whole communities; every
+// one of them gets a real detail panel (the plan's "legibility matters most
+// exactly here" rule — none may land in KNOWN_GENERIC_FAMILIES).
+
+const federationProposalDetail: PetitionDetailBuilder = async (prisma, { subjectId, subjectType, status }, { proposer, familyLabel }) => {
+  const proposal = await prisma.federationProposal.findUnique({
+    where: { id: subjectId },
+    select: {
+      action: true,
+      name: true,
+      content: true,
+      initiatedByDomain: true,
+      participantSnapshot: true,
+      decisions: true,
+      closesAt: true,
+      federation: { select: { name: true } },
+    },
+  });
+  if (!proposal) return null;
+
+  const snapshot = proposal.participantSnapshot as { domains?: string[] } | null;
+  const domains = snapshot?.domains ?? [];
+  const decisions = (proposal.decisions ?? {}) as Record<string, string>;
+  const federationName = proposal.name?.trim() || proposal.federation?.name || "the federation";
+
+  const fields: { label: string; value: string }[] = [];
+  fields.push({ label: "Participating nodes", value: domains.join(", ") || "—" });
+  fields.push({ label: "Initiated by", value: proposal.initiatedByDomain });
+  const decided = domains
+    .map((domain) => `${domain}: ${decisions[domain] ?? "pending"}`)
+    .join(" · ");
+  if (decided) fields.push({ label: "Node decisions", value: decided });
+  if (proposal.content?.trim()) fields.push({ label: "Rationale", value: truncateBody(proposal.content) });
+  fields.push({
+    label: "What an agreement grants",
+    value:
+      "Only the capability to interact: every collective on this node stays closed toward the peer until it opens itself by its own petition. No community data flows from the agreement alone.",
+  });
+
+  let summary = familyLabel;
+  let effect = `this ${familyLabel.toLowerCase()} takes effect`;
+  if (subjectType === "federation_formation") {
+    summary = `Federate with ${domains.filter((d) => d !== proposal.initiatedByDomain).join(", ") || "a peer node"}`;
+    effect = "the agreement becomes active once EVERY participating node's steward petition approves (mutual consent)";
+  } else if (subjectType === "federation_departure") {
+    summary = `Leave "${federationName}"`;
+    effect = "this node leaves the agreement unilaterally and the peer is notified";
+  } else if (subjectType === "federation_join") {
+    summary = `Join "${federationName}"`;
+    effect = "this node joins the agreement once every member consents";
+  } else if (subjectType === "federation_removal") {
+    summary = `Remove a node from "${federationName}"`;
+    effect = "the node is removed once the remaining members consent";
+  }
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
+const federationPolicyDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
+  const target = subjectId.split(":")[1] ?? "unknown";
+  return {
+    summary: `Set federation policy to "${target}"`,
+    proposer,
+    outcome: frameOutcome(status, `this node's federation policy becomes "${target}"`),
+    fields: [
+      { label: "Proposed policy", value: target },
+      {
+        label: "Scope",
+        value:
+          "Policy governs how this node handles federation requests. It is steward-managed; any member can petition node-wide to end an agreement or disable federation entirely.",
+      },
+    ],
+  };
+};
+
+const federationTerminationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const federation = await prisma.federation.findUnique({
+    where: { id: subjectId },
+    select: { name: true, memberships: { where: { endedAt: null }, select: { memberDomain: true, isSelf: true } } },
+  });
+  const name = federation?.name ?? "the federation";
+  const peers = federation?.memberships.filter((m) => !m.isSelf).map((m) => m.memberDomain) ?? [];
+  return {
+    summary: `End federation agreement "${name}"`,
+    proposer,
+    outcome: frameOutcome(status, `the agreement with ${peers.join(", ") || "the peer node"} ends and the peer is notified`),
+    fields: [
+      { label: "Agreement", value: name },
+      ...(peers.length ? [{ label: "Peer nodes", value: peers.join(", ") }] : []),
+      {
+        label: "Why this vote is node-wide",
+        value:
+          "Starting federation is delegated to the steward collective; stopping it always belongs to the whole node. Ending is reversible — a new agreement can be proposed later.",
+      },
+    ],
+  };
+};
+
+const federationDisableDetail: PetitionDetailBuilder = async (prisma, { status }, { proposer }) => {
+  const activeCount = await prisma.federation.count({
+    where: { status: "active", memberships: { some: { isSelf: true, endedAt: null } } },
+  });
+  return {
+    summary: "Disable federation for this node",
+    proposer,
+    outcome: frameOutcome(
+      status,
+      `federation is disabled: ${activeCount > 0 ? `all ${activeCount} active agreement${activeCount === 1 ? "" : "s"} end` : "no agreements are active"} and the node stops accepting federation requests`,
+    ),
+    fields: [
+      { label: "Active agreements affected", value: String(activeCount) },
+      {
+        label: "Why this vote is node-wide",
+        value:
+          "A community that wants to be constitutionally non-federating can make itself so. This is the strongest stop valve; it is reversible only by the steward collective re-enabling policy later.",
+      },
+    ],
+  };
+};
+
+// Steward petitions carry real authority since federation landed (register
+// F-5): the detail panel must say what the vote confers, not just name it —
+// this is Workstream A finding A7, the mandated appointment legibility.
+const NODE_STEWARD_MANDATE =
+  "The steward collective holds the node's federation authority: it decides which other Commons nodes " +
+  "this node federates with, through its own visible petitions. Node-wide votes can end any agreement " +
+  "or disable federation, and the steward collective is recallable by node-wide no-confidence vote.";
+
+const nodeStewardDetail: PetitionDetailBuilder = async (prisma, { subjectId, subjectType, status }, { proposer, familyLabel }) => {
+  const proposal = await prisma.nodeStewardProposal.findUnique({
+    where: { id: subjectId },
+    select: { action: true, origin: true, snapshot: true },
+  });
+  if (!proposal) return null;
+
+  const snapshot = proposal.snapshot as {
+    node?: { name?: string };
+    candidateGroup?: { name?: string };
+    stewardGroup?: { name?: string };
+    initiatingGroup?: { name?: string };
+  } | null;
+  const nodeName = snapshot?.node?.name ?? "this node";
+  const collective = snapshot?.candidateGroup?.name ?? snapshot?.stewardGroup?.name ?? "a collective";
+
+  const fields: { label: string; value: string }[] = [];
+  fields.push({ label: "Node", value: nodeName });
+  fields.push({
+    label: proposal.action === "appointment" ? "Candidate collective" : "Steward collective",
+    value: collective,
+  });
+  if (snapshot?.initiatingGroup?.name) {
+    fields.push({ label: "Initiated through", value: snapshot.initiatingGroup.name });
+  }
+  fields.push({ label: "Origin", value: proposal.origin === "host" ? "Node host" : "Collective" });
+  fields.push({ label: "What stewardship carries", value: NODE_STEWARD_MANDATE });
+
+  let summary = familyLabel;
+  let effect = `this ${familyLabel.toLowerCase()} takes effect`;
+  if (subjectType === "node_steward_group_nomination") {
+    summary = `Nominate ${collective} as steward collective`;
+    effect = "the nomination advances (candidate consent, then a node-wide appointment vote)";
+  } else if (subjectType === "node_steward_candidate_consent") {
+    summary = `${collective} consents to steward candidacy`;
+    effect = "the candidacy advances to a node-wide appointment vote";
+  } else if (subjectType === "node_steward_appointment") {
+    summary = `Appoint ${collective} as steward collective`;
+    effect = `${collective} becomes the steward collective, holding the node's federation authority`;
+  } else if (subjectType === "node_steward_no_confidence_initiation") {
+    summary = `Initiate no-confidence in ${collective}`;
+    effect = "a node-wide no-confidence vote opens";
+  } else if (subjectType === "node_steward_no_confidence") {
+    summary = `Remove ${collective} as steward collective`;
+    effect = `${collective} is removed and the node's federation authority is vacated until a new steward is appointed`;
+  } else if (subjectType === "node_steward_resignation") {
+    summary = `${collective} resigns as steward collective`;
+    effect = `${collective} steps down and the node's federation authority is vacated until a new steward is appointed`;
+  }
+  return { summary, proposer, outcome: frameOutcome(status, effect), fields };
+};
+
 const trustedProviderProposalDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
   const application = await prisma.trustedProviderApplication.findUnique({
     where: { id: subjectId },
@@ -864,6 +1092,19 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   coalition_join: coalitionDetail,
   coalition_departure: coalitionDetail,
   coalition_removal: coalitionDetail,
+  node_steward_group_nomination: nodeStewardDetail,
+  node_steward_candidate_consent: nodeStewardDetail,
+  node_steward_appointment: nodeStewardDetail,
+  node_steward_no_confidence_initiation: nodeStewardDetail,
+  node_steward_no_confidence: nodeStewardDetail,
+  node_steward_resignation: nodeStewardDetail,
+  federation_formation: federationProposalDetail,
+  federation_join: federationProposalDetail,
+  federation_departure: federationProposalDetail,
+  federation_removal: federationProposalDetail,
+  federation_policy_change: federationPolicyDetail,
+  federation_termination: federationTerminationDetail,
+  federation_disable: federationDisableDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -880,12 +1121,6 @@ export const PETITION_DETAILED_FAMILIES = Object.keys(PETITION_DETAIL_BUILDERS) 
  */
 export const KNOWN_GENERIC_FAMILIES: ReadonlySet<ProposalFamily> = new Set<ProposalFamily>([
   "project_hosting_withdrawal",
-  "node_steward_group_nomination",
-  "node_steward_candidate_consent",
-  "node_steward_appointment",
-  "node_steward_no_confidence_initiation",
-  "node_steward_no_confidence",
-  "node_steward_resignation",
   "node_name_change_proposal",
   "node_name_change",
   "accountability_action",
@@ -975,6 +1210,13 @@ export function proposalFamilyLabel(subjectType: string) {
     case "node_steward_resignation": return "Node steward resignation";
     case "node_name_change_proposal": return "Node name proposal";
     case "node_name_change": return "Node rename vote";
+    case "federation_formation": return "Federation agreement";
+    case "federation_join": return "Federation join";
+    case "federation_departure": return "Federation departure";
+    case "federation_removal": return "Federation member removal";
+    case "federation_policy_change": return "Federation policy change";
+    case "federation_termination": return "End federation agreement";
+    case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";
     default: return subjectType.replace(/_/g, " ");
   }

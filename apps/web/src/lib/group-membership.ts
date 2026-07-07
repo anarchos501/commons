@@ -267,6 +267,37 @@ export async function leaveGroup(
 export async function archiveGroupIfDefunct(prisma: PrismaClient, groupId: string): Promise<void> {
   const activeCount = await prisma.groupMembership.count({ where: { groupId, status: "active" } });
   if (activeCount === 0) {
-    await prisma.group.updateMany({ where: { id: groupId, archivedAt: null }, data: { archivedAt: new Date() } });
+    const archived = await prisma.group.updateMany({
+      where: { id: groupId, archivedAt: null },
+      data: { archivedAt: new Date() },
+    });
+
+    // Steward audit A8: a memberless steward group cannot resign (resignation
+    // requires an active steward-group membership) and would otherwise hold
+    // node authority — including federation authority (register F-5) — as a
+    // ghost, removable only by an elevated no-confidence vote. Archival of
+    // the steward group vacates stewardship: fail-closed, the same rule as
+    // "no steward ⇒ not federable". The revision bump auto-stales in-flight
+    // steward proposals baselined on the old era.
+    if (archived.count > 0) {
+      const stewardedNodes = await prisma.node.findMany({
+        where: { stewardGroupId: groupId },
+        select: { id: true },
+      });
+      for (const node of stewardedNodes) {
+        await prisma.node.updateMany({
+          where: { id: node.id, stewardGroupId: groupId },
+          data: { stewardGroupId: null, stewardRevision: { increment: 1 } },
+        });
+        await logAction(prisma, {
+          actorAccountId: null,
+          nodeId: node.id,
+          groupId,
+          action: "node.steward.vacated_by_archival",
+          targetType: "group",
+          targetId: groupId,
+        });
+      }
+    }
   }
 }

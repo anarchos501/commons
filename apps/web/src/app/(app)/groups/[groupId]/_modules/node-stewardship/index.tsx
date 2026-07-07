@@ -40,6 +40,14 @@ export function NodeStewardshipModule({
       <p className="mb-4 text-xs leading-5 text-[var(--muted)]">
         This collective may open stewardship questions. Node users decide appointments and no-confidence votes.
       </p>
+      {/* register F-5: the appointment mandate must be legible at the moment of consent. */}
+      <p className="mb-4 text-xs leading-5 text-[var(--soft-text)]">
+        Appointing a steward collective grants it real authority: the steward collective decides which
+        other Commons nodes this node federates with and manages the node&apos;s federation policy, through
+        its own visible petitions. Without a steward collective, this node cannot federate at all. The
+        community keeps two checks: a node-wide vote can end any agreement or disable federation entirely,
+        and the steward collective itself is recallable by a node-wide no-confidence vote.
+      </p>
       {isActive && !nodeState.stewardGroupId && (
         <form action={openGroupStewardNominationAction} className="space-y-3">
           <input type="hidden" name="groupId" value={groupId} />
@@ -51,6 +59,9 @@ export function NodeStewardshipModule({
                 <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
               ))}
             </select>
+            <span className="mt-1 block text-xs text-[var(--muted)]">
+              If appointed, this collective holds federation authority for the node (see above).
+            </span>
           </label>
           <SubmitButton variant="secondary">Open nomination petition</SubmitButton>
         </form>

@@ -1,4 +1,5 @@
 import { receiveFederationEnvelope } from "../../../../lib/federation-inbox";
+import { resolveCurrentNode } from "../../../../lib/node-context";
 import { createPrismaClient } from "../../../../lib/prisma";
 
 // Server-to-server delivery endpoint — browsers never call this (register F-4).
@@ -25,7 +26,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const prisma = createPrismaClient();
   try {
-    const result = await receiveFederationEnvelope(prisma, body);
+    const localNode = await resolveCurrentNode(prisma);
+    const result = await receiveFederationEnvelope(prisma, body, { localNode });
     if (result.outcome === "rejected") {
       const status =
         result.reason === "unknown_origin" || result.reason === "bad_signature" ? 401 : 400;

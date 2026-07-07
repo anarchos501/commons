@@ -8,7 +8,12 @@ export const FEDERATION_PROTOCOL_VERSION = 1;
 // SignedEventType enum: new event types must not require a migration. The
 // union is for senders; receivers dispatch on the raw string and record
 // unknown types as rejected (register F-4: the surface stays narrow).
-export type FederationWireEventType = "federation_ping";
+export type FederationWireEventType =
+  | "federation_ping"
+  | "federation_proposal_opened"
+  | "federation_proposal_decision"
+  | "federation_agreement_ended"
+  | "federation_suspension_notice";
 
 export type FederationEnvelope = {
   version: number;

@@ -8,11 +8,13 @@ import {
   upsertNodeGovernanceSignal,
 } from "../lib/node-governance";
 import {
+  openGroupNoConfidence,
   openGroupStewardNomination,
   openHostNoConfidence,
   openHostStewardNomination,
   openStewardResignation,
 } from "../lib/node-stewardship";
+import { archiveGroupIfDefunct } from "../lib/group-membership";
 import { addNodePetitionSupport, addPetitionSupport } from "../lib/petitions";
 import { evaluateAndApplyPetition } from "../lib/petition-evaluation";
 import { labelNodeGroupForAccount } from "../lib/node-privacy";
@@ -304,6 +306,231 @@ test("a private group cannot be nominated as node steward (transparency guard)",
     if (!opened.ok) assert.equal(opened.reason, "candidate_not_public");
   } finally {
     await cleanup("node_private_candidate");
+  }
+});
+
+// ── Steward audit regressions (Workstream A) ────────────────────────────────
+
+test("audit A1: a candidate that goes private mid-vote cannot be installed", async () => {
+  const fixture = await createFixture("node_a1_private", 2);
+  try {
+    await makeHost(fixture, 0);
+    const opened = await openHostStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      candidateGroupId: fixture.groups[1].id,
+      hostAccountId: fixture.accounts[0].id,
+    });
+    assert.equal(opened.ok, true);
+    if (!opened.ok) return;
+    await approveGroupPetition(opened.petitionId, fixture.memberships[1].id);
+    const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.ok(proposal.nodePetitionId);
+
+    await prisma.group.update({ where: { id: fixture.groups[1].id }, data: { visibility: "private" } });
+    await approveNodePetition(proposal.nodePetitionId!, fixture.accounts.map((account) => account.id));
+
+    const after = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.equal(after.status, "failed-stale");
+    assert.equal((await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } })).stewardGroupId, null);
+  } finally {
+    await cleanup("node_a1_private");
+  }
+});
+
+test("audit A1: an archived candidate cannot be installed mid-vote nor nominated at open", async () => {
+  const fixture = await createFixture("node_a1_archived", 2);
+  try {
+    await makeHost(fixture, 0);
+    const opened = await openHostStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      candidateGroupId: fixture.groups[1].id,
+      hostAccountId: fixture.accounts[0].id,
+    });
+    assert.equal(opened.ok, true);
+    if (!opened.ok) return;
+    await approveGroupPetition(opened.petitionId, fixture.memberships[1].id);
+    const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+
+    await prisma.group.update({ where: { id: fixture.groups[1].id }, data: { archivedAt: new Date() } });
+    await approveNodePetition(proposal.nodePetitionId!, fixture.accounts.map((account) => account.id));
+    const after = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.equal(after.status, "failed-stale");
+    assert.equal((await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } })).stewardGroupId, null);
+
+    // Open-time guard: an archived group cannot even be nominated.
+    const nominateArchived = await openHostStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      candidateGroupId: fixture.groups[1].id,
+      hostAccountId: fixture.accounts[0].id,
+    });
+    assert.deepEqual(nominateArchived, { ok: false, reason: "candidate_not_public" });
+  } finally {
+    await cleanup("node_a1_archived");
+  }
+});
+
+test("audit A2: re-evaluating an already-escalated petition does not double-escalate", async () => {
+  const fixture = await createFixture("node_a2_idem", 2);
+  try {
+    const opened = await openGroupStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      initiatingGroupId: fixture.groups[0].id,
+      candidateGroupId: fixture.groups[0].id,
+      createdByMembershipId: fixture.memberships[0].id,
+    });
+    assert.equal(opened.ok, true);
+    if (!opened.ok) return;
+    await approveGroupPetition(opened.petitionId, fixture.memberships[0].id);
+    const escalated = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.ok(escalated.nodePetitionId);
+
+    // A second resolver (sweep vs. on-load) re-evaluates the same approved
+    // initiation petition — the escalation must not fire again.
+    await evaluateAndApplyPetition(prisma, opened.petitionId);
+    await evaluateAndApplyPetition(prisma, opened.petitionId);
+
+    const after = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.equal(after.nodePetitionId, escalated.nodePetitionId, "node petition must not be replaced");
+    const nodePetitions = await prisma.petition.count({
+      where: { subjectId: opened.proposalId, subjectType: "node_steward_appointment" },
+    });
+    assert.equal(nodePetitions, 1, "exactly one node vote may exist per proposal");
+  } finally {
+    await cleanup("node_a2_idem");
+  }
+});
+
+test("audit A3: one group's parked no-confidence initiation blocks neither another group nor the host", async () => {
+  const fixture = await createFixture("node_a3_squat", 3);
+  try {
+    await prisma.node.update({
+      where: { id: fixture.node.id },
+      data: { stewardGroupId: fixture.groups[0].id },
+    });
+    await makeHost(fixture, 0);
+
+    const parked = await openGroupNoConfidence(prisma, {
+      nodeId: fixture.node.id,
+      initiatingGroupId: fixture.groups[1].id,
+      createdByMembershipId: fixture.memberships[1].id,
+    });
+    assert.equal(parked.ok, true);
+
+    // The squat: while group 1's initiation sits open and unapproved, group 2
+    // and the host must still be able to open their own.
+    const otherGroup = await openGroupNoConfidence(prisma, {
+      nodeId: fixture.node.id,
+      initiatingGroupId: fixture.groups[2].id,
+      createdByMembershipId: fixture.memberships[2].id,
+    });
+    assert.equal(otherGroup.ok, true, "another group's recall must not be blocked");
+
+    const host = await openHostNoConfidence(prisma, {
+      nodeId: fixture.node.id,
+      hostAccountId: fixture.accounts[0].id,
+    });
+    assert.equal(host.ok, true, "the host's recall must not be blocked");
+
+    // But the same initiator opening twice is still refused.
+    const duplicate = await openGroupNoConfidence(prisma, {
+      nodeId: fixture.node.id,
+      initiatingGroupId: fixture.groups[1].id,
+      createdByMembershipId: fixture.memberships[1].id,
+    });
+    assert.deepEqual(duplicate, { ok: false, reason: "proposal_already_open" });
+  } finally {
+    await cleanup("node_a3_squat");
+  }
+});
+
+test("audit A4: a recall vote resolving after a resignation fails stale instead of double-applying", async () => {
+  const fixture = await createFixture("node_a4_race", 3);
+  try {
+    await prisma.node.update({
+      where: { id: fixture.node.id },
+      data: { stewardGroupId: fixture.groups[0].id },
+    });
+    await makeHost(fixture, 1);
+
+    const recall = await openHostNoConfidence(prisma, {
+      nodeId: fixture.node.id,
+      hostAccountId: fixture.accounts[1].id,
+    });
+    assert.equal(recall.ok, true);
+    if (!recall.ok) return;
+
+    const resignation = await openStewardResignation(prisma, {
+      nodeId: fixture.node.id,
+      createdByMembershipId: fixture.memberships[0].id,
+    });
+    assert.equal(resignation.ok, true);
+    if (!resignation.ok) return;
+
+    // Resignation applies first: steward vacated, revision bumped.
+    await approveGroupPetition(resignation.petitionId, fixture.memberships[0].id);
+    const nodeAfterResignation = await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } });
+    assert.equal(nodeAfterResignation.stewardGroupId, null);
+    const revisionAfterResignation = nodeAfterResignation.stewardRevision;
+
+    // The recall vote then passes — but its baseline revision is gone.
+    await approveNodePetition(recall.petitionId, fixture.accounts.map((account) => account.id));
+    const recallProposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: recall.proposalId } });
+    assert.equal(recallProposal.status, "failed-stale");
+    const nodeAfterRecall = await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } });
+    assert.equal(nodeAfterRecall.stewardRevision, revisionAfterResignation, "revision must not double-bump");
+  } finally {
+    await cleanup("node_a4_race");
+  }
+});
+
+test("audit A5: a proposal whose petition link was lost is recovered via subjectId and heals the link", async () => {
+  const fixture = await createFixture("node_a5_orphan", 2);
+  try {
+    const opened = await openGroupStewardNomination(prisma, {
+      nodeId: fixture.node.id,
+      initiatingGroupId: fixture.groups[0].id,
+      candidateGroupId: fixture.groups[0].id,
+      createdByMembershipId: fixture.memberships[0].id,
+    });
+    assert.equal(opened.ok, true);
+    if (!opened.ok) return;
+
+    // Simulate the crash window: proposal created, petition opened, link lost.
+    await prisma.nodeStewardProposal.update({
+      where: { id: opened.proposalId },
+      data: { groupInitiationPetitionId: null },
+    });
+
+    await approveGroupPetition(opened.petitionId, fixture.memberships[0].id);
+    const proposal = await prisma.nodeStewardProposal.findUniqueOrThrow({ where: { id: opened.proposalId } });
+    assert.equal(proposal.groupInitiationPetitionId, opened.petitionId, "link must self-heal");
+    assert.equal(proposal.status, "awaiting_node_vote", "the orphan must still escalate");
+    assert.ok(proposal.nodePetitionId);
+  } finally {
+    await cleanup("node_a5_orphan");
+  }
+});
+
+test("audit A8: archiving the steward group vacates stewardship fail-closed", async () => {
+  const fixture = await createFixture("node_a8_vacate", 2);
+  try {
+    await prisma.node.update({
+      where: { id: fixture.node.id },
+      data: { stewardGroupId: fixture.groups[0].id },
+    });
+    const before = await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } });
+
+    await prisma.groupMembership.update({
+      where: { id: fixture.memberships[0].id },
+      data: { status: "inactive" },
+    });
+    await archiveGroupIfDefunct(prisma, fixture.groups[0].id);
+
+    const after = await prisma.node.findUniqueOrThrow({ where: { id: fixture.node.id } });
+    assert.equal(after.stewardGroupId, null, "a memberless steward group must not keep node authority");
+    assert.equal(after.stewardRevision, before.stewardRevision + 1, "revision bump stales in-flight proposals");
+  } finally {
+    await cleanup("node_a8_vacate");
   }
 });
 

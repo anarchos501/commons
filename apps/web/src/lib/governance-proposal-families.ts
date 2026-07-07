@@ -10,6 +10,15 @@ export type ProposalFamily =
   | "coalition_join"
   | "coalition_departure"
   | "coalition_removal"
+  // Inter-node federation (register F-5): agreement + policy families are
+  // steward-group petitions; termination/disable are the node-wide STOP valves.
+  | "federation_formation"
+  | "federation_join"
+  | "federation_departure"
+  | "federation_removal"
+  | "federation_policy_change"
+  | "federation_termination"
+  | "federation_disable"
   | "node_steward_group_nomination"
   | "node_steward_candidate_consent"
   | "node_steward_appointment"
@@ -61,6 +70,17 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   coalition_join: "group_settings",
   coalition_departure: "group_settings",
   coalition_removal: "group_settings",
+  // Steward-group petitions ride the steward group's own group_settings
+  // params, exactly like coalition_* — deliberately NOT a new constitutional
+  // category (register F-5: starting is delegated, only stopping is node-wide).
+  federation_formation: "group_settings",
+  federation_join: "group_settings",
+  federation_departure: "group_settings",
+  federation_removal: "group_settings",
+  federation_policy_change: "group_settings",
+  // Node-wide STOP valves follow the node_name_change precedent.
+  federation_termination: "node_stewardship",
+  federation_disable: "node_stewardship",
   node_steward_group_nomination: "node_stewardship",
   node_steward_candidate_consent: "node_stewardship",
   node_steward_appointment: "node_stewardship",
@@ -136,6 +156,12 @@ export function deriveCompetitionKey(
     case "coalition_join":
     case "coalition_departure":
     case "coalition_removal":
+    // Non-competing like coalition_*: each federation proposal is independent
+    // and the cross-node decisions map (not competition) resolves conflicts.
+    case "federation_formation":
+    case "federation_join":
+    case "federation_departure":
+    case "federation_removal":
     case "node_steward_group_nomination":
     case "node_steward_candidate_consent":
     case "node_steward_no_confidence_initiation":
@@ -152,6 +178,10 @@ export function deriveCompetitionKey(
     // already enforce "only one open at a time", so no competition key is needed.
     case "custom_support_requests_toggle":
     case "membership_policy_change":
+    // Non-competing AND reversible like the two settings above; the partial
+    // unique index Petition_federation_policy_change_open_unique enforces
+    // one-open-at-a-time instead of a competition key.
+    case "federation_policy_change":
     // Non-competing: each event proposal is independent; coalition events open one petition
     // per member group sharing the same subjectId (proposalId) and must not compete.
     case "event_authorization":
@@ -163,6 +193,12 @@ export function deriveCompetitionKey(
       return `${groupId}:node_name_change`;
     case "node_steward_no_confidence":
       return `${groupId}:node_steward_no_confidence:${subjectId}`;
+    // One node-wide termination vote per agreement, one disable vote per node
+    // at a time (groupId carries the nodeId for node-scoped petitions).
+    case "federation_termination":
+      return `${groupId}:federation_termination:${subjectId}`;
+    case "federation_disable":
+      return `${groupId}:federation_disable`;
     // All others: groupId:family:subjectId is unique per decision within a group
     default:
       return `${groupId}:${family}:${subjectId}`;
