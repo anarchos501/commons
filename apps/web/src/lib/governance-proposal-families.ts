@@ -49,6 +49,8 @@ export type ProposalFamily =
   | "trusted_provider_revocation"
   // RFC: Private-By-Default Groups
   | "group_visibility_proposal"
+  // RFC-009: per-(collective, peer-node) federated visibility grants (register D-4)
+  | "federated_visibility_change"
   // Collective-wide settings that must be petitioned rather than flipped by one member.
   | "custom_support_requests_toggle"
   | "membership_policy_change"
@@ -107,6 +109,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   trusted_provider_proposal: "trusted_provider",
   trusted_provider_revocation: "trusted_provider",
   group_visibility_proposal: "group_settings",
+  federated_visibility_change: "group_settings",
   custom_support_requests_toggle: "group_settings",
   // Changing the membership model is a membership-weight decision, so it inherits the
   // group's membership thresholds/duration (per feedback #2).
@@ -178,6 +181,12 @@ export function deriveCompetitionKey(
     // already enforce "only one open at a time", so no competition key is needed.
     case "custom_support_requests_toggle":
     case "membership_policy_change":
+    // Non-competing AND reversible (same rationale as its neighbors): stances
+    // flip over a group's life; the partial unique index
+    // Petition_federated_visibility_open_unique enforces one open petition per
+    // (group, peer) instead of a competition key (register F-7: that index IS
+    // the single-open invariant).
+    case "federated_visibility_change":
     // Non-competing AND reversible like the two settings above; the partial
     // unique index Petition_federation_policy_change_open_unique enforces
     // one-open-at-a-time instead of a competition key.

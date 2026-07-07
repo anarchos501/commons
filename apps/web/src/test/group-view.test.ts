@@ -32,6 +32,7 @@ function inputs(over: Partial<GroupViewInputs> = {}): GroupViewInputs {
     hasTrustedProviders: false,
     hasLibraryContent: false,
     isNodeSteward: false,
+    hasFederatedPeers: false,
     ...over,
   };
 }

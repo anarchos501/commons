@@ -455,6 +455,7 @@ model FederatedNode {
   outboxItems           FederationOutboxItem[]
   inboundEvents         FederationInboundEvent[]
   federationMemberships FederationMembership[]
+  visibilityGrants      FederatedVisibilityGrant[]
 
   @@index([status])
 }
@@ -564,6 +565,26 @@ model FederationOutboxItem {
   @@index([peerId])
 }
 
+// register D-4: per-(collective, peer-node) visibility grants — the §2b
+// consent layer. Absent row = closed. Public-group instrument only (A3):
+// validation rejects private groups. Suspension is agreement-scoped
+// (soft-archive on dissolve, resume on re-federation), never deletion.
+model FederatedVisibilityGrant {
+  id              String    @id @default(cuid())
+  groupId         String
+  federatedNodeId String
+  stance          String    @default("closed") // closed | visible | interactive
+  suspendedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  group         Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  federatedNode FederatedNode @relation(fields: [federatedNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, federatedNodeId])
+  @@index([federatedNodeId])
+}
+
 // Inbound event ledger: the unique(origin, remoteEventId) pair is the replay
 // guard — insert-first, catch P2002 as "duplicate" (register F-4). outcome is
 // null until the handler transaction completes.
@@ -660,6 +681,7 @@ model Group {
   createdAt             DateTime @default(now())
 
   node             Node                       @relation(fields: [nodeId], references: [id])
+  federatedVisibilityGrants FederatedVisibilityGrant[]
   foundedProjects  Project[]
   hostedProjects   ProjectHosting[]
   hostingProposals ProjectHostingProposal[]

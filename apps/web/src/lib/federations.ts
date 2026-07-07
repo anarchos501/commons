@@ -12,6 +12,7 @@ import type { FederationDataClass } from "./federation-data-classes";
 import { createFederationEnvelope } from "./federation-envelope";
 import { enqueueFederationEvent } from "./federation-outbox";
 import { getPeerByDomain } from "./federation-peers";
+import { resumeGrantsForPeer, suspendGrantsForPeer } from "./federated-visibility";
 import { nodeSigningProvider } from "./node-keys";
 import { requireActiveNodeUser } from "./node-governance";
 import { openPetition, openSystemGroupPetition } from "./petitions";
@@ -486,6 +487,12 @@ async function applyFederationProposal(
       if (peer && peer.status === "proposed") {
         await tx.federatedNode.update({ where: { id: peer.id }, data: { status: "active" } });
       }
+      if (peer) {
+        // register D-4: suspended grants resume when federation resumes —
+        // keyed HERE, to the new agreement being applied, never inferred
+        // from peer status (proposed-after-dissolve ≡ proposed-fresh).
+        await resumeGrantsForPeer(tx, peer.id);
+      }
     }
     await tx.federationProposal.updateMany({
       where: { id: proposal.id, status: { in: ["open", "awaiting_remote"] } },
@@ -574,6 +581,10 @@ export async function dissolveFederationLocally(
       where: { domain, status: "active" },
       data: { status: "proposed" },
     });
+    // register D-4: grants toward this peer suspend with the agreement
+    // (soft-archive, not deletion — a later re-federation resumes them).
+    const peer = await getPeerByDomain(tx, domain);
+    if (peer) await suspendGrantsForPeer(tx, peer.id);
   }
   return { dissolved: true };
 }

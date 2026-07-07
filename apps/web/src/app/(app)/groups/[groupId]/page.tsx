@@ -4,6 +4,7 @@ import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import { ProjectsModule } from "./_modules/projects";
 import { CoalitionsModule } from "./_modules/coalitions";
+import { FederationModule } from "./_modules/federation";
 import { NodeStewardshipModule } from "./_modules/node-stewardship";
 import { ContributionCategoriesModule } from "./_modules/contribution-categories";
 import { TrustedProvidersModule } from "./_modules/trusted-providers";
@@ -237,6 +238,8 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
 
         {present.has("coalitions") && <CoalitionsModule data={data} isActive={isActive} groupId={groupId} />}
 
+        {present.has("federation") && <FederationModule data={data.federation} isActive={isActive} groupId={groupId} />}
+
         {present.has("node-stewardship") && <NodeStewardshipModule nodeState={data.nodeState} nodeGroupOptions={data.nodeGroupOptions} nodeId={group.nodeId} isActive={isActive} groupId={groupId} />}
 
         {/* ── Members ───────────────────────────────────────────────── */}
@@ -343,6 +346,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       trustedProviderCount,
       authoredThreadCount,
       hasReviewerRole,
+      federatedPeerCount,
     ] = await Promise.all([
       getViewerSpaces(prisma, accountId),
       prisma.project.findMany({ where: { hostings: { some: { groupId, endedAt: null } }, status: { not: "closed" }, archivedAt: null }, select: { id: true } }),
@@ -354,6 +358,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       prisma.trustedProviderStatus.count({ where: { groupId, status: "active" } }),
       prisma.discussionThread.count({ where: { spaceType: "group", spaceId: groupId, createdByAccountId: accountId } }),
       hasActiveEligibleAssignment(prisma, currentMembership.id, "reviewer"),
+      prisma.federatedNode.count(),
     ]);
     const groupProjectIds = new Set(groupProjectIdRows.map((p) => p.id));
     const groupCoalitionIds = new Set(groupCoalitionIdRows.map((c) => c.id));
@@ -389,6 +394,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
         hasTrustedProviders: trustedProviderCount > 0,
         hasLibraryContent: bulletinCount > 0 || publicationCount > 0 || livingDocCount > 0,
         isNodeSteward: nodeState.stewardGroupId === groupId,
+        hasFederatedPeers: federatedPeerCount > 0,
       },
       { section, discussionThread: selectedThreadId, petitionFilter },
       prefs,
@@ -528,6 +534,41 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // groups they belong to). Private groups are never shown to non-members, so the coalition
     // form is not a discovery directory; a shared member bridges private–private coalitions by
     // initiating from within a group they belong to. (isPrivate = !(public || actor-is-member).)
+    // Federated visibility stances (register D-4): the peer list + this
+    // collective's current stance toward each. Public groups only hold
+    // stances; the module renders the deliberate-acts explainer for private.
+    const federationModule = present.has("federation")
+      ? await (async () => {
+          const [peerRows, grantRows] = await Promise.all([
+            prisma.federatedNode.findMany({
+              select: { id: true, displayName: true, domain: true, status: true },
+              orderBy: { pinnedAt: "asc" },
+              take: 50,
+            }),
+            prisma.federatedVisibilityGrant.findMany({
+              where: { groupId },
+              select: { federatedNodeId: true, stance: true, suspendedAt: true },
+            }),
+          ]);
+          const grantByPeer = new Map(grantRows.map((g) => [g.federatedNodeId, g]));
+          return {
+            isPrivate: group.visibility !== "public",
+            peers: peerRows.map((peer) => {
+              const grant = grantByPeer.get(peer.id);
+              const stance = (grant?.stance ?? "closed") as "closed" | "visible" | "interactive";
+              return {
+                peerNodeId: peer.id,
+                label: peer.displayName ?? peer.domain,
+                domain: peer.domain,
+                agreementActive: peer.status === "active",
+                stance,
+                suspended: Boolean(grant?.suspendedAt),
+              };
+            }),
+          };
+        })()
+      : { isPrivate: group.visibility !== "public", peers: [] };
+
     const eligibleCoalitionPartners =
       present.has("coalitions") && currentMembership.participationStatus === "active"
         ? nodeGroupOptions.filter((candidate) => candidate.id !== groupId && !candidate.isPrivate)
@@ -833,6 +874,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
       requestLinkPreview,
       nodeState,
       nodeGroupOptions,
+      federation: federationModule,
       view,
       revealAll: prefs.revealAll,
       disclosureCards,

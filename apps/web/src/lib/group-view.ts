@@ -28,6 +28,7 @@ export type GroupViewInputs = {
   hasTrustedProviders: boolean;
   hasLibraryContent: boolean;
   isNodeSteward: boolean; // nodeState.stewardGroupId === groupId
+  hasFederatedPeers: boolean; // any FederatedNode rows exist for this node
 };
 
 export type GroupSearchSignals = {
@@ -65,6 +66,7 @@ export function computeForeground(inputs: GroupViewInputs, signals: GroupSearchS
   if (inputs.authoredDiscussionThread) fg.add("discussion");
   if (inputs.hasLibraryContent) fg.add("library");
   if (inputs.isNodeSteward) fg.add("node-stewardship");
+  if (inputs.hasFederatedPeers) fg.add("federation");
   if (inputs.hasCategories) fg.add("contribution-categories");
   if (inputs.hasTrustedProviders) fg.add("trusted-providers");
   // (responsibilities/concerns/petitions are baseline — always present regardless of footprint.)

@@ -28,6 +28,7 @@ import {
 } from "./project-hosting";
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
 import { evaluateFederationProposalForPetition } from "./federations";
+import { applyFederatedVisibilityFromPetition } from "./federated-visibility";
 import {
   applyFederationDisableFromPetition,
   applyFederationPolicyFromPetition,
@@ -145,6 +146,8 @@ async function applyApprovedPetition(
     await applyFederationTerminationFromPetition(tx, petitionId);
   } else if (subjectType === "federation_disable") {
     await applyFederationDisableFromPetition(tx, petitionId);
+  } else if (subjectType === "federated_visibility_change") {
+    await applyFederatedVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -440,6 +443,15 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
   if (subjectType === "federation_policy_change") {
     const target = subjectId.split(":")[1];
     return target ? `Set federation policy to "${target}"` : proposalFamilyLabel(subjectType);
+  }
+
+  if (subjectType === "federated_visibility_change") {
+    const [, peerNodeId, target] = subjectId.split(":");
+    const peer = peerNodeId
+      ? await prisma.federatedNode.findUnique({ where: { id: peerNodeId }, select: { displayName: true, domain: true } })
+      : null;
+    const peerLabel = peer?.displayName ?? peer?.domain ?? "a federated node";
+    return target ? `Set stance toward ${peerLabel} to "${target}"` : proposalFamilyLabel(subjectType);
   }
 
   if (subjectType === "federation_termination") {
@@ -813,6 +825,36 @@ const coalitionDetail: PetitionDetailBuilder = async (prisma, { subjectId, subje
   return { summary, proposer, outcome: frameOutcome(status, effect), fields };
 };
 
+const federatedVisibilityDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const [, peerNodeId, target] = subjectId.split(":");
+  if (!peerNodeId || !target) return null;
+  const peer = await prisma.federatedNode.findUnique({
+    where: { id: peerNodeId },
+    select: { displayName: true, domain: true, status: true },
+  });
+  const peerLabel = peer?.displayName ?? peer?.domain ?? "a federated node";
+  const stanceMeaning =
+    target === "closed"
+      ? "invisible to that node's federated surfaces (the default)"
+      : target === "visible"
+        ? "discoverable in that node's federated listings, but not interactive"
+        : "that node's members may interact (join requests, presence interaction) through the normal processes";
+  return {
+    summary: `Set this collective's stance toward ${peerLabel} to "${target}"`,
+    proposer,
+    outcome: frameOutcome(status, `this collective becomes ${target} toward ${peerLabel}`),
+    fields: [
+      { label: "Peer node", value: peer ? `${peerLabel} (${peer.domain}, ${peer.status})` : peerNodeId },
+      { label: "Proposed stance", value: `${target} — ${stanceMeaning}` },
+      {
+        label: "Honest scope",
+        value:
+          "This governs the federated layer only. A public collective's page is already readable by anyone on the open web, including that node's members — no stance can retract that.",
+      },
+    ],
+  };
+};
+
 // Federation petitions decide relationships between whole communities; every
 // one of them gets a real detail panel (the plan's "legibility matters most
 // exactly here" rule — none may land in KNOWN_GENERIC_FAMILIES).
@@ -1105,6 +1147,7 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   federation_policy_change: federationPolicyDetail,
   federation_termination: federationTerminationDetail,
   federation_disable: federationDisableDetail,
+  federated_visibility_change: federatedVisibilityDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -1215,6 +1258,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "federation_departure": return "Federation departure";
     case "federation_removal": return "Federation member removal";
     case "federation_policy_change": return "Federation policy change";
+    case "federated_visibility_change": return "Federated visibility stance";
     case "federation_termination": return "End federation agreement";
     case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";

@@ -1,4 +1,5 @@
 import type { PrismaClient } from "../generated/prisma/client";
+import { NOT_SHADOW_ACCOUNT_FILTER } from "./shadow-accounts";
 
 // Catch-up-on-return: a passive "while you were away" digest of what changed across your spaces since
 // you last visited each. Reuses GroupMembership.lastSeenAt (per-group; the home reads it WITHOUT
@@ -88,8 +89,10 @@ export async function hasCatchUpSince(prisma: PrismaClient, accountId: string): 
   if (await prisma.livingDocument.count({ where: { archivedAt: null, OR: spaceOr.map((g) => ({ spaceType: "group" as const, spaceId: g.spaceId, lastRevisedAt: { gt: g.gt } })) } })) return true;
   // Requests routed to you for action (RequestRoute → SupportRequest.groupId).
   if (await prisma.requestRoute.count({ where: { contributorAccountId: accountId, OR: groupOr.map((g) => ({ supportRequest: { is: { groupId: g.groupId } }, createdAt: { gt: g.gt } })) } })) return true;
-  // New members joined.
-  if (await prisma.groupMembership.count({ where: { status: "active", OR: groupOr.map((g) => ({ groupId: g.groupId, joinedAt: { gt: g.gt } })) } })) return true;
+  // New members joined. Shadow audit C2: remote presence-backed joins are not
+  // an unqualified local-membership signal — a distinct remote-member signal
+  // can exist later, but this one means local people.
+  if (await prisma.groupMembership.count({ where: { status: "active", account: NOT_SHADOW_ACCOUNT_FILTER, OR: groupOr.map((g) => ({ groupId: g.groupId, joinedAt: { gt: g.gt } })) } })) return true;
   // Concerns — only for groups where the viewer is a reviewer (else this signal must not be consulted).
   const reviewer = await reviewerGroupIds(prisma, accountId);
   const reviewerOr = groupOr.filter((g) => reviewer.has(g.groupId));
@@ -110,7 +113,7 @@ export async function summarizeGroupSinceLastSeen(
     prisma.publication.count({ where: { spaceType: "group", spaceId: groupId, archivedAt: null, createdAt: { gt: since } } }),
     prisma.livingDocument.count({ where: { spaceType: "group", spaceId: groupId, archivedAt: null, lastRevisedAt: { gt: since } } }),
     prisma.requestRoute.count({ where: { contributorAccountId: accountId, createdAt: { gt: since }, supportRequest: { is: { groupId } } } }),
-    prisma.groupMembership.count({ where: { groupId, status: "active", joinedAt: { gt: since } } }),
+    prisma.groupMembership.count({ where: { groupId, status: "active", account: NOT_SHADOW_ACCOUNT_FILTER, joinedAt: { gt: since } } }),
     canSeeConcerns ? prisma.report.count({ where: { groupId, createdAt: { gt: since } } }) : Promise.resolve(null),
   ]);
   const newPosts = bulletins + publications + livingDocs;

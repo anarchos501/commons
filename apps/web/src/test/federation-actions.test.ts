@@ -30,8 +30,12 @@ after(async () => {
   await prismaB?.$disconnect();
 });
 
+// Creates the target group on B and — for public groups — opens it
+// interactive toward B's record of A (the actor's home node), so these F2
+// authorization tests exercise the JOIN logic rather than being stopped at
+// the F3 stance gate. Private groups get no grant (they cannot hold one).
 async function createGroupOnB(pair: FederatedPair, prefix: string, input: { open?: boolean; visibility?: "public" | "private" }) {
-  return prismaB.group.create({
+  const group = await prismaB.group.create({
     data: {
       id: `${prefix}_target_${input.open === false ? "closed" : "open"}_${input.visibility ?? "public"}`,
       nodeId: pair.b.node.id,
@@ -40,6 +44,13 @@ async function createGroupOnB(pair: FederatedPair, prefix: string, input: { open
       visibility: input.visibility ?? "public",
     },
   });
+  if ((input.visibility ?? "public") === "public") {
+    const peerA = await prismaB.federatedNode.findUniqueOrThrow({ where: { domain: pair.a.domain } });
+    await prismaB.federatedVisibilityGrant.create({
+      data: { groupId: group.id, federatedNodeId: peerA.id, stance: "interactive" },
+    });
+  }
+  return group;
 }
 
 test("a mediated join lands through the remote node's ordinary authorization", async () => {

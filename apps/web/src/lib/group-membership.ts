@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { logAction } from "./action-log";
 import { openPetition, withdrawPetitionBySubject } from "./petitions";
+import { NOT_SHADOW_ACCOUNT_FILTER } from "./shadow-accounts";
 
 export async function requireGroupMembership(
   prisma: PrismaClient,
@@ -265,7 +266,12 @@ export async function leaveGroup(
  * has ~40 child relations without DB-level cascade, so a destructive purge is its own piece of work).
  */
 export async function archiveGroupIfDefunct(prisma: PrismaClient, groupId: string): Promise<void> {
-  const activeCount = await prisma.groupMembership.count({ where: { groupId, status: "active" } });
+  // Shadow audit C1: a remote presence-backed member must not keep a local
+  // collective (least of all a steward group) alive after every local person
+  // has left — but local members who merely went participation-dormant must.
+  const activeCount = await prisma.groupMembership.count({
+    where: { groupId, status: "active", account: NOT_SHADOW_ACCOUNT_FILTER },
+  });
   if (activeCount === 0) {
     const archived = await prisma.group.updateMany({
       where: { id: groupId, archivedAt: null },

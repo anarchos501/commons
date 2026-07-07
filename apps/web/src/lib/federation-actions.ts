@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FederatedNode, Node, PortableIdentity, Prisma, PrismaClient } from "../generated/prisma/client";
 import type { FederationEnvelope } from "./federation-envelope";
 import { ensurePeerNodeRow, getPeerByDomain } from "./federation-peers";
+import { resolveFederatedStance } from "./federated-visibility";
 import { enqueueSignedNodeEvent } from "./federations";
 import { joinOpenGroup } from "./group-membership";
 import { verifyWithPublicKeyPem } from "./node-keys";
@@ -35,7 +36,7 @@ const MEDIATED_ACTION_HANDLERS: Record<string, MediatedActionHandler> = {
   // real action that exercises the whole chain, deciding through the SAME
   // joinOpenGroup guards a local member hits (open policy, revoked/pending
   // membership refusals).
-  join_open_group: async (tx, { localNode, shadowAccountId, action }) => {
+  join_open_group: async (tx, { localNode, origin, shadowAccountId, action }) => {
     const groupId = typeof action.groupId === "string" ? action.groupId : null;
     if (!groupId) return { ok: false, reason: "malformed_action" };
 
@@ -48,6 +49,15 @@ const MEDIATED_ACTION_HANDLERS: Record<string, MediatedActionHandler> = {
     if (!group || group.nodeId !== localNode.id || group.archivedAt || group.visibility !== "public") {
       return { ok: false, reason: "not_found" };
     }
+
+    // register D-4: the grant chokepoint, on a federated serve path. A group
+    // closed toward this peer reads as not found on the FEDERATED layer —
+    // its public page stays public on the open web, which this function
+    // never gates. A merely-visible group is discoverable but refuses
+    // interaction, honestly labeled.
+    const stance = await resolveFederatedStance(tx, groupId, origin);
+    if (stance === "closed") return { ok: false, reason: "not_found" };
+    if (stance !== "interactive") return { ok: false, reason: "group_not_interactive" };
 
     try {
       await joinOpenGroup(tx as unknown as PrismaClient, shadowAccountId, groupId);
