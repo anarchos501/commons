@@ -539,7 +539,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // stances; the module renders the deliberate-acts explainer for private.
     const federationModule = present.has("federation")
       ? await (async () => {
-          const [peerRows, grantRows] = await Promise.all([
+          const [peerRows, grantRows, coalitionPresences] = await Promise.all([
             prisma.federatedNode.findMany({
               select: { id: true, displayName: true, domain: true, status: true },
               orderBy: { pinnedAt: "asc" },
@@ -549,10 +549,21 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
               where: { groupId },
               select: { federatedNodeId: true, stance: true, suspendedAt: true },
             }),
+            prisma.federatedCoalitionPresence.findMany({
+              where: { groupId },
+              select: { id: true, name: true, status: true, homeFederatedNode: { select: { domain: true } } },
+              orderBy: { createdAt: "desc" },
+            }),
           ]);
           const grantByPeer = new Map(grantRows.map((g) => [g.federatedNodeId, g]));
           return {
             isPrivate: group.visibility !== "public",
+            remoteCoalitions: coalitionPresences.map((presence) => ({
+              presenceId: presence.id,
+              name: presence.name,
+              homeDomain: presence.homeFederatedNode.domain,
+              status: presence.status,
+            })),
             peers: peerRows.map((peer) => {
               const grant = grantByPeer.get(peer.id);
               const stance = (grant?.stance ?? "closed") as "closed" | "visible" | "interactive";
@@ -567,7 +578,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
             }),
           };
         })()
-      : { isPrivate: group.visibility !== "public", peers: [] };
+      : { isPrivate: group.visibility !== "public", peers: [], remoteCoalitions: [] };
 
     const eligibleCoalitionPartners =
       present.has("coalitions") && currentMembership.participationStatus === "active"

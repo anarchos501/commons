@@ -6,6 +6,12 @@ import {
   type FederationEnvelope,
 } from "./federation-envelope";
 import { handleMediatedAction } from "./federation-actions";
+import {
+  handleCoalitionContentAppended,
+  handleCoalitionProposalDecision,
+  handleCoalitionProposalOpened,
+  handleCoalitionResolved,
+} from "./federated-coalitions";
 import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
@@ -172,6 +178,10 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   presence_establish: applyPresenceEstablish,
   presence_revoke: applyPresenceRevoke,
   mediated_action: handleMediatedAction,
+  coalition_proposal_opened: handleCoalitionProposalOpened,
+  coalition_proposal_decision: handleCoalitionProposalDecision,
+  coalition_resolved: handleCoalitionResolved,
+  coalition_content_appended: handleCoalitionContentAppended,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

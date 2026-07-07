@@ -5,6 +5,7 @@ export async function register() {
   const { resolveExpiredPetitions } = await import("./lib/petition-evaluation");
   const { deliverPendingFederationEvents, httpsFederationTransport } = await import("./lib/federation-outbox");
   const { resolveExpiredFederationProposals } = await import("./lib/federations");
+  const { resolveExpiredCrossNodeCoalitionProposals } = await import("./lib/federated-coalitions");
 
   const prisma = createPrismaClient();
   const SWEEP_INTERVAL_MS = 60_000;
@@ -30,6 +31,7 @@ export async function register() {
       // petition resolves, only remote decisions or this timeout sweep can
       // finish them.
       await resolveExpiredFederationProposals(prisma);
+      await resolveExpiredCrossNodeCoalitionProposals(prisma);
     } catch (err) {
       console.error("[federation] outbox sweep failed", err);
     } finally {

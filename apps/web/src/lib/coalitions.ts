@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "../generated/prisma/client";
+import { applyDecision, parseDecisions } from "./federation-consent";
+import {
+  broadcastCoalitionResolved,
+  remoteDecisionKey,
+  sendCoalitionProposalOpened,
+  REMOTE_DECISION_GRACE_MS,
+  type RemoteParticipantRef,
+} from "./federated-coalitions";
+import { enqueueSignedNodeEvent } from "./federations";
 import type { ProposalFamily } from "./governance-proposal-families";
 import { evaluatePetition, openPetition, openSystemGroupPetition } from "./petitions";
 import { assertWithinTransaction } from "./prisma";
@@ -15,6 +24,10 @@ type ParticipantSnapshot = {
   capturedAt: string;
   groupIds: string[];
   currentCoalitionGroupIds: string[];
+  // Cross-node (F3): remote member groups by home domain + their group id
+  // THERE, and the deadline after which silent remote consent times out.
+  remoteParticipants?: RemoteParticipantRef[];
+  remoteDeadline?: string;
 };
 
 export type OpenCoalitionProposalResult =
@@ -43,17 +56,40 @@ export async function openCoalitionFormationProposal(
     description,
     content,
     participants,
+    remoteParticipants = [],
   }: {
     name: string;
     description?: string | null;
     content: string;
     participants: GroupSponsor[];
+    // Cross-node members (F3): this node becomes the coalition's home (the
+    // proposing group's node hosts — plan §5). Each remote group's own node
+    // opens its petition; the act is the consent (F-2, A3).
+    remoteParticipants?: RemoteParticipantRef[];
   },
 ): Promise<OpenCoalitionProposalResult> {
   const normalizedName = name.trim();
   const uniqueParticipants = uniqueSponsors(participants);
-  if (!normalizedName || uniqueParticipants.length < 2 || uniqueParticipants.length !== participants.length) {
+  const uniqueRemotes = [
+    ...new Map(remoteParticipants.map((remote) => [`${remote.domain}:${remote.remoteGroupId}`, remote])).values(),
+  ];
+  const totalParticipants = uniqueParticipants.length + uniqueRemotes.length;
+  if (
+    !normalizedName ||
+    totalParticipants < 2 ||
+    uniqueParticipants.length < 1 ||
+    uniqueParticipants.length !== participants.length ||
+    uniqueRemotes.length !== remoteParticipants.length
+  ) {
     return { ok: false, reason: "invalid_participants" };
+  }
+  // Every remote participant's home must hold an ACTIVE agreement with this
+  // node (A4: the hub agreements are the coalition's transport).
+  for (const remote of uniqueRemotes) {
+    const peer = await prisma.federatedNode.findUnique({ where: { domain: remote.domain }, select: { status: true } });
+    if (!peer || peer.status !== "active" || !remote.remoteGroupId.trim() || !remote.name.trim()) {
+      return { ok: false, reason: "invalid_participants" };
+    }
   }
 
   const groups = await loadSponsorGroups(prisma, uniqueParticipants);
@@ -79,6 +115,7 @@ export async function openCoalitionFormationProposal(
     currentCoalitionGroupIds: [],
     sponsors: uniqueParticipants.map((sponsor) => ({ ...sponsor, role: "participant" })),
     groups,
+    remoteParticipants: uniqueRemotes,
   });
 }
 
@@ -98,7 +135,13 @@ export async function openCoalitionJoinProposal(
 ): Promise<OpenCoalitionProposalResult> {
   const coalition = await loadActiveCoalition(prisma, coalitionId);
   if (!coalition) return { ok: false, reason: "not_found" };
-  const currentGroupIds = coalition.memberships.map((membership) => membership.groupId).sort();
+  // Join on a coalition with REMOTE members needs every member's consent,
+  // including remote ones — multilateral cross-node changes are deferred
+  // (pairwise-first). Refuse rather than silently skip remote consent.
+  if (coalition.memberships.some((membership) => membership.groupId === null)) {
+    return { ok: false, reason: "invalid_participants" };
+  }
+  const currentGroupIds = localMemberGroupIds(coalition.memberships);
   if (currentGroupIds.includes(applicant.groupId)) return { ok: false, reason: "already_member" };
   if (!sameIds(currentGroupIds, memberSponsors.map((sponsor) => sponsor.groupId))) {
     return { ok: false, reason: "invalid_participants" };
@@ -142,7 +185,9 @@ export async function openCoalitionDepartureProposal(
 ): Promise<OpenCoalitionProposalResult> {
   const coalition = await loadActiveCoalition(prisma, coalitionId);
   if (!coalition) return { ok: false, reason: "not_found" };
-  const currentGroupIds = coalition.memberships.map((membership) => membership.groupId).sort();
+  // Departure is unilateral, so a LOCAL group may leave a mixed coalition;
+  // the snapshot tracks local members only (matcher filters likewise).
+  const currentGroupIds = localMemberGroupIds(coalition.memberships);
   if (!currentGroupIds.includes(departing.groupId)) return { ok: false, reason: "not_member" };
   const groups = await loadSponsorGroups(prisma, [departing]);
   if (!groups) return { ok: false, reason: "not_eligible" };
@@ -177,7 +222,11 @@ export async function openCoalitionRemovalProposal(
 ): Promise<OpenCoalitionProposalResult> {
   const coalition = await loadActiveCoalition(prisma, coalitionId);
   if (!coalition) return { ok: false, reason: "not_found" };
-  const currentGroupIds = coalition.memberships.map((membership) => membership.groupId).sort();
+  // Removal on a mixed coalition: deferred with join (see above).
+  if (coalition.memberships.some((membership) => membership.groupId === null)) {
+    return { ok: false, reason: "invalid_participants" };
+  }
+  const currentGroupIds = localMemberGroupIds(coalition.memberships);
   if (!currentGroupIds.includes(targetGroupId)) return { ok: false, reason: "not_member" };
   const expectedRemaining = currentGroupIds.filter((groupId) => groupId !== targetGroupId);
   if (expectedRemaining.length === 0 || !sameIds(expectedRemaining, remainingSponsors.map((sponsor) => sponsor.groupId))) {
@@ -219,6 +268,29 @@ export async function evaluateCoalitionProposal(
     return { outcome: proposal.status as "failed-rejected" | "failed-withdrawn" | "failed-timeout" };
   }
 
+  // MEMBER side of a cross-node coalition: this node only decides its own
+  // groups' petitions and reports each decision to the home; the home's
+  // signed coalition_resolved event finalizes the mirror.
+  if (proposal.homeNodeDomain) {
+    return evaluateMemberSideProposal(prisma, proposal);
+  }
+  const crossNodeSnapshot = proposal.participantSnapshot as ParticipantSnapshot;
+  const remoteParticipants = crossNodeSnapshot.remoteParticipants ?? [];
+  if (remoteParticipants.length > 0) {
+    // Serialize with the inbound decision handler (read-modify-write on the
+    // decisions map); re-entrant within its transaction.
+    await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`coalition_proposal:${proposal.id}`}, 0))`;
+    // Any remote rejection fails the whole formation IMMEDIATELY — before the
+    // local gates, which would otherwise return "pending" while local
+    // petitions are still open (the unanimity short-circuit, as in
+    // combineDecisions).
+    const earlyDecisions = parseDecisions(proposal.decisions);
+    const rejected = remoteParticipants.some(
+      (remote) => earlyDecisions[remoteDecisionKey(remote.domain, remote.remoteGroupId)] === "rejected",
+    );
+    if (rejected) return failCoalitionProposal(prisma, proposal, "failed-rejected");
+  }
+
   if (proposal.coalitionId && !(await participantSnapshotStillMatches(prisma, proposal.coalitionId, proposal.participantSnapshot))) {
     return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
   }
@@ -243,7 +315,99 @@ export async function evaluateCoalitionProposal(
   }
   if (!petitions.every((petition) => petition.status === "approved")) return { outcome: "pending" };
 
+  // Home-side remote-consent gate (F3): every remote group's decision must be
+  // approved; any rejection fails the whole formation; silence times out at
+  // the snapshot deadline. Mirrors the federation unanimity ladder.
+  if (remoteParticipants.length > 0) {
+    const decisions = parseDecisions(proposal.decisions);
+    const keys = remoteParticipants.map((remote) => remoteDecisionKey(remote.domain, remote.remoteGroupId));
+    if (keys.some((key) => decisions[key] === "rejected")) {
+      return failCoalitionProposal(prisma, proposal, "failed-rejected");
+    }
+    if (!keys.every((key) => decisions[key] === "approved")) {
+      if (crossNodeSnapshot.remoteDeadline && evaluatedAt > new Date(crossNodeSnapshot.remoteDeadline)) {
+        return failCoalitionProposal(prisma, proposal, "failed-timeout");
+      }
+      return { outcome: "pending" };
+    }
+  }
+
   return applyCoalitionProposal(prisma, proposal);
+}
+
+// Member-side mirror evaluation: fold each local petition's fate into the
+// decisions map, emit one signed decision per group (monotonic — a slot
+// already terminal never re-emits), and fail the mirror locally on any
+// rejection or on deadline.
+async function evaluateMemberSideProposal(
+  prisma: Prisma.TransactionClient,
+  proposal: {
+    id: string;
+    homeNodeDomain: string | null;
+    decisions: unknown;
+    participantSnapshot: unknown;
+    petitions: Array<{ petitionId: string; groupId: string }>;
+  },
+): Promise<EvaluateCoalitionProposalResult> {
+  const evaluatedAt = new Date();
+  await evaluateDuePetitions(prisma, proposal.petitions.map((child) => child.petitionId), evaluatedAt);
+  const petitions = await prisma.petition.findMany({
+    where: { id: { in: proposal.petitions.map((child) => child.petitionId) } },
+    select: { id: true, status: true, closesAt: true },
+  });
+  const petitionByGroup = new Map(proposal.petitions.map((child) => [child.groupId, child.petitionId]));
+  const statusById = new Map(petitions.map((petition) => [petition.id, petition]));
+
+  const selfNode = await selfNodeForLocalGroup(prisma, proposal.petitions[0]?.groupId);
+  if (!selfNode) return { outcome: "pending" };
+
+  let decisions = parseDecisions(proposal.decisions);
+  let anyRejected = false;
+  for (const [groupId, petitionId] of petitionByGroup) {
+    const petition = statusById.get(petitionId);
+    if (!petition) continue;
+    let outcome: "approved" | "rejected" | null = null;
+    if (petition.status === "approved") outcome = "approved";
+    else if (petition.status === "rejected" || petition.status === "blocked") outcome = "rejected";
+    else if (petition.status === "withdrawn" || petition.status === "superseded") outcome = "rejected";
+    else if (petition.status === "open" && petition.closesAt <= evaluatedAt) outcome = "rejected";
+    if (!outcome) continue;
+    const key = remoteDecisionKey(selfNode.domain, groupId);
+    const updated = applyDecision(decisions, key, outcome);
+    if (updated) {
+      decisions = updated;
+      await prisma.coalitionProposal.update({ where: { id: proposal.id }, data: { decisions } });
+      await enqueueSignedNodeEvent(
+        prisma,
+        selfNode,
+        proposal.homeNodeDomain!,
+        "coalition_proposal_decision",
+        { proposalId: proposal.id, domain: selfNode.domain, remoteGroupId: groupId, outcome },
+        "coalition_coordination",
+      );
+      if (outcome === "rejected") anyRejected = true;
+    }
+  }
+  if (anyRejected) return failCoalitionProposal(prisma, proposal, "failed-rejected");
+
+  const snapshot = proposal.participantSnapshot as ParticipantSnapshot;
+  if (snapshot.remoteDeadline && evaluatedAt > new Date(snapshot.remoteDeadline)) {
+    // The home never resolved us: fail the mirror rather than dangle forever.
+    return failCoalitionProposal(prisma, proposal, "failed-timeout");
+  }
+  return { outcome: "pending" };
+}
+
+async function selfNodeForLocalGroup(
+  prisma: Prisma.TransactionClient,
+  groupId: string | undefined,
+): Promise<{ id: string; domain: string } | null> {
+  if (!groupId) return null;
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { node: { select: { id: true, domain: true } } },
+  });
+  return group?.node ?? null;
 }
 
 export async function evaluateCoalitionProposalForPetition(
@@ -271,14 +435,17 @@ async function createCoalitionProposal(
     currentCoalitionGroupIds: string[];
     sponsors: Array<GroupSponsor & { role: string }>;
     groups: Array<{ id: string; name: string; nodeId: string }>;
+    remoteParticipants?: RemoteParticipantRef[];
   },
 ): Promise<OpenCoalitionProposalResult> {
   const proposalId = randomUUID();
   const groupIds = input.sponsors.map((sponsor) => sponsor.groupId).sort();
+  const remoteParticipants = input.remoteParticipants ?? [];
   const participantSnapshot: ParticipantSnapshot = {
     capturedAt: new Date().toISOString(),
     groupIds,
     currentCoalitionGroupIds: [...input.currentCoalitionGroupIds].sort(),
+    ...(remoteParticipants.length > 0 ? { remoteParticipants } : {}),
   };
   await prisma.coalitionProposal.create({
     data: {
@@ -291,6 +458,16 @@ async function createCoalitionProposal(
       description: input.description,
       content: input.content.trim(),
       participantSnapshot,
+      // Pre-seeded pending slots: applyDecision is deliberately
+      // snapshot-scoped (federation-consent) — a decision for an unknown key
+      // is ignored, so every expected participant must start as pending.
+      ...(remoteParticipants.length > 0
+        ? {
+            decisions: Object.fromEntries(
+              remoteParticipants.map((remote) => [remoteDecisionKey(remote.domain, remote.remoteGroupId), "pending"]),
+            ),
+          }
+        : {}),
     },
   });
 
@@ -333,6 +510,41 @@ async function createCoalitionProposal(
       await failOpenProposal(prisma, proposalId, petitionIds);
     }
     return { ok: false, reason: "petition_error" };
+  }
+
+  if (remoteParticipants.length > 0) {
+    // The shared deadline: every local petition has closed by then; remote
+    // silence past it fails the formation (sweep + evaluate both check it).
+    const petitions = await prisma.petition.findMany({
+      where: { id: { in: petitionIds } },
+      select: { closesAt: true },
+    });
+    const remoteDeadline = new Date(
+      Math.max(...petitions.map((petition) => petition.closesAt.getTime())) + REMOTE_DECISION_GRACE_MS,
+    );
+    await prisma.coalitionProposal.update({
+      where: { id: proposalId },
+      data: { participantSnapshot: { ...participantSnapshot, remoteDeadline: remoteDeadline.toISOString() } },
+    });
+    const selfNode = await prisma.node.findUniqueOrThrow({
+      where: { id: input.groups[0].nodeId },
+      select: { id: true, domain: true },
+    });
+    const delivered = await sendCoalitionProposalOpened(prisma, selfNode, {
+      proposalId,
+      name: input.name,
+      content: input.content.trim(),
+      participantLabels: [
+        ...input.groups.map((group) => group.name),
+        ...remoteParticipants.map((remote) => `${remote.name} @ ${remote.domain}`),
+      ],
+      remoteParticipants,
+      closesAt: remoteDeadline,
+    });
+    if (!delivered) {
+      await failOpenProposal(prisma, proposalId, petitionIds);
+      return { ok: false, reason: "petition_error" };
+    }
   }
 
   return { ok: true, proposalId, petitionIds };
@@ -389,10 +601,36 @@ async function applyCoalitionProposal(
     await prisma.coalitionMembership.createMany({
       data: snapshot.groupIds.map((groupId) => ({ coalitionId: coalition.id, groupId })),
     });
+    // Remote members: presence-backed rows (the XOR's other arm). Presence
+    // name is the disclosure the remote group consented to by joining (A3).
+    const remoteParticipants = snapshot.remoteParticipants ?? [];
+    for (const remote of remoteParticipants) {
+      const peer = await prisma.federatedNode.findUniqueOrThrow({ where: { domain: remote.domain } });
+      const presence = await prisma.federatedGroupPresence.upsert({
+        where: { federatedNodeId_remoteGroupId: { federatedNodeId: peer.id, remoteGroupId: remote.remoteGroupId } },
+        update: { name: remote.name, status: "active", lastSyncedAt: new Date() },
+        create: { federatedNodeId: peer.id, remoteGroupId: remote.remoteGroupId, name: remote.name },
+      });
+      await prisma.coalitionMembership.create({
+        data: { coalitionId: coalition.id, federatedGroupPresenceId: presence.id },
+      });
+    }
     await prisma.coalitionProposal.update({
       where: { id: proposal.id },
       data: { coalitionId: coalition.id, status: "succeeded", resolvedAt: new Date() },
     });
+    if (remoteParticipants.length > 0) {
+      const selfNode = await prisma.node.findUniqueOrThrow({
+        where: { id: sponsorGroup.nodeId },
+        select: { id: true, domain: true },
+      });
+      await broadcastCoalitionResolved(prisma, selfNode, {
+        proposalId: proposal.id,
+        outcome: "succeeded",
+        remoteParticipants,
+        coalition: { id: coalition.id, name: coalition.name },
+      });
+    }
     return { outcome: "succeeded" as const, coalitionId: coalition.id };
   }
 
@@ -438,7 +676,12 @@ async function applyCoalitionProposal(
 
 async function failCoalitionProposal(
   prisma: Prisma.TransactionClient,
-  proposal: { id: string; petitions: Array<{ petitionId: string }> },
+  proposal: {
+    id: string;
+    petitions: Array<{ petitionId: string; groupId?: string }>;
+    participantSnapshot?: unknown;
+    homeNodeDomain?: string | null;
+  },
   status: "failed-rejected" | "failed-withdrawn" | "failed-timeout",
 ): Promise<EvaluateCoalitionProposalResult> {
   const updated = await prisma.coalitionProposal.updateMany({
@@ -450,6 +693,22 @@ async function failCoalitionProposal(
       where: { id: { in: proposal.petitions.map((child) => child.petitionId) }, status: "open" },
       data: { status: "superseded", resolvedAt: new Date() },
     });
+    // Cross-node HOME failure: tell every member node once (guarded by the
+    // updateMany count, so redelivered evaluations cannot double-emit).
+    const snapshot = (proposal.participantSnapshot ?? {}) as ParticipantSnapshot;
+    const remoteParticipants = snapshot.remoteParticipants ?? [];
+    if ((proposal.homeNodeDomain ?? null) === null && remoteParticipants.length > 0) {
+      const firstGroupId = proposal.petitions.find((child) => child.groupId)?.groupId;
+      const selfNode = await selfNodeForLocalGroup(prisma, firstGroupId);
+      if (selfNode) {
+        await broadcastCoalitionResolved(prisma, selfNode, {
+          proposalId: proposal.id,
+          outcome: status,
+          remoteParticipants,
+          coalition: null,
+        });
+      }
+    }
   }
   return { outcome: status };
 }
@@ -485,7 +744,8 @@ async function participantSnapshotStillMatches(
     where: { coalitionId, endedAt: null },
     select: { groupId: true },
   });
-  return sameIds(snapshot.currentCoalitionGroupIds, memberships.map((membership) => membership.groupId));
+  // Snapshots capture LOCAL member groups; compare against locals only.
+  return sameIds(snapshot.currentCoalitionGroupIds, localMemberGroupIds(memberships));
 }
 
 async function loadActiveCoalition(prisma: PrismaClient, coalitionId: string) {
@@ -541,6 +801,10 @@ function familyForAction(action: CoalitionProposalAction): ProposalFamily {
 
 function uniqueSponsors(sponsors: GroupSponsor[]): GroupSponsor[] {
   return [...new Map(sponsors.map((sponsor) => [sponsor.groupId, sponsor])).values()];
+}
+
+function localMemberGroupIds(memberships: Array<{ groupId: string | null }>): string[] {
+  return memberships.flatMap((membership) => (membership.groupId ? [membership.groupId] : [])).sort();
 }
 
 function sameIds(left: string[], right: string[]): boolean {

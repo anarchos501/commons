@@ -28,10 +28,14 @@ export async function proposeCoalitionFormationAction(_prev: FormState, formData
   const groupId = requiredString(formData, "groupId");
   const name = requiredString(formData, "name");
   const description = (formData.get("description") as string | null) ?? "";
+  const remotePeerDomain = ((formData.get("remotePeerDomain") as string | null) ?? "").trim();
+  const remoteGroupId = ((formData.get("remoteGroupId") as string | null) ?? "").trim();
+  const remoteGroupName = ((formData.get("remoteGroupName") as string | null) ?? "").trim();
   const content = requiredString(formData, "content");
   const partnerGroupIds = formData.getAll("partnerGroupId").filter((value): value is string => typeof value === "string" && value.length > 0);
-  if (partnerGroupIds.length === 0) {
-    return { kind: "error", message: "Select at least one partner collective to invite into the coalition." };
+  const hasRemotePartner = Boolean(remotePeerDomain && remoteGroupId && remoteGroupName);
+  if (partnerGroupIds.length === 0 && !hasRemotePartner) {
+    return { kind: "error", message: "Select at least one partner collective (local or on a federated node)." };
   }
 
   const membership = await requireMembership(session.accountId, groupId);
@@ -45,6 +49,12 @@ export async function proposeCoalitionFormationAction(_prev: FormState, formData
         { groupId, createdByMembershipId: membership.id },
         ...partnerGroupIds.map((partnerGroupId) => ({ groupId: partnerGroupId })),
       ],
+      // Cross-node partner (F3): entered by id until discovery listings ship
+      // with F3(3). This node becomes the coalition's home (plan §5).
+      remoteParticipants:
+        remotePeerDomain && remoteGroupId && remoteGroupName
+          ? [{ domain: remotePeerDomain, remoteGroupId, name: remoteGroupName }]
+          : [],
     });
     if (!result.ok) return { kind: "error", message: coalitionProposalFailureMessage(result.reason) };
   } finally {

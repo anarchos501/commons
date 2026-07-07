@@ -64,6 +64,30 @@ export function CoalitionsModule({ data, isActive, groupId }: { data: Coalitions
                   </label>
                 ))}
               </fieldset>
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-[var(--accent)] hover:underline">
+                  Invite a collective on a federated node
+                </summary>
+                <div className="mt-2 space-y-2 border border-[var(--border)] p-2">
+                  <p className="text-xs leading-5 text-[var(--muted)]">
+                    Your node becomes the coalition&apos;s home; the remote collective decides through its
+                    own petition on its own node. Enter the partner&apos;s node domain, collective id, and
+                    name (discovery listings arrive later).
+                  </p>
+                  <label className="block">
+                    <span className="field-label">Peer node domain</span>
+                    <input name="remotePeerDomain" type="text" className="field-input" placeholder="commons.example.org" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Remote collective id</span>
+                    <input name="remoteGroupId" type="text" className="field-input" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Remote collective name</span>
+                    <input name="remoteGroupName" type="text" className="field-input" />
+                  </label>
+                </div>
+              </details>
               <SubmitButton variant="secondary">Open formation proposal</SubmitButton>
             </FormWithNotice>
           ) : (

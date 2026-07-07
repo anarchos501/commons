@@ -456,6 +456,8 @@ model FederatedNode {
   inboundEvents         FederationInboundEvent[]
   federationMemberships FederationMembership[]
   visibilityGrants      FederatedVisibilityGrant[]
+  groupPresences        FederatedGroupPresence[]
+  coalitionPresences    FederatedCoalitionPresence[]
 
   @@index([status])
 }
@@ -585,6 +587,63 @@ model FederatedVisibilityGrant {
   @@index([federatedNodeId])
 }
 
+// Home-side record of a REMOTE member group in a cross-node coalition (A4:
+// hub topology — the home node holds the canonical membership; the remote
+// group's node holds a FederatedCoalitionPresence). Name is the disclosure
+// the remote group consented to by joining (A3: scoped to this shared
+// entity's membership, never to the peer node broadly).
+model FederatedGroupPresence {
+  id              String    @id @default(cuid())
+  federatedNodeId String
+  remoteGroupId   String
+  name            String
+  status          String    @default("active") // active | suspended | ended
+  lastSyncedAt    DateTime?
+  createdAt       DateTime  @default(now())
+
+  federatedNode        FederatedNode         @relation(fields: [federatedNodeId], references: [id], onDelete: Cascade)
+  coalitionMemberships CoalitionMembership[]
+
+  @@unique([federatedNodeId, remoteGroupId])
+}
+
+// Member-side record: OUR group belongs to a coalition homed elsewhere.
+// coalitionId is the home node's coalition id (shared, like federation ids).
+model FederatedCoalitionPresence {
+  id                  String   @id @default(cuid())
+  coalitionId         String
+  homeFederatedNodeId String
+  groupId             String
+  name                String
+  status              String   @default("active") // active | suspended | ended
+  createdAt           DateTime @default(now())
+
+  homeFederatedNode FederatedNode               @relation(fields: [homeFederatedNodeId], references: [id], onDelete: Cascade)
+  group             Group                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  messages          FederatedCoalitionMessage[]
+
+  @@unique([coalitionId, groupId])
+}
+
+// Member-side cache of coalition coordination content, relayed by the home
+// node (aggregated reads are local-cache reads — never a synchronous
+// cross-node fetch in RSC). Tagged with the AUTHOR's origin domain.
+model FederatedCoalitionMessage {
+  id              String   @id @default(cuid())
+  presenceId      String
+  remoteMessageId String
+  originDomain    String
+  authorLabel     String
+  body            String
+  postedAt        DateTime
+  receivedAt      DateTime @default(now())
+
+  presence FederatedCoalitionPresence @relation(fields: [presenceId], references: [id], onDelete: Cascade)
+
+  @@unique([presenceId, remoteMessageId])
+  @@index([presenceId, postedAt])
+}
+
 // Inbound event ledger: the unique(origin, remoteEventId) pair is the replay
 // guard — insert-first, catch P2002 as "duplicate" (register F-4). outcome is
 // null until the handler transaction completes.
@@ -682,6 +741,7 @@ model Group {
 
   node             Node                       @relation(fields: [nodeId], references: [id])
   federatedVisibilityGrants FederatedVisibilityGrant[]
+  federatedCoalitionPresences FederatedCoalitionPresence[]
   foundedProjects  Project[]
   hostedProjects   ProjectHosting[]
   hostingProposals ProjectHostingProposal[]
@@ -881,17 +941,19 @@ model Coalition {
 model CoalitionMembership {
   id          String    @id @default(cuid())
   coalitionId String
-  // Nullable since F3(2): a cross-node coalition's remote member is a
-  // FederatedGroupPresence, not a local Group. App-level invariant (enforced
-  // in coalitions.ts, tested): exactly one of groupId / the presence link is
-  // set. Every LOCAL read path filters or narrows on groupId != null.
-  groupId     String?
+  // A member is EITHER a local Group or a remote FederatedGroupPresence —
+  // exactly one, enforced structurally by the CoalitionMembership_member_xor
+  // CHECK constraint (never by convention). Every LOCAL read path narrows on
+  // groupId != null.
+  groupId                   String?
+  federatedGroupPresenceId  String?
   joinedAt    DateTime  @default(now())
   endedAt     DateTime?
   endReason   String?
 
-  coalition Coalition @relation(fields: [coalitionId], references: [id])
-  group     Group?    @relation(fields: [groupId], references: [id])
+  coalition               Coalition               @relation(fields: [coalitionId], references: [id])
+  group                   Group?                  @relation(fields: [groupId], references: [id])
+  federatedGroupPresence  FederatedGroupPresence? @relation(fields: [federatedGroupPresenceId], references: [id])
 
   @@index([coalitionId])
   @@index([groupId])
@@ -908,6 +970,13 @@ model CoalitionProposal {
   description         String?
   content             String
   participantSnapshot Json
+  // Cross-node (F3): null = this node is the coalition's home. Set on the
+  // MEMBER side to the home node's domain — resolution then mirrors the
+  // home's signed outcome instead of local evaluation.
+  homeNodeDomain      String?
+  // Home-side remote consent map, keyed `${domain}:${remoteGroupId}` →
+  // pending|approved|rejected (the federation-consent shape).
+  decisions           Json?
   status              String    @default("open") // open | succeeded | failed-rejected | failed-withdrawn | failed-timeout
   createdAt           DateTime  @default(now())
   resolvedAt          DateTime?

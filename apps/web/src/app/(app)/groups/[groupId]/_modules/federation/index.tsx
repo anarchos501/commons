@@ -16,6 +16,7 @@ export type FederationModulePeer = {
 export type FederationModuleData = {
   isPrivate: boolean;
   peers: FederationModulePeer[];
+  remoteCoalitions: Array<{ presenceId: string; name: string; homeDomain: string; status: string }>;
 };
 
 const STANCE_HELP: Record<string, string> = {
@@ -46,6 +47,22 @@ export function FederationModule({
         but nothing is exposed until you choose to. Every collective starts <strong>closed</strong> toward
         every peer.
       </p>
+
+      {data.remoteCoalitions.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Cross-node coalitions</p>
+          {data.remoteCoalitions.map((coalition) => (
+            <a
+              key={coalition.presenceId}
+              href={`/coalitions/remote/${coalition.presenceId}`}
+              className="block border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+            >
+              {coalition.name}
+              <span className="ml-2 text-xs font-normal text-[var(--muted)]">@ {coalition.homeDomain} · {coalition.status}</span>
+            </a>
+          ))}
+        </div>
+      )}
 
       {data.isPrivate ? (
         // register D-4/A3: private groups hold no stance — a deliberate-acts

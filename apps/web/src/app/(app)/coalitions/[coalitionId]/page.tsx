@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { broadcastCoalitionMessage } from "../../../../lib/federated-coalitions";
 import { redirect } from "next/navigation";
 import { AlphaNotice, Notice } from "../../../../components/shared/Notice";
 import { CollapsibleSection } from "../../../../components/shared/CollapsibleSection";
@@ -497,12 +498,32 @@ async function postDiscussionMessageAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
-    await postCoalitionDiscussionMessage(prisma, {
+    const message = await postCoalitionDiscussionMessage(prisma, {
       coalitionId,
       threadId,
       accountId: session.accountId,
       body,
     });
+    // Hub relay (A4): a locally-posted coalition message reaches remote
+    // member nodes via the home's broadcast. No-op for local-only coalitions.
+    const coalition = await prisma.coalition.findUnique({
+      where: { id: coalitionId },
+      select: { node: { select: { id: true, domain: true } } },
+    });
+    const author = await prisma.account.findUnique({
+      where: { id: session.accountId },
+      select: { displayName: true },
+    });
+    if (coalition) {
+      await broadcastCoalitionMessage(prisma, coalition.node, {
+        coalitionId,
+        messageId: message.id,
+        originDomain: coalition.node.domain,
+        authorLabel: author?.displayName ?? "member",
+        body: message.body,
+        postedAt: message.createdAt,
+      });
+    }
   } finally {
     await prisma.$disconnect();
   }

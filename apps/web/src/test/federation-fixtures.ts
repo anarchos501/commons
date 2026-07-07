@@ -18,33 +18,42 @@ import { evaluateAndApplyPetition } from "../lib/petition-evaluation";
 // carried by the in-memory transport (the plan's standard test pattern).
 
 const SECOND_DB_NAME = "commons_federation_test_b";
+const THIRD_DB_NAME = "commons_federation_test_c";
 
-export function secondDatabaseUrl(): string {
+function testDatabaseUrl(name: string): string {
   const baseUrl = process.env.DATABASE_URL;
   if (!baseUrl) throw new Error("DATABASE_URL required for federation tests");
   const url = new URL(baseUrl);
-  url.pathname = `/${SECOND_DB_NAME}`;
+  url.pathname = `/${name}`;
   return url.toString();
 }
 
-export async function ensureSecondDatabase(): Promise<string> {
+export async function ensureTestDatabase(name: string): Promise<string> {
   const baseUrl = process.env.DATABASE_URL!;
   const admin = new URL(baseUrl);
   admin.pathname = "/postgres";
   const client = new Client({ connectionString: admin.toString() });
   await client.connect();
   try {
-    const exists = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [SECOND_DB_NAME]);
-    if (exists.rowCount === 0) await client.query(`CREATE DATABASE "${SECOND_DB_NAME}"`);
+    const exists = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
+    if (exists.rowCount === 0) await client.query(`CREATE DATABASE "${name}"`);
   } finally {
     await client.end();
   }
-  const url = secondDatabaseUrl();
+  const url = testDatabaseUrl(name);
   execSync("node node_modules/prisma/build/index.js migrate deploy", {
     env: { ...process.env, DATABASE_URL: url },
     stdio: "ignore",
   });
   return url;
+}
+
+export async function ensureSecondDatabase(): Promise<string> {
+  return ensureTestDatabase(SECOND_DB_NAME);
+}
+
+export async function ensureThirdDatabase(): Promise<string> {
+  return ensureTestDatabase(THIRD_DB_NAME);
 }
 
 export type Side = {
@@ -53,6 +62,7 @@ export type Side = {
   domain: string;
   stewardMembershipId: string | null;
   stewardAccountId: string;
+  groupId: string | null;
 };
 
 export type FederatedPair = { a: Side; b: Side; transport: FederationTransport; pump: () => Promise<void> };
@@ -113,6 +123,67 @@ export async function createFederatedPair(
   return { a, b, transport, pump };
 }
 
+export type FederatedTriad = {
+  a: Side;
+  b: Side;
+  c: Side;
+  pump: () => Promise<void>;
+};
+
+// Hub topology (A4): A holds ACTIVE agreements with B and with C; B and C
+// hold NO pin of each other at all — any content that crosses B→C can only
+// have traveled via the hub.
+export async function createFederatedTriad(
+  prismaA: PrismaClient,
+  prismaB: PrismaClient,
+  prismaC: PrismaClient,
+  prefix: string,
+): Promise<FederatedTriad> {
+  await cleanupSide(prismaA, prefix);
+  await cleanupSide(prismaB, prefix);
+  await cleanupSide(prismaC, prefix);
+
+  const a = await createSide(prismaA, prefix, "a", true);
+  const b = await createSide(prismaB, prefix, "b", true);
+  const c = await createSide(prismaC, prefix, "c", true);
+
+  const keyA = await ensureNodeKeyPair(prismaA, a.node.id);
+  const keyB = await ensureNodeKeyPair(prismaB, b.node.id);
+  const keyC = await ensureNodeKeyPair(prismaC, c.node.id);
+  await prismaA.federatedNode.create({ data: { domain: b.domain, publicKey: keyB.publicKey, status: "active" } });
+  await prismaA.federatedNode.create({ data: { domain: c.domain, publicKey: keyC.publicKey, status: "active" } });
+  await prismaB.federatedNode.create({ data: { domain: a.domain, publicKey: keyA.publicKey, status: "active" } });
+  await prismaC.federatedNode.create({ data: { domain: a.domain, publicKey: keyA.publicKey, status: "active" } });
+
+  const sides: Record<string, Side> = { [a.domain]: a, [b.domain]: b, [c.domain]: c };
+  const transport = createInMemoryFederationTransport(async (domain, envelope) => {
+    const side = sides[domain];
+    if (!side) return { ok: false, retryable: false, error: "unknown_test_domain" };
+    const outcome = await receiveFederationEnvelope(
+      side.prisma,
+      JSON.parse(JSON.stringify(envelope)),
+      { localNode: side.node },
+    );
+    return outcome.outcome === "applied" || outcome.outcome === "duplicate"
+      ? { ok: true }
+      : { ok: false, retryable: false, error: outcome.reason };
+  });
+
+  const pump = async () => {
+    for (let round = 0; round < 8; round += 1) {
+      const future = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const results = [
+        await deliverPendingFederationEvents(prismaA, transport, { now: future }),
+        await deliverPendingFederationEvents(prismaB, transport, { now: future }),
+        await deliverPendingFederationEvents(prismaC, transport, { now: future }),
+      ];
+      if (results.every((result) => result.attempted === 0)) return;
+    }
+  };
+
+  return { a, b, c, pump };
+}
+
 async function createSide(prisma: PrismaClient, prefix: string, suffix: string, withSteward: boolean): Promise<Side> {
   const domain = `${prefix}-${suffix}.example`;
   const node = await prisma.node.create({
@@ -150,7 +221,14 @@ async function createSide(prisma: PrismaClient, prefix: string, suffix: string, 
     await prisma.node.update({ where: { id: node.id }, data: { stewardGroupId: group.id } });
   }
   const fresh = await prisma.node.findUniqueOrThrow({ where: { id: node.id } });
-  return { prisma, node: fresh, domain, stewardMembershipId, stewardAccountId: account.id };
+  return {
+    prisma,
+    node: fresh,
+    domain,
+    stewardMembershipId,
+    stewardAccountId: account.id,
+    groupId: withSteward ? `${prefix}_steward_${suffix}` : null,
+  };
 }
 
 export async function approveStewardPetition(side: Side, petitionId: string) {
@@ -183,6 +261,32 @@ export async function stewardPetitionFor(side: Side, proposalId: string): Promis
 }
 
 export async function cleanupSide(prisma: PrismaClient, prefix: string) {
+  await prisma.federatedCoalitionMessage.deleteMany({
+    where: { presence: { OR: [{ group: { nodeId: { startsWith: prefix } } }, { homeFederatedNode: { domain: { startsWith: prefix } } }] } },
+  });
+  await prisma.federatedCoalitionPresence.deleteMany({
+    where: { OR: [{ group: { nodeId: { startsWith: prefix } } }, { homeFederatedNode: { domain: { startsWith: prefix } } }] },
+  });
+  await prisma.coalitionMembership.deleteMany({
+    where: {
+      OR: [
+        { coalition: { nodeId: { startsWith: prefix } } },
+        { federatedGroupPresence: { federatedNode: { domain: { startsWith: prefix } } } },
+      ],
+    },
+  });
+  await prisma.discussionMessage.deleteMany({
+    where: { thread: { spaceType: "coalition", spaceId: { in: (await prisma.coalition.findMany({ where: { nodeId: { startsWith: prefix } }, select: { id: true } })).map((coalition) => coalition.id) } } },
+  });
+  await prisma.discussionThread.deleteMany({
+    where: { spaceType: "coalition", spaceId: { in: (await prisma.coalition.findMany({ where: { nodeId: { startsWith: prefix } }, select: { id: true } })).map((coalition) => coalition.id) } },
+  });
+  await prisma.coalitionProposalPetition.deleteMany({
+    where: { OR: [{ group: { nodeId: { startsWith: prefix } } }, { proposal: { proposedByGroup: { nodeId: { startsWith: prefix } } } }] },
+  });
+  await prisma.coalitionProposal.deleteMany({ where: { proposedByGroup: { nodeId: { startsWith: prefix } } } });
+  await prisma.coalition.deleteMany({ where: { nodeId: { startsWith: prefix } } });
+  await prisma.federatedGroupPresence.deleteMany({ where: { federatedNode: { domain: { startsWith: prefix } } } });
   await prisma.federationProposal.deleteMany({ where: { initiatedByDomain: { startsWith: prefix } } });
   await prisma.federation.deleteMany({
     where: { memberships: { some: { memberDomain: { startsWith: prefix } } } },

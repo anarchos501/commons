@@ -79,6 +79,78 @@ const MEDIATED_ACTION_HANDLERS: Record<string, MediatedActionHandler> = {
     });
     return { ok: true };
   },
+
+  // Hub ingest (A4): a member of a REMOTE member group posts into a coalition
+  // homed here. WHO was verified by handleMediatedAction (pinned node key +
+  // identity key + active presence); the home's own authorization is: the
+  // vouched group must be an active remote member of this coalition, vouched
+  // by ITS home node (origin). The member's node asserted the person's group
+  // membership by signing the envelope — Pattern 1's trust shape.
+  coalition_post_message: async (tx, { localNode, origin, shadowAccountId, action }) => {
+    const coalitionId = typeof action.coalitionId === "string" ? action.coalitionId : null;
+    const viaRemoteGroupId = typeof action.viaRemoteGroupId === "string" ? action.viaRemoteGroupId : null;
+    const body = typeof action.body === "string" ? action.body.trim() : "";
+    if (!coalitionId || !viaRemoteGroupId || !body) return { ok: false, reason: "malformed_action" };
+
+    const membership = await tx.coalitionMembership.findFirst({
+      where: {
+        coalitionId,
+        endedAt: null,
+        coalition: { status: "active", nodeId: localNode.id },
+        federatedGroupPresence: {
+          remoteGroupId: viaRemoteGroupId,
+          federatedNodeId: origin.id,
+          status: "active",
+        },
+      },
+      select: { id: true },
+    });
+    if (!membership) return { ok: false, reason: "group_not_coalition_member" };
+
+    // The relay thread: first open coalition thread, created on demand.
+    let thread = await tx.discussionThread.findFirst({
+      where: { spaceType: "coalition", spaceId: coalitionId, closedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (!thread) {
+      thread = await tx.discussionThread.create({
+        data: {
+          spaceType: "coalition",
+          spaceId: coalitionId,
+          title: "Cross-node coordination",
+          createdByAccountId: shadowAccountId,
+        },
+        select: { id: true },
+      });
+    }
+    const message = await tx.discussionMessage.create({
+      data: {
+        threadId: thread.id,
+        authorId: shadowAccountId,
+        body,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.discussionThread.update({
+      where: { id: thread.id },
+      data: { messageCount: { increment: 1 }, lastActivityAt: new Date() },
+    });
+
+    const author = await tx.account.findUnique({ where: { id: shadowAccountId }, select: { displayName: true } });
+    // Dynamic import: federated-coalitions imports mediateRemoteAction from
+    // this module; a static import back would be a cycle.
+    const { broadcastCoalitionMessage } = await import("./federated-coalitions");
+    await broadcastCoalitionMessage(tx, { id: localNode.id, domain: localNode.domain }, {
+      coalitionId,
+      messageId: message.id,
+      originDomain: origin.domain,
+      authorLabel: `${author?.displayName ?? "member"} @ ${origin.domain}`,
+      body,
+      postedAt: message.createdAt,
+    });
+    return { ok: true };
+  },
 };
 
 export const MEDIATED_ACTION_TYPES = Object.keys(MEDIATED_ACTION_HANDLERS);
