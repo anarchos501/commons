@@ -55,7 +55,7 @@ test("an unknown class is denied even when the type system is bypassed", () => {
 });
 
 test("protocol classes flow to proposed and active peers only", () => {
-  for (const dataClass of ["federation_ping", "federation_governance"] as FederationDataClass[]) {
+  for (const dataClass of ["federation_ping", "federation_governance", "continuity_protocol"] as FederationDataClass[]) {
     assert.equal(mayFederate(dataClass, { status: "proposed" }), true);
     assert.equal(mayFederate(dataClass, { status: "active" }), true);
     assert.equal(mayFederate(dataClass, { status: "suspended" }), false);
@@ -71,7 +71,7 @@ test("coordination classes require an active agreement", () => {
     "portable_identity",
     "linked_node_presence",
     "coalition_coordination",
-    "refuge_structural",
+    "continuity",
   ] as FederationDataClass[]) {
     assert.equal(mayFederate(dataClass, { status: "active" }), true, dataClass);
     assert.equal(mayFederate(dataClass, { status: "proposed" }), false, dataClass);

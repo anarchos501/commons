@@ -539,7 +539,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     // stances; the module renders the deliberate-acts explainer for private.
     const federationModule = present.has("federation")
       ? await (async () => {
-          const [peerRows, grantRows, coalitionPresences] = await Promise.all([
+          const [peerRows, grantRows, coalitionPresences, entityBackup] = await Promise.all([
             prisma.federatedNode.findMany({
               select: { id: true, displayName: true, domain: true, status: true },
               orderBy: { pinnedAt: "asc" },
@@ -554,10 +554,37 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
               select: { id: true, name: true, status: true, homeFederatedNode: { select: { domain: true } } },
               orderBy: { createdAt: "desc" },
             }),
+            prisma.entityBackup.findUnique({
+              where: { entityType_entityId: { entityType: "group", entityId: groupId } },
+              select: {
+                status: true,
+                windowHours: true,
+                directive: true,
+                lastReplicatedAt: true,
+                peer: { select: { id: true, displayName: true, domain: true } },
+              },
+            }),
           ]);
           const grantByPeer = new Map(grantRows.map((g) => [g.federatedNodeId, g]));
           return {
             isPrivate: group.visibility !== "public",
+            continuity: {
+              backup:
+                entityBackup && entityBackup.status !== "ended" && entityBackup.status !== "revoked" && entityBackup.status !== "refused"
+                  ? {
+                      peerLabel: entityBackup.peer.displayName ?? entityBackup.peer.domain,
+                      peerDomain: entityBackup.peer.domain,
+                      status: entityBackup.status,
+                      windowHours: entityBackup.windowHours,
+                      directive: entityBackup.directive,
+                      lastReplicatedAt: entityBackup.lastReplicatedAt?.toISOString() ?? null,
+                      peerNodeId: entityBackup.peer.id,
+                    }
+                  : null,
+              activePeers: peerRows
+                .filter((peer) => peer.status === "active")
+                .map((peer) => ({ peerNodeId: peer.id, label: peer.displayName ?? peer.domain })),
+            },
             remoteCoalitions: coalitionPresences.map((presence) => ({
               presenceId: presence.id,
               name: presence.name,
@@ -578,7 +605,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
             }),
           };
         })()
-      : { isPrivate: group.visibility !== "public", peers: [], remoteCoalitions: [] };
+      : { isPrivate: group.visibility !== "public", peers: [], remoteCoalitions: [], continuity: { backup: null, activePeers: [] } };
 
     const eligibleCoalitionPartners =
       present.has("coalitions") && currentMembership.participationStatus === "active"

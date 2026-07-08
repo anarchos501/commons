@@ -53,6 +53,13 @@ export type ProposalFamily =
   | "federated_visibility_change"
   // F3.5 Phase 0 (C0 core): who may join the node is constitutional (node-rename precedent)
   | "registration_mode_change"
+  // F3.5 continuity (register F-8/F-10): designation is the entity's own petition;
+  // consent/end are steward petitions on the backup node; threshold is node-wide.
+  | "backup_designation"
+  | "backup_hosting_consent"
+  | "backup_hosting_end"
+  | "backup_size_threshold_change"
+  | "backup_hosting_policy_change"
   // Collective-wide settings that must be petitioned rather than flipped by one member.
   | "custom_support_requests_toggle"
   | "membership_policy_change"
@@ -113,6 +120,11 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   group_visibility_proposal: "group_settings",
   federated_visibility_change: "group_settings",
   registration_mode_change: "node_stewardship",
+  backup_designation: "group_settings",
+  backup_hosting_consent: "group_settings",
+  backup_hosting_end: "group_settings",
+  backup_size_threshold_change: "node_stewardship",
+  backup_hosting_policy_change: "group_settings",
   custom_support_requests_toggle: "group_settings",
   // Changing the membership model is a membership-weight decision, so it inherits the
   // group's membership thresholds/duration (per feedback #2).
@@ -190,6 +202,12 @@ export function deriveCompetitionKey(
     // (group, peer) instead of a competition key (register F-7: that index IS
     // the single-open invariant).
     case "federated_visibility_change":
+    // Non-competing AND reversible, same rationale: single-open enforced by
+    // DB partial indexes (register F-7), never competition keys.
+    case "backup_designation":
+    case "backup_hosting_consent":
+    case "backup_hosting_end":
+    case "backup_hosting_policy_change":
     // Non-competing AND reversible like the two settings above; the partial
     // unique index Petition_federation_policy_change_open_unique enforces
     // one-open-at-a-time instead of a competition key.
@@ -206,6 +224,10 @@ export function deriveCompetitionKey(
     // One node-wide registration-mode vote at a time (same precedent).
     case "registration_mode_change":
       return `${groupId}:registration_mode_change`;
+    // One node-wide threshold vote at a time (same precedent; DB partial index
+    // is the real single-open invariant — register F-7).
+    case "backup_size_threshold_change":
+      return `${groupId}:backup_size_threshold_change`;
     case "node_steward_no_confidence":
       return `${groupId}:node_steward_no_confidence:${subjectId}`;
     // One node-wide termination vote per agreement, one disable vote per node

@@ -12,6 +12,13 @@ import {
   handleCoalitionProposalOpened,
   handleCoalitionResolved,
 } from "./federated-coalitions";
+import {
+  handleBackupEstablishAccept,
+  handleBackupEstablishRefuse,
+  handleBackupEstablishRequest,
+  handleBackupHostingEnded,
+  handleBackupRevoked,
+} from "./continuity-establishment";
 import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
@@ -182,6 +189,11 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   coalition_proposal_decision: handleCoalitionProposalDecision,
   coalition_resolved: handleCoalitionResolved,
   coalition_content_appended: handleCoalitionContentAppended,
+  backup_establish_request: handleBackupEstablishRequest,
+  backup_establish_accept: handleBackupEstablishAccept,
+  backup_establish_refuse: handleBackupEstablishRefuse,
+  backup_revoked: handleBackupRevoked,
+  backup_hosting_ended: handleBackupHostingEnded,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

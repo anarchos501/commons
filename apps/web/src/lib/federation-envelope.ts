@@ -20,7 +20,22 @@ export type FederationWireEventType =
   | "coalition_proposal_opened"
   | "coalition_proposal_decision"
   | "coalition_resolved"
-  | "coalition_content_appended";
+  | "coalition_content_appended"
+  | "backup_establish_request"
+  | "backup_establish_accept"
+  | "backup_establish_refuse"
+  | "backup_revoked"
+  | "backup_hosting_ended"
+  | "backup_snapshot"
+  | "backup_delta"
+  | "takeover_challenge"
+  | "challenge_relay_request"
+  | "proof_of_life"
+  | "proof_of_life_relay"
+  | "takeover_handoff"
+  | "takeover_activated"
+  | "takeover_ceded"
+  | "catch_up_applied";
 
 export type FederationEnvelope = {
   version: number;

@@ -358,6 +358,11 @@ model Node {
   constitutionalPreferences Json?
   federationPolicy          FederationPolicy @default(disabled)
   registrationMode          RegistrationMode @default(open)
+  // F3.5 (register F-10): backup-hosting consent knobs. Threshold: null = no
+  // cap; over-threshold requests auto-convert into the steward consent
+  // petition (escalate, never refuse). Policy applies when invite_only.
+  backupMemberThreshold     Int?
+  backupHostingPolicy       String           @default("approve_each") // accept | approve_each | refuse
   pluginPolicy              PluginPolicy     @default(disabled)
   createdAt                 DateTime         @default(now())
 
@@ -402,6 +407,13 @@ model IdentityKeyCustody {
   signingPrivateKeyPem    String
   encryptionPublicKey     String?
   encryptionPrivateKeyPem String?
+  // F3.5 key escrow (register D-8's demanded recovery design): the identity
+  // key WRAPPED (not derived) under scrypt(password, escrowSalt) + AES-GCM.
+  // This custody row stays PRIMARY — password change rewraps; the wrapped
+  // blob rides backup replicas' cannot-read tier for stranded login.
+  escrowSalt              String?
+  escrowWrappedKey        String?
+  escrowUpdatedAt         DateTime?
   createdAt               DateTime  @default(now())
   revokedAt               DateTime?
 
@@ -461,6 +473,11 @@ model FederatedNode {
   policySnapshot Json?
   pinnedAt       DateTime  @default(now())
   lastSeenAt     DateTime?
+  // F3.5 lease visibility (register F-9): last successful outbound delivery.
+  // Lease contact = max(lastSeenAt, lastOutboundOkAt) over active peers —
+  // DB-persisted so every instance agrees and it is honestly stale after
+  // downtime (quiet-boot depends on that).
+  lastOutboundOkAt DateTime?
   endedAt        DateTime?
 
   outboxItems           FederationOutboxItem[]
@@ -469,6 +486,8 @@ model FederatedNode {
   visibilityGrants      FederatedVisibilityGrant[]
   groupPresences        FederatedGroupPresence[]
   coalitionPresences    FederatedCoalitionPresence[]
+  entityBackups         EntityBackup[]               @relation("EntityBackupPeer")
+  backupReplicas        BackupReplica[]              @relation("BackupReplicaOrigin")
 
   @@index([status])
 }
@@ -576,6 +595,83 @@ model FederationOutboxItem {
 
   @@index([status, nextAttemptAt])
   @@index([peerId])
+}
+
+// F3.5 HOME side (register F-8): this node's entity has designated a backup
+// elsewhere. verifiedAt is the quiet-boot marker: NULL means "do not trust
+// your own database for this entity" (register F-9) — a per-request DB check,
+// deliberately never an in-memory flag.
+model EntityBackup {
+  id               String    @id @default(cuid())
+  entityType       String // group | project | coalition — generic from day one
+  entityId         String
+  peerId           String
+  windowHours      Int       @default(24) // W; floor 1 enforced in code
+  directive        String    @default("none") // reconstitute | none (advance directive, F-6)
+  status           String    @default("proposed") // proposed | active | refused | revoked | ended
+  establishedAt    DateTime?
+  manifestSeq      Int       @default(0)
+  lastManifest     Json?
+  lastReplicatedAt DateTime?
+  verifiedAt       DateTime?
+  takeoverState    String    @default("none") // none | remote_active | ceding
+  lastAppliedSeq   Int       @default(0)
+  createdAt        DateTime  @default(now())
+
+  peer FederatedNode @relation("EntityBackupPeer", fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@unique([entityType, entityId])
+  @@index([peerId])
+  @@index([status])
+}
+
+// F3.5 BACKUP side: an inert replica of a remote entity, walled off by
+// construction — its data lives ONLY here + TakeoverLogEntry; no Group /
+// Account / Membership rows are ever created for it, so local rosters,
+// denominators, and notifications cannot see it (register F-8, D-10).
+model BackupReplica {
+  id                 String    @id @default(cuid())
+  entityType         String
+  entityId           String // the HOME's id (shared-id convention)
+  originPeerId       String
+  entityName         String
+  memberCount        Int // home-asserted, locals only (register F-10)
+  windowHours        Int
+  directive          String    @default("none")
+  manifest           Json?
+  manifestSeq        Int       @default(0)
+  status             String    @default("pending_consent") // pending_consent | active | challenge_open | takeover_active | ceding | ended | refused
+  consentPetitionId  String?
+  challengeOpenedAt  DateTime?
+  lastProofOfLifeAt  DateTime?
+  expediteApprovedAt DateTime?
+  activatedAt        DateTime?
+  cededAt            DateTime?
+  createdAt          DateTime  @default(now())
+
+  origin     FederatedNode      @relation("BackupReplicaOrigin", fields: [originPeerId], references: [id], onDelete: Cascade)
+  logEntries TakeoverLogEntry[]
+
+  @@unique([entityType, entityId, originPeerId])
+  @@index([status])
+}
+
+// F3.5 Tier-2 coordination annex (register F-8, ratified log-only): a signed
+// append-only log of takeover writes; replayed on the home at cede.
+model TakeoverLogEntry {
+  id             String   @id @default(cuid())
+  replicaId      String
+  seq            Int
+  actionType     String // takeover_post_message | takeover_join_open_group
+  action         Json
+  actorLabel     String
+  actorAccountId String?
+  signature      String
+  createdAt      DateTime @default(now())
+
+  replica BackupReplica @relation(fields: [replicaId], references: [id], onDelete: Cascade)
+
+  @@unique([replicaId, seq])
 }
 
 // register D-4: per-(collective, peer-node) visibility grants — the §2b

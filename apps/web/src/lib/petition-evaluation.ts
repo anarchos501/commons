@@ -31,6 +31,13 @@ import { evaluateFederationProposalForPetition } from "./federations";
 import { applyFederatedVisibilityFromPetition } from "./federated-visibility";
 import { applyRegistrationModeFromPetition } from "./node-registration-mode";
 import {
+  applyBackupDesignationFromPetition,
+  applyBackupHostingEndFromPetition,
+  applyBackupHostingPolicyFromPetition,
+  applyBackupSizeThresholdFromPetition,
+  evaluateBackupHostingConsentForPetition,
+} from "./continuity-establishment";
+import {
   applyFederationDisableFromPetition,
   applyFederationPolicyFromPetition,
   applyFederationTerminationFromPetition,
@@ -89,6 +96,7 @@ async function applyResolvedPetition(
   if (await evaluateEventProposalForPetition(tx, petitionId)) return;
   if (await evaluateNodeStewardProposalForPetition(tx, petitionId)) return;
   if (await evaluateNodeNameProposalForPetition(tx, petitionId)) return;
+  if (await evaluateBackupHostingConsentForPetition(tx, petitionId)) return;
 
   if (!justResolved) return;
 
@@ -151,6 +159,14 @@ async function applyApprovedPetition(
     await applyFederatedVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "registration_mode_change") {
     await applyRegistrationModeFromPetition(tx, petitionId);
+  } else if (subjectType === "backup_designation") {
+    await applyBackupDesignationFromPetition(tx, petitionId);
+  } else if (subjectType === "backup_hosting_end") {
+    await applyBackupHostingEndFromPetition(tx, petitionId);
+  } else if (subjectType === "backup_size_threshold_change") {
+    await applyBackupSizeThresholdFromPetition(tx, petitionId);
+  } else if (subjectType === "backup_hosting_policy_change") {
+    await applyBackupHostingPolicyFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -464,6 +480,38 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
 
   if (subjectType === "federation_disable") {
     return "Disable federation for this node";
+  }
+
+  if (subjectType === "backup_designation") {
+    const parts = subjectId.split(":");
+    const peer = parts[2]
+      ? await prisma.federatedNode.findUnique({ where: { id: parts[2] }, select: { displayName: true, domain: true } })
+      : null;
+    const peerLabel = peer?.displayName ?? peer?.domain ?? "a federated node";
+    return parts[3] === "revoke"
+      ? `Revoke this collective's backup on ${peerLabel}`
+      : `Designate ${peerLabel} as this collective's backup`;
+  }
+
+  if (subjectType === "backup_hosting_consent" || subjectType === "backup_hosting_end") {
+    const replica = await prisma.backupReplica.findUnique({
+      where: { id: subjectId },
+      select: { entityName: true, origin: { select: { domain: true } } },
+    });
+    const label = replica ? `"${replica.entityName}" from ${replica.origin.domain}` : "a remote community";
+    return subjectType === "backup_hosting_consent"
+      ? `Host a backup for ${label}?`
+      : `Stop hosting the backup for ${label}`;
+  }
+
+  if (subjectType === "backup_size_threshold_change") {
+    const raw = subjectId.split(":")[1];
+    return raw === "none" ? "Remove the backup size threshold" : `Set the backup size threshold to ${raw} members`;
+  }
+
+  if (subjectType === "backup_hosting_policy_change") {
+    const target = subjectId.split(":")[1];
+    return target ? `Set backup hosting policy to "${target.replace("_", "-")}"` : proposalFamilyLabel(subjectType);
   }
 
   if (subjectType === "registration_mode_change") {
@@ -982,6 +1030,115 @@ const federationDisableDetail: PetitionDetailBuilder = async (prisma, { status }
   };
 };
 
+const backupDesignationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const [, , peerNodeId, action, windowRaw, directiveRaw] = subjectId.split(":");
+  const peer = peerNodeId
+    ? await prisma.federatedNode.findUnique({ where: { id: peerNodeId }, select: { displayName: true, domain: true } })
+    : null;
+  const peerLabel = peer?.displayName ?? peer?.domain ?? "a federated node";
+  if (action === "revoke") {
+    return {
+      summary: `Revoke this collective's backup on ${peerLabel}`,
+      proposer,
+      outcome: frameOutcome(status, `the backup relationship with ${peerLabel} ends (the replica is retired, not deleted)`),
+      fields: [{ label: "Backup node", value: peerLabel }],
+    };
+  }
+  const directive = directiveRaw === "reconstitute" ? "reconstitute" : "none";
+  return {
+    summary: `Designate ${peerLabel} as this collective's backup`,
+    proposer,
+    outcome: frameOutcome(status, `${peerLabel} begins holding an inert structural replica of this collective`),
+    fields: [
+      { label: "Backup node", value: peer ? `${peerLabel} (${peer.domain})` : peerNodeId ?? "—" },
+      { label: "Failover window (W)", value: `${windowRaw ?? "24"} hours — after this much verified total silence, the backup may cover for this collective; the home node parks itself read-only on the same clock, so two live writers are impossible by construction (register F-9)` },
+      {
+        label: "Advance directive",
+        value:
+          directive === "reconstitute"
+            ? "reconstitute — if this home is ever confirmed permanently gone, this collective pre-consents to its replica being activated as a NEW collective on the backup node (register F-6). This is the only moment this consent can legitimately be collected."
+            : "none — the replica is never activated as a collective; if this home is permanently gone, members re-form by hand.",
+      },
+      {
+        label: "What the backup can read",
+        value:
+          "Structure only (counts, labels, timing) until encrypted content replication ships — never petition content, never messages, never who-needed-help (register D-10).",
+      },
+    ],
+  };
+};
+
+const backupHostingConsentDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const replica = await prisma.backupReplica.findUnique({
+    where: { id: subjectId },
+    select: { entityName: true, memberCount: true, windowHours: true, origin: { select: { displayName: true, domain: true } } },
+  });
+  if (!replica) return null;
+  const originLabel = replica.origin.displayName ?? replica.origin.domain;
+  return {
+    summary: `Host a backup for "${replica.entityName}" from ${originLabel}?`,
+    proposer,
+    outcome: frameOutcome(status, `this node holds an inert, walled-off replica of "${replica.entityName}" and may cover for it read-only if its home goes down`),
+    fields: [
+      { label: "Community", value: `"${replica.entityName}" — ${replica.memberCount} members (as asserted by its home node)` },
+      { label: "Home node", value: `${originLabel} (${replica.origin.domain})` },
+      { label: "Failover window", value: `${replica.windowHours} hours` },
+      {
+        label: "What hosting costs",
+        value:
+          "Disk for a structural replica this node cannot read into local surfaces — replica members never join this node's rosters, vote counts, or notifications (register F-8).",
+      },
+    ],
+  };
+};
+
+const backupHostingEndDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const replica = await prisma.backupReplica.findUnique({
+    where: { id: subjectId },
+    select: { entityName: true, origin: { select: { domain: true } } },
+  });
+  if (!replica) return null;
+  return {
+    summary: `Stop hosting the backup for "${replica.entityName}" from ${replica.origin.domain}`,
+    proposer,
+    outcome: frameOutcome(status, `the replica is retired and its home node is notified (register F-2: stopping is always available on both sides)`),
+    fields: [{ label: "Community", value: `"${replica.entityName}" (${replica.origin.domain})` }],
+  };
+};
+
+const backupSizeThresholdDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
+  const raw = subjectId.split(":")[1];
+  const none = raw === "none";
+  return {
+    summary: none ? "Remove the backup size threshold" : `Set the backup size threshold to ${raw} members`,
+    proposer,
+    outcome: frameOutcome(status, none ? "backups of any size are accepted automatically" : `backups over ${raw} members escalate to a steward consent petition instead of auto-accepting`),
+    fields: [
+      {
+        label: "What the threshold does",
+        value:
+          "A size gate, not a resource budget: requests over it are never refused — they auto-convert into the steward consent petition, so large arrivals get human eyes while small ones stay routine (register F-10).",
+      },
+    ],
+  };
+};
+
+const backupHostingPolicyDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
+  const target = subjectId.split(":")[1] ?? "unknown";
+  const meaning =
+    target === "accept"
+      ? "backup requests are accepted automatically"
+      : target === "refuse"
+        ? "backup requests receive an honest signed refusal"
+        : "each backup request opens a steward consent petition (the default)";
+  return {
+    summary: `Set backup hosting policy to "${target.replace("_", "-")}"`,
+    proposer,
+    outcome: frameOutcome(status, `this node's answer to backup requests becomes "${target.replace("_", "-")}"`),
+    fields: [{ label: "Proposed policy", value: `${target.replace("_", "-")} — ${meaning} (applies while registration is invite-only; register F-10)` }],
+  };
+};
+
 const registrationModeDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
   const target = subjectId.split(":")[1] ?? "unknown";
   const meaning =
@@ -1178,6 +1335,11 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   federation_disable: federationDisableDetail,
   federated_visibility_change: federatedVisibilityDetail,
   registration_mode_change: registrationModeDetail,
+  backup_designation: backupDesignationDetail,
+  backup_hosting_consent: backupHostingConsentDetail,
+  backup_hosting_end: backupHostingEndDetail,
+  backup_size_threshold_change: backupSizeThresholdDetail,
+  backup_hosting_policy_change: backupHostingPolicyDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -1290,6 +1452,11 @@ export function proposalFamilyLabel(subjectType: string) {
     case "federation_policy_change": return "Federation policy change";
     case "federated_visibility_change": return "Federated visibility stance";
     case "registration_mode_change": return "Registration mode change";
+    case "backup_designation": return "Backup designation";
+    case "backup_hosting_consent": return "Backup hosting consent";
+    case "backup_hosting_end": return "Backup hosting end";
+    case "backup_size_threshold_change": return "Backup size threshold";
+    case "backup_hosting_policy_change": return "Backup hosting policy";
     case "federation_termination": return "End federation agreement";
     case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";

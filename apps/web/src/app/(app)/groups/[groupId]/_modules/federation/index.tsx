@@ -2,7 +2,7 @@ import { CollapsibleSection } from "../../../../../../components/shared/Collapsi
 import { SubmitButton } from "../../../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../../../components/shared/EmptyState";
 import { FormWithNotice } from "../../../../../../components/shared/FormWithNotice";
-import { proposeFederatedStanceAction } from "./actions";
+import { proposeBackupDesignationAction, proposeBackupRevocationAction, proposeFederatedStanceAction } from "./actions";
 
 export type FederationModulePeer = {
   peerNodeId: string;
@@ -17,6 +17,18 @@ export type FederationModuleData = {
   isPrivate: boolean;
   peers: FederationModulePeer[];
   remoteCoalitions: Array<{ presenceId: string; name: string; homeDomain: string; status: string }>;
+  continuity: {
+    backup: {
+      peerLabel: string;
+      peerDomain: string;
+      status: string;
+      windowHours: number;
+      directive: string;
+      lastReplicatedAt: string | null;
+      peerNodeId: string;
+    } | null;
+    activePeers: Array<{ peerNodeId: string; label: string }>;
+  };
 };
 
 const STANCE_HELP: Record<string, string> = {
@@ -63,6 +75,70 @@ export function FederationModule({
           ))}
         </div>
       )}
+
+      {/* register F-8: continuity is per-entity and legible — home, backup,
+          window, and the advance directive are always visible here. */}
+      <div className="mb-4 border border-[var(--border)] bg-[var(--subtle)] p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Continuity</p>
+        {data.continuity.backup ? (
+          <div className="mt-1 text-xs leading-5 text-[var(--soft-text)]">
+            <p>
+              Backup: <span className="font-medium text-[var(--text)]">{data.continuity.backup.peerLabel}</span>{" "}
+              ({data.continuity.backup.peerDomain}) · <span className="capitalize">{data.continuity.backup.status}</span>
+              {" · "}window {data.continuity.backup.windowHours}h · directive{" "}
+              <span className="font-medium">{data.continuity.backup.directive}</span>
+              {data.continuity.backup.lastReplicatedAt ? ` · replicated ${data.continuity.backup.lastReplicatedAt.slice(0, 16).replace("T", " ")}` : " · not yet replicated"}
+            </p>
+            {isActive && (
+              <FormWithNotice action={proposeBackupRevocationAction} className="mt-2">
+                <input type="hidden" name="groupId" value={groupId} />
+                <input type="hidden" name="peerNodeId" value={data.continuity.backup.peerNodeId} />
+                <SubmitButton variant="secondary">Petition to revoke this backup</SubmitButton>
+              </FormWithNotice>
+            )}
+          </div>
+        ) : data.continuity.activePeers.length === 0 ? (
+          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+            No backup designated. A backup requires an active federation agreement first.
+          </p>
+        ) : (
+          <div className="mt-1 text-xs leading-5 text-[var(--muted)]">
+            <p>
+              No backup designated. If this node ever goes down, this collective is unavailable until it
+              returns — designating a backup keeps it readable (and partly actable) elsewhere.
+            </p>
+            {isActive && (
+              <FormWithNotice action={proposeBackupDesignationAction} className="mt-2 flex flex-wrap items-end gap-2">
+                <input type="hidden" name="groupId" value={groupId} />
+                <label className="block">
+                  <span className="field-label">Backup node</span>
+                  <select name="peerNodeId" className="field-input" required>
+                    {data.continuity.activePeers.map((peer) => (
+                      <option key={peer.peerNodeId} value={peer.peerNodeId}>{peer.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="field-label">Failover window (hours)</span>
+                  <input name="windowHours" type="number" min={1} defaultValue={24} className="field-input" />
+                </label>
+                <label className="block">
+                  <span className="field-label">If our home is ever gone for good</span>
+                  <select name="directive" className="field-input" defaultValue="none">
+                    <option value="none">never activate our replica (re-form by hand)</option>
+                    <option value="reconstitute">pre-consent to reconstituting there as a new collective</option>
+                  </select>
+                </label>
+                <SubmitButton variant="secondary">Open backup petition</SubmitButton>
+              </FormWithNotice>
+            )}
+            <p className="mt-1 text-[11px] text-[var(--muted)]">
+              The directive is this collective&apos;s only legitimate moment to consent to disaster re-homing —
+              after a home dies, its governance machinery dies with it.
+            </p>
+          </div>
+        )}
+      </div>
 
       {data.isPrivate ? (
         // register D-4/A3: private groups hold no stance — a deliberate-acts

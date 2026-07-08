@@ -15,7 +15,8 @@ export type FederationDataClass =
   | "federation_ping"
   | "cross_node_action"
   | "coalition_coordination"
-  | "refuge_structural"
+  | "continuity"
+  | "continuity_protocol"
   | "refuge_content_blob";
 
 // never           — structurally excluded; no agreement state or flag can pass it.
@@ -56,7 +57,9 @@ export const FEDERATION_CLASS_RULES: Record<FederationDataClass, FederationClass
   // carries it.
   cross_node_action: "active_agreement",
   coalition_coordination: "active_agreement",
-  refuge_structural: "active_agreement",
+  // F3.5 continuity (register F-8/D-10): establishment, snapshots/deltas,
+  // takeover lifecycle, catch-up — structural or ciphertext, never content.
+  continuity: "active_agreement",
 
   // Refuge content replicates only as ciphertext members hold the keys to (F4).
   refuge_content_blob: "ciphertext_only",
@@ -64,6 +67,11 @@ export const FEDERATION_CLASS_RULES: Record<FederationDataClass, FederationClass
   // The handshake layer.
   federation_governance: "protocol",
   federation_ping: "protocol",
+  // F3.5 (register D-3 amendment — the tier's SECOND named exception):
+  // liveness must be provable across relationship turbulence, so takeover
+  // challenges, challenge relays, and proofs of life ride the protocol tier.
+  // They carry ZERO member data: entity refs, domains, timestamps, signatures.
+  continuity_protocol: "protocol",
 };
 
 export const FEDERATION_DATA_CLASSES = Object.keys(FEDERATION_CLASS_RULES) as FederationDataClass[];

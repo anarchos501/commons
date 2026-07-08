@@ -48,3 +48,66 @@ export async function proposeFederatedStanceAction(_prev: FormState, formData: F
   revalidatePath(`/groups/${groupId}`);
   return { kind: "success", message: "Stance petition opened." };
 }
+
+
+function backupFailureMessage(reason: string): string {
+  switch (reason) {
+    case "not_found": return "This collective could not be found.";
+    case "invalid_window": return "The failover window must be at least 1 hour.";
+    case "invalid_directive": return "Choose a valid directive.";
+    case "no_active_agreement": return "A backup requires an active federation agreement with that node.";
+    case "backup_already_exists": return "This collective already has a backup designated.";
+    case "no_backup_to_revoke": return "There is no backup to revoke on that node.";
+    case "petition_already_open": return "A backup petition toward that node is already open.";
+    case "creator_not_eligible": return "An active member must open this petition.";
+    default: return "This backup petition could not be opened.";
+  }
+}
+
+export async function proposeBackupDesignationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const peerNodeId = requiredString(formData, "peerNodeId");
+  const windowHours = Number.parseInt(requiredString(formData, "windowHours"), 10);
+  const directive = requiredString(formData, "directive");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const { proposeBackupDesignation } = await import("../../../../../../lib/continuity-establishment");
+    const result = await proposeBackupDesignation(prisma, {
+      groupId,
+      peerNodeId,
+      windowHours,
+      directive,
+      createdByMembershipId: membership.id,
+    });
+    if (!result.ok) return { kind: "error", message: backupFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Backup petition opened." };
+}
+
+export async function proposeBackupRevocationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const groupId = requiredString(formData, "groupId");
+  const peerNodeId = requiredString(formData, "peerNodeId");
+  const membership = await requireMembership(session.accountId, groupId);
+  const prisma = createPrismaClient();
+  try {
+    const { proposeBackupRevocation } = await import("../../../../../../lib/continuity-establishment");
+    const result = await proposeBackupRevocation(prisma, {
+      groupId,
+      peerNodeId,
+      createdByMembershipId: membership.id,
+    });
+    if (!result.ok) return { kind: "error", message: backupFailureMessage(result.reason) };
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/groups/${groupId}`);
+  return { kind: "success", message: "Revocation petition opened." };
+}

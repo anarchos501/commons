@@ -261,6 +261,36 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
               </div>
             )}
 
+            {(data.hostedReplicas.length > 0 || data.participationStatus === "active") && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Backups hosted here</p>
+                <p className="text-xs text-[var(--muted)]">
+                  Replicas of communities homed elsewhere. This node stores them but cannot read them into
+                  its own life — replica members never appear in local rosters, votes, or notifications.
+                  Consent policy: <span className="font-medium">{data.registrationMode === "open"
+                    ? `open node — auto-accept${data.backupMemberThreshold ? ` up to ${data.backupMemberThreshold} members, steward consent above` : ", no size threshold"}`
+                    : `invite-only node — ${data.backupHostingPolicy.replace("_", "-")}`}</span>.
+                </p>
+                {data.hostedReplicas.map((replica) => (
+                  <p key={replica.id} className="border border-[var(--border)] px-3 py-2 text-xs text-[var(--soft-text)]">
+                    <span className="font-medium text-[var(--text)]">{replica.name}</span>
+                    {" "}from {replica.originLabel} ({replica.originDomain}) · {replica.memberCount} members ·{" "}
+                    <span className="capitalize">{replica.status.replaceAll("_", " ")}</span> · window {replica.windowHours}h
+                  </p>
+                ))}
+                {data.participationStatus === "active" && (
+                  <form action={backupThresholdAction} className="mt-2 flex flex-wrap items-end gap-2 border border-[var(--border)] p-2">
+                    <input type="hidden" name="nodeId" value={data.node.id} />
+                    <label className="block">
+                      <span className="field-label">Backup size threshold (members; empty = none)</span>
+                      <input name="value" type="number" min={1} className="field-input" defaultValue={data.backupMemberThreshold ?? ""} />
+                    </label>
+                    <SubmitButton variant="secondary">Open node-wide threshold vote</SubmitButton>
+                  </form>
+                )}
+              </div>
+            )}
+
             {data.federation.myPresences.length > 0 && (
               <div className="mt-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Your presences</p>
@@ -461,9 +491,9 @@ async function getNodePageData(accountId: string) {
     if (!participationStatus && !isHost) redirect("/dashboard");
     const nodeWithSteward = await prisma.node.findUniqueOrThrow({
       where: { id: node.id },
-      select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true, registrationMode: true },
+      select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true, registrationMode: true, backupMemberThreshold: true, backupHostingPolicy: true },
     });
-    const [peers, federations, federationProposals, hostedPresences, myPresences] = await Promise.all([
+    const [peers, federations, federationProposals, hostedPresences, myPresences, hostedReplicas] = await Promise.all([
       prisma.federatedNode.findMany({
         select: { id: true, domain: true, displayName: true, status: true, lastSeenAt: true, publicKey: true },
         orderBy: { pinnedAt: "asc" },
@@ -506,6 +536,20 @@ async function getNodePageData(accountId: string) {
         select: { id: true, status: true, node: { select: { domain: true, name: true } } },
         orderBy: { createdAt: "desc" },
         take: 20,
+      }),
+      prisma.backupReplica.findMany({
+        where: { status: { notIn: ["ended", "refused"] } },
+        select: {
+          id: true,
+          entityName: true,
+          entityType: true,
+          memberCount: true,
+          status: true,
+          windowHours: true,
+          origin: { select: { domain: true, displayName: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
       }),
     ]);
     const [steward, memberships, proposals, nodePetitions] = await Promise.all([
@@ -571,6 +615,18 @@ async function getNodePageData(accountId: string) {
       })),
       currentSignal: currentSignal?.signal ?? 0,
       registrationMode: nodeWithSteward.registrationMode,
+      backupMemberThreshold: nodeWithSteward.backupMemberThreshold,
+      backupHostingPolicy: nodeWithSteward.backupHostingPolicy,
+      hostedReplicas: hostedReplicas.map((replica) => ({
+        id: replica.id,
+        name: replica.entityName,
+        entityType: replica.entityType,
+        memberCount: replica.memberCount,
+        status: replica.status,
+        windowHours: replica.windowHours,
+        originLabel: replica.origin.displayName ?? replica.origin.domain,
+        originDomain: replica.origin.domain,
+      })),
       federation: {
         policy: nodeWithSteward.federationPolicy,
         peers: peers.map((peer) => ({
@@ -744,6 +800,23 @@ async function federationPolicyAction(formData: FormData) {
       const membershipId = await activeMembershipForGroup(session.accountId, node.stewardGroupId);
       await proposeFederationPolicyChange(prisma, { nodeId, target, createdByMembershipId: membershipId });
     }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function backupThresholdAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const raw = ((formData.get("value") as string | null) ?? "").trim();
+  const value = raw === "" ? null : Number.parseInt(raw, 10);
+  const prisma = createPrismaClient();
+  try {
+    const { proposeBackupSizeThreshold } = await import("../../../lib/continuity-establishment");
+    await proposeBackupSizeThreshold(prisma, { nodeId, value, requestedByAccountId: session.accountId });
   } finally {
     await prisma.$disconnect();
   }

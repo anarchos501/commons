@@ -98,10 +98,14 @@ export async function createFederatedPair(
   const transport = createInMemoryFederationTransport(async (domain, envelope) => {
     const side = sides[domain];
     if (!side) return { ok: false, retryable: false, error: "unknown_test_domain" };
+    // Re-read the node per delivery — production resolves the current node
+    // per request, so mid-test changes (registration mode, thresholds,
+    // steward) must be visible to handlers.
+    const freshNode = await side.prisma.node.findUniqueOrThrow({ where: { id: side.node.id } });
     const outcome = await receiveFederationEnvelope(
       side.prisma,
       JSON.parse(JSON.stringify(envelope)),
-      { localNode: side.node },
+      { localNode: freshNode },
     );
     return outcome.outcome === "applied" || outcome.outcome === "duplicate"
       ? { ok: true }
@@ -159,10 +163,11 @@ export async function createFederatedTriad(
   const transport = createInMemoryFederationTransport(async (domain, envelope) => {
     const side = sides[domain];
     if (!side) return { ok: false, retryable: false, error: "unknown_test_domain" };
+    const freshNode = await side.prisma.node.findUniqueOrThrow({ where: { id: side.node.id } });
     const outcome = await receiveFederationEnvelope(
       side.prisma,
       JSON.parse(JSON.stringify(envelope)),
-      { localNode: side.node },
+      { localNode: freshNode },
     );
     return outcome.outcome === "applied" || outcome.outcome === "duplicate"
       ? { ok: true }
@@ -261,6 +266,12 @@ export async function stewardPetitionFor(side: Side, proposalId: string): Promis
 }
 
 export async function cleanupSide(prisma: PrismaClient, prefix: string) {
+  await prisma.entityBackup.deleteMany({
+    where: { OR: [{ peer: { domain: { startsWith: prefix } } }, { entityId: { startsWith: prefix } }] },
+  });
+  await prisma.backupReplica.deleteMany({
+    where: { OR: [{ origin: { domain: { startsWith: prefix } } }, { entityId: { startsWith: prefix } }] },
+  });
   await prisma.federatedCoalitionMessage.deleteMany({
     where: { presence: { OR: [{ group: { nodeId: { startsWith: prefix } } }, { homeFederatedNode: { domain: { startsWith: prefix } } }] } },
   });
