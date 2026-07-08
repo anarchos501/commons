@@ -51,6 +51,8 @@ export type ProposalFamily =
   | "group_visibility_proposal"
   // RFC-009: per-(collective, peer-node) federated visibility grants (register D-4)
   | "federated_visibility_change"
+  // F3.5 Phase 0 (C0 core): who may join the node is constitutional (node-rename precedent)
+  | "registration_mode_change"
   // Collective-wide settings that must be petitioned rather than flipped by one member.
   | "custom_support_requests_toggle"
   | "membership_policy_change"
@@ -110,6 +112,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   trusted_provider_revocation: "trusted_provider",
   group_visibility_proposal: "group_settings",
   federated_visibility_change: "group_settings",
+  registration_mode_change: "node_stewardship",
   custom_support_requests_toggle: "group_settings",
   // Changing the membership model is a membership-weight decision, so it inherits the
   // group's membership thresholds/duration (per feedback #2).
@@ -200,6 +203,9 @@ export function deriveCompetitionKey(
     // One node-wide rename vote at a time (groupId carries the nodeId for node-scoped petitions).
     case "node_name_change":
       return `${groupId}:node_name_change`;
+    // One node-wide registration-mode vote at a time (same precedent).
+    case "registration_mode_change":
+      return `${groupId}:registration_mode_change`;
     case "node_steward_no_confidence":
       return `${groupId}:node_steward_no_confidence:${subjectId}`;
     // One node-wide termination vote per agreement, one disable vote per node

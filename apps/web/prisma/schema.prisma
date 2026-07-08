@@ -48,6 +48,16 @@ enum PluginPolicy {
   disabled
 }
 
+// F3.5 Phase 0 (C0 core pulled forward): who may join this node. ALL rows —
+// including new nodes — default `open` until C0 ships actual gating and flips
+// the creation default in the same commit: the mode feeds registration
+// legibility AND backup consent (register F-10), so it must never label a
+// door that doesn't exist.
+enum RegistrationMode {
+  open
+  invite_only
+}
+
 enum ProjectStatus {
   active    // at least one active project member
   quiet     // no active members; at least one quiet member remains
@@ -347,6 +357,7 @@ model Node {
   stewardRevision           Int              @default(0)
   constitutionalPreferences Json?
   federationPolicy          FederationPolicy @default(disabled)
+  registrationMode          RegistrationMode @default(open)
   pluginPolicy              PluginPolicy     @default(disabled)
   createdAt                 DateTime         @default(now())
 

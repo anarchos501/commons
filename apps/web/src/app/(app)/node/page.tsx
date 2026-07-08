@@ -36,6 +36,7 @@ import {
   proposeFederationTermination,
 } from "../../../lib/federation-policy";
 import { requireActiveNodeUser } from "../../../lib/node-governance";
+import { proposeRegistrationModeChange } from "../../../lib/node-registration-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +148,24 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                     Ask this collective whether to initiate a node-wide vote to remove the current steward collective.
                   </p>
                   <SubmitButton variant="secondary">Open steward no-confidence initiation</SubmitButton>
+                </form>
+              )}
+              {data.participationStatus === "active" && (
+                <form action={registrationModeAction} className="space-y-3 border border-[var(--border)] p-3">
+                  <input type="hidden" name="nodeId" value={data.node.id} />
+                  <p className="text-sm text-[var(--soft-text)]">
+                    Registration mode: <span className="font-medium capitalize">{data.registrationMode.replace("_", "-")}</span>.
+                    Who may join the node is constitutional — changing it is a node-wide vote.
+                    {data.registrationMode === "invite_only" ? " (Invite gating itself ships with the email workstream; until then this label is aspirational.)" : ""}
+                  </p>
+                  <label className="block">
+                    <span className="field-label">Propose mode</span>
+                    <select name="target" className="field-input" defaultValue={data.registrationMode === "open" ? "invite_only" : "open"}>
+                      <option value="open">open</option>
+                      <option value="invite_only">invite-only</option>
+                    </select>
+                  </label>
+                  <SubmitButton variant="secondary">Open registration-mode vote</SubmitButton>
                 </form>
               )}
               {data.canResignSteward && (
@@ -442,7 +461,7 @@ async function getNodePageData(accountId: string) {
     if (!participationStatus && !isHost) redirect("/dashboard");
     const nodeWithSteward = await prisma.node.findUniqueOrThrow({
       where: { id: node.id },
-      select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true },
+      select: { id: true, name: true, stewardGroupId: true, domain: true, federationPolicy: true, registrationMode: true },
     });
     const [peers, federations, federationProposals, hostedPresences, myPresences] = await Promise.all([
       prisma.federatedNode.findMany({
@@ -551,6 +570,7 @@ async function getNodePageData(accountId: string) {
         supportedByCurrentAccount: petition.nodeSupport.length > 0,
       })),
       currentSignal: currentSignal?.signal ?? 0,
+      registrationMode: nodeWithSteward.registrationMode,
       federation: {
         policy: nodeWithSteward.federationPolicy,
         peers: peers.map((peer) => ({
@@ -724,6 +744,21 @@ async function federationPolicyAction(formData: FormData) {
       const membershipId = await activeMembershipForGroup(session.accountId, node.stewardGroupId);
       await proposeFederationPolicyChange(prisma, { nodeId, target, createdByMembershipId: membershipId });
     }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath("/node");
+}
+
+async function registrationModeAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const nodeId = requiredString(formData, "nodeId");
+  const target = requiredString(formData, "target");
+  const prisma = createPrismaClient();
+  try {
+    await proposeRegistrationModeChange(prisma, { nodeId, target, requestedByAccountId: session.accountId });
   } finally {
     await prisma.$disconnect();
   }

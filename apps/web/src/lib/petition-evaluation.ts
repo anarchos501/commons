@@ -29,6 +29,7 @@ import {
 import { evaluateCoalitionProposalForPetition } from "./coalitions";
 import { evaluateFederationProposalForPetition } from "./federations";
 import { applyFederatedVisibilityFromPetition } from "./federated-visibility";
+import { applyRegistrationModeFromPetition } from "./node-registration-mode";
 import {
   applyFederationDisableFromPetition,
   applyFederationPolicyFromPetition,
@@ -148,6 +149,8 @@ async function applyApprovedPetition(
     await applyFederationDisableFromPetition(tx, petitionId);
   } else if (subjectType === "federated_visibility_change") {
     await applyFederatedVisibilityFromPetition(tx, petitionId);
+  } else if (subjectType === "registration_mode_change") {
+    await applyRegistrationModeFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -461,6 +464,11 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
 
   if (subjectType === "federation_disable") {
     return "Disable federation for this node";
+  }
+
+  if (subjectType === "registration_mode_change") {
+    const target = subjectId.split(":")[1];
+    return target ? `Set registration mode to "${target.replace("_", "-")}"` : proposalFamilyLabel(subjectType);
   }
 
   // Never surface a raw identity code: fall back to the human-readable family label.
@@ -974,6 +982,27 @@ const federationDisableDetail: PetitionDetailBuilder = async (prisma, { status }
   };
 };
 
+const registrationModeDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
+  const target = subjectId.split(":")[1] ?? "unknown";
+  const meaning =
+    target === "open"
+      ? "anyone may register on this node (protected by the registration rate limiter once C0 ships)"
+      : "registration requires a valid node invite (the gate itself ships with Workstream C0; until then this label is aspirational and the node behaves as open)";
+  return {
+    summary: `Set registration mode to "${target.replace("_", "-")}"`,
+    proposer,
+    outcome: frameOutcome(status, `this node's registration mode becomes "${target.replace("_", "-")}"`),
+    fields: [
+      { label: "Proposed mode", value: `${target.replace("_", "-")} — ${meaning}` },
+      {
+        label: "Why this vote is node-wide",
+        value:
+          "Who may join the node is constitutional, like the node's name — never a delegated operational act. The mode also governs how this node consents to hosting other communities' backups (register F-10).",
+      },
+    ],
+  };
+};
+
 // Steward petitions carry real authority since federation landed (register
 // F-5): the detail panel must say what the vote confers, not just name it —
 // this is Workstream A finding A7, the mandated appointment legibility.
@@ -1148,6 +1177,7 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   federation_termination: federationTerminationDetail,
   federation_disable: federationDisableDetail,
   federated_visibility_change: federatedVisibilityDetail,
+  registration_mode_change: registrationModeDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -1259,6 +1289,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "federation_removal": return "Federation member removal";
     case "federation_policy_change": return "Federation policy change";
     case "federated_visibility_change": return "Federated visibility stance";
+    case "registration_mode_change": return "Registration mode change";
     case "federation_termination": return "End federation agreement";
     case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";
