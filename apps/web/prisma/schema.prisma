@@ -639,6 +639,10 @@ model BackupReplica {
   windowHours        Int
   directive          String    @default("none")
   manifest           Json?
+  // Cannot-read tier (register D-10): password-wrapped identity keys for
+  // stranded login. Ciphertext by construction — this node holds blobs it
+  // cannot open.
+  escrowEntries      Json?
   manifestSeq        Int       @default(0)
   status             String    @default("pending_consent") // pending_consent | active | challenge_open | takeover_active | ceding | ended | refused
   consentPetitionId  String?

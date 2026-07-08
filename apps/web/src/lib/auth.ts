@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "../generated/prisma/client";
+import { ensureEscrowWrap } from "./identity-escrow";
 import type { SessionData } from "./session";
 
 // First-run bootstrap: when nobody has registered yet, the very first
@@ -49,6 +50,16 @@ async function createAccountForRegistration(
       },
     });
 
+    // F3.5 key escrow (register D-8): registration is one of the three
+    // moments the password plaintext exists — create the portable identity
+    // eagerly and wrap its key under the password. Best-effort: the account
+    // already exists, and a missed wrap self-heals at next login.
+    try {
+      await ensureEscrowWrap(prisma, { accountId: account.id, password: input.password });
+    } catch (escrowError) {
+      console.error("[continuity] escrow wrap at registration failed", escrowError);
+    }
+
     return {
       accountId: account.id,
       displayName: account.displayName,
@@ -90,6 +101,15 @@ export async function loginAccount(
 
   if (!valid) {
     throw new Error("Invalid email or password.");
+  }
+
+  // F3.5 key escrow backfill: an identity created lazily mid-session had no
+  // password present to wrap under — login is the moment it becomes possible.
+  // Best-effort: escrow must never block login.
+  try {
+    await ensureEscrowWrap(prisma, { accountId: account.id, password: input.password });
+  } catch (error) {
+    console.error("[continuity] escrow wrap at login failed", error);
   }
 
   // Temporary default:

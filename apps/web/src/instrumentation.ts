@@ -6,6 +6,7 @@ export async function register() {
   const { deliverPendingFederationEvents, httpsFederationTransport } = await import("./lib/federation-outbox");
   const { resolveExpiredFederationProposals } = await import("./lib/federations");
   const { resolveExpiredCrossNodeCoalitionProposals } = await import("./lib/federated-coalitions");
+  const { runContinuityReplicationSweep } = await import("./lib/continuity-replication");
 
   const prisma = createPrismaClient();
   const SWEEP_INTERVAL_MS = 60_000;
@@ -32,6 +33,7 @@ export async function register() {
       // finish them.
       await resolveExpiredFederationProposals(prisma);
       await resolveExpiredCrossNodeCoalitionProposals(prisma);
+      await runContinuityReplicationSweep(prisma);
     } catch (err) {
       console.error("[federation] outbox sweep failed", err);
     } finally {

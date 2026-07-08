@@ -19,6 +19,7 @@ import {
   handleBackupHostingEnded,
   handleBackupRevoked,
 } from "./continuity-establishment";
+import { handleBackupDelta } from "./continuity-replication";
 import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
@@ -194,6 +195,7 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   backup_establish_refuse: handleBackupEstablishRefuse,
   backup_revoked: handleBackupRevoked,
   backup_hosting_ended: handleBackupHostingEnded,
+  backup_delta: handleBackupDelta,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

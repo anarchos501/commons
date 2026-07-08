@@ -135,7 +135,7 @@ Independent of federation, gating beta alongside F4 (it is the delivery channel 
 | F2 | `PortableIdentity` activation (`did:key`, custody), `LinkedNodePresence`, Pattern-1 mediated actions | Implemented |
 | F3 | Visibility grants (implemented), cross-node coalitions (implemented, hub topology), node tags + home aggregation (specified) | Partially implemented |
 | F3.5-0 | `registrationMode` column + node-wide mode petitions (C0 core; all nodes `open` until C0 ships the gate) | Implemented |
-| F3.5 | Continuity: establishment + advance directive, structural delta replication, Tier-1 read-only, Tier-2 lease + coordination annex, quiet-boot + catch-up, key escrow | Specified |
+| F3.5 | Continuity: establishment + advance directive, structural delta replication, Tier-1 read-only, Tier-2 lease + coordination annex, quiet-boot + catch-up, key escrow | Partially implemented — establishment + consent matrix, key escrow (wrapped at registration/login; blobs ride the cannot-read tier), and structural delta replication (whole-manifest deltas keyed by seq; wall-off pinned by test) are built; the failover tiers (Phases 3–4) are specified |
 | F4 | Rung 1: content-blind host — vulnerability class → collective content → names + attribution audit; refuge ciphertext replication | Specified (beta gate) |
 | C | Registration modes, optional verified email, opt-in existence-only notifications | Specified (beta gate) |
 | F5 | Rate limits, suspension, countersigned key rotation, compromise runbook | Specified |
