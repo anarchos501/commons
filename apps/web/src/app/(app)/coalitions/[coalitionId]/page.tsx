@@ -1,3 +1,4 @@
+import { NodeTag } from "../../../../components/shared/NodeTag";
 import { revalidatePath } from "next/cache";
 import { broadcastCoalitionMessage } from "../../../../lib/federated-coalitions";
 import { redirect } from "next/navigation";
@@ -332,18 +333,26 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
             className="bg-[var(--surface)] p-5 sm:p-6"
           >
             <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
-              {data.coalition.memberships.flatMap((membership) =>
-                membership.group
-                  ? [
-                      <a
-                        key={membership.id}
-                        href={`/groups/${membership.group.id}`}
-                        className="block px-3 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
-                      >
-                        {membership.group.name}
-                      </a>,
-                    ]
-                  : [],
+              {data.coalition.memberships.map((membership) =>
+                membership.group ? (
+                  <a
+                    key={membership.id}
+                    href={`/groups/${membership.group.id}`}
+                    className="block px-3 py-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+                  >
+                    {membership.group.name}
+                  </a>
+                ) : membership.federatedGroupPresence ? (
+                  // Remote member collectives are full members — rendered
+                  // with the node tag, never silently dropped (F3(3)).
+                  <p key={membership.id} className="px-3 py-3 text-sm font-medium text-[var(--text)]">
+                    {membership.federatedGroupPresence.name}
+                    <NodeTag
+                      domain={membership.federatedGroupPresence.federatedNode.domain}
+                      status={membership.federatedGroupPresence.status}
+                    />
+                  </p>
+                ) : null,
               )}
             </div>
             <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
@@ -499,7 +508,12 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       include: {
         memberships: {
           where: { endedAt: null },
-          include: { group: { select: { id: true, name: true } } },
+          include: {
+            group: { select: { id: true, name: true } },
+            federatedGroupPresence: {
+              select: { name: true, status: true, federatedNode: { select: { domain: true } } },
+            },
+          },
           orderBy: { joinedAt: "asc" },
         },
         proposals: {

@@ -1,3 +1,4 @@
+import { NodeTag } from "../../../../../components/shared/NodeTag";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { AlphaNotice } from "../../../../../components/shared/Notice";
@@ -51,8 +52,8 @@ export default async function RemoteCoalitionPage({ params }: { params: Promise<
             <h1 className="mt-1 text-2xl font-bold text-[var(--text)]">{presence.name}</h1>
             {/* The node tag: quiet, always-visible, honest (plan §5). */}
             <p className="mt-1 text-xs text-[var(--muted)]">
-              Home: <span className="font-medium text-[var(--soft-text)]">@ {presence.homeFederatedNode.domain}</span>
-              {" · "}your collective: {presence.group.name} · <span className="capitalize">{presence.status}</span>
+              Home:<NodeTag domain={presence.homeFederatedNode.domain} status={presence.status} />
+              {" · "}your collective: {presence.group.name}
             </p>
             <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
               This coalition lives on {homeLabel}. What you read here is your node&apos;s cached copy of the

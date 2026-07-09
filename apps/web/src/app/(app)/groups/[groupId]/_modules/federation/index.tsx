@@ -1,3 +1,4 @@
+import { NodeTag } from "../../../../../../components/shared/NodeTag";
 import { CollapsibleSection } from "../../../../../../components/shared/CollapsibleSection";
 import { SubmitButton } from "../../../../../../components/shared/SubmitButton";
 import { EmptyState } from "../../../../../../components/shared/EmptyState";
@@ -70,7 +71,7 @@ export function FederationModule({
               className="block border border-[var(--border)] bg-[var(--subtle)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
             >
               {coalition.name}
-              <span className="ml-2 text-xs font-normal text-[var(--muted)]">@ {coalition.homeDomain} · {coalition.status}</span>
+              <NodeTag domain={coalition.homeDomain} status={coalition.status} />
             </a>
           ))}
         </div>
