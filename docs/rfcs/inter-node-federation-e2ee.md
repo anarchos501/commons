@@ -128,7 +128,7 @@ Independent of federation, gating beta alongside F4 (it is the delivery channel 
 
 ## Phasing (the implementation program)
 
-*Status verified against commit `8b12aeb` (update this stamp with every phase commit — the stamp means someone compared this table to the code, not to memory).*
+*Status verified against commit `c5a2da3` (update this stamp with every phase commit — the stamp means someone compared this table to the code, not to memory).*
 
 | Phase | Contents | Status |
 |---|---|---|
