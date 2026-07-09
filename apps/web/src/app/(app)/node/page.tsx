@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { AlphaNotice, Notice } from "../../../components/shared/Notice";
@@ -273,7 +274,7 @@ export default async function NodePage({ searchParams }: { searchParams: SearchP
                 </p>
                 {data.hostedReplicas.map((replica) => (
                   <p key={replica.id} className="border border-[var(--border)] px-3 py-2 text-xs text-[var(--soft-text)]">
-                    <span className="font-medium text-[var(--text)]">{replica.name}</span>
+                    <Link href={`/replicas/${replica.id}`} className="font-medium text-[var(--text)] underline">{replica.name}</Link>
                     {" "}from {replica.originLabel} ({replica.originDomain}) · {replica.memberCount} members ·{" "}
                     <span className="capitalize">{replica.status.replaceAll("_", " ")}</span> · window {replica.windowHours}h
                   </p>

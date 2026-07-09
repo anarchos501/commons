@@ -62,6 +62,7 @@ import { loadSpaceCalendarData } from "../../../../lib/calendar-data";
 import { submitEvent, setInterest, cancelEvent, getViewerSpaces } from "../../../../lib/events";
 import { getUiDisclosurePreference, resolveEffectiveVisibility } from "../../../../lib/ui-disclosure";
 import { resolveGroupView } from "../../../../lib/group-view";
+import { resolveWriteAuthority } from "../../../../lib/continuity";
 import { isModuleId, MODULE_IDS } from "../../../../lib/group-modules";
 import { parseEventSubmission, submitEventFailureMessage } from "../../../../lib/event-form";
 import type { EventInterestLevel } from "../../../../generated/prisma/enums";
@@ -106,7 +107,9 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
   }
 
   const { group, currentMembership } = data;
-  const isActive = currentMembership?.participationStatus === "active";
+  // Read-only during continuity failover: the existing isActive mechanism is
+  // the enforcement surface every module already respects.
+  const isActive = currentMembership?.participationStatus === "active" && data.continuityAuthority === "writable";
 
   const calendar = await loadSpaceCalendarData(session.accountId, "group", groupId);
 
@@ -162,6 +165,16 @@ export default async function GroupSpacePage({ params, searchParams }: PageProps
       <GroupContextSync syncAction={syncGroupContext} />
       <DisclosureBookmarkFallback present={[...present]} validIds={[...MODULE_IDS]} />
       <AlphaNotice />
+      {data.continuityAuthority !== "writable" && (
+        <div className="mt-4 border border-[var(--border)] bg-[var(--subtle)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Continuity failover</p>
+          <p className="mt-1 text-sm text-[var(--soft-text)]">
+            {data.continuityAuthority === "unverified"
+              ? "This node just restarted and is verifying with this collective's backup node that nothing happened while it was down. The space is read-only for a moment — no action needed."
+              : "This collective's node has been out of federation contact longer than its failover window, so the space is read-only until contact returns. Petitions are paused, not lost — they resolve when write authority is back."}
+          </p>
+        </div>
+      )}
       {notice && <div className="mt-4"><Notice message={notice} /></div>}
 
       {data.catchUpBanner && (
@@ -310,9 +323,18 @@ function activityFilterCutoff(filter: string): Date | null {
 async function getGroupSpaceData(accountId: string, groupId: string, selectedThreadId: string | null, section: string | null, activityFilter = "month", petitionFilter: PetitionFilterValue = "all") {
   const prisma = createPrismaClient();
   try {
+    // Continuity write-authority (register F-9): computed BEFORE the visit
+    // effects — when the lease has lapsed the effects must not fire at all
+    // (presence reactivation is a write, and the resolver sweep inside them
+    // is the one writer with no human present).
+    const continuityAuthority = await resolveWriteAuthority(prisma, { entityType: "group", entityId: groupId });
+
     // Presence + reactivation + maintenance sweeps — one named, ordered unit (see lib/group-visit.ts).
     // MUST stay first: a quiet/dormant member's visit reactivates them before anything is read.
-    const presence = await runGroupVisitEffects(prisma, accountId, groupId);
+    const presence =
+      continuityAuthority === "writable"
+        ? await runGroupVisitEffects(prisma, accountId, groupId)
+        : { reactivated: false, previousLastSeenAt: null };
 
     const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
 
@@ -881,6 +903,7 @@ async function getGroupSpaceData(accountId: string, groupId: string, selectedThr
     return {
       group,
       currentMembership,
+      continuityAuthority,
       projects,
       coalitions,
       eligibleCoalitionPartners,

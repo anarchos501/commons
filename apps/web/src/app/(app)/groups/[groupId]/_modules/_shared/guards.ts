@@ -1,3 +1,4 @@
+import { resolveWriteAuthority } from "../../../../../../lib/continuity";
 import { createPrismaClient } from "../../../../../../lib/prisma";
 
 // Shared membership guards for group module server actions. Self-contained (own prisma client),
@@ -10,9 +11,16 @@ export async function requireMembership(accountId: string, groupId: string) {
     where: { accountId_groupId: { accountId, groupId } },
     select: { id: true, status: true, participationStatus: true },
   });
+  // Continuity write-authority gate (register F-9): every group-module
+  // server action passes through this guard, so a group whose lease has
+  // lapsed (or that is unverified after a restart) is read-only here too.
+  const authority = membership ? await resolveWriteAuthority(prisma, { entityType: "group", entityId: groupId }) : "writable";
   await prisma.$disconnect();
   if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
     throw new Error("Active group membership required.");
+  }
+  if (authority !== "writable") {
+    throw new Error("This collective is in continuity failover and is temporarily read-only.");
   }
   return membership;
 }

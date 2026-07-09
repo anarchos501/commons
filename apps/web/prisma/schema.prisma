@@ -211,6 +211,7 @@ enum SignedEventType {
   governance_preference_changed
   migration_prepared
   mediated_action_requested
+  continuity_authority_changed // F3.5 legibility log — never authoritative (register F-9)
 }
 
 enum DataClass {

@@ -9,6 +9,7 @@ import {
   deliverPendingFederationEvents,
   type FederationTransport,
 } from "../lib/federation-outbox";
+import type { FederationEnvelope } from "../lib/federation-envelope";
 import { ensureNodeKeyPair } from "../lib/node-keys";
 import { addPetitionSupport } from "../lib/petitions";
 import { evaluateAndApplyPetition } from "../lib/petition-evaluation";
@@ -65,7 +66,34 @@ export type Side = {
   groupId: string | null;
 };
 
-export type FederatedPair = { a: Side; b: Side; transport: FederationTransport; pump: () => Promise<void> };
+export type TransportCuts = {
+  // Total isolation: nothing to or from this domain gets through.
+  cut: (domain: string) => void;
+  restore: (domain: string) => void;
+  // Directed-pair cut: only the X↔Y link fails (for relay-path tests).
+  cutLink: (x: string, y: string) => void;
+  restoreLink: (x: string, y: string) => void;
+};
+
+function createTransportCuts() {
+  const cutDomains = new Set<string>();
+  const cutLinks = new Set<string>();
+  const linkKey = (x: string, y: string) => [x, y].sort().join("|");
+  const cuts: TransportCuts = {
+    cut: (domain) => void cutDomains.add(domain),
+    restore: (domain) => void cutDomains.delete(domain),
+    cutLink: (x, y) => void cutLinks.add(linkKey(x, y)),
+    restoreLink: (x, y) => void cutLinks.delete(linkKey(x, y)),
+  };
+  // Cuts model the NETWORK, so they key on the sending node (whose outbox is
+  // delivering), never the envelope's logical origin — a relayed envelope
+  // keeps its origin while traveling a different road.
+  const isCut = (targetDomain: string, senderDomain: string) =>
+    cutDomains.has(targetDomain) || cutDomains.has(senderDomain) || cutLinks.has(linkKey(targetDomain, senderDomain));
+  return { cuts, isCut };
+}
+
+export type FederatedPair = { a: Side; b: Side; transport: FederationTransport; pump: () => Promise<void> } & TransportCuts;
 
 // Each side gets a node, an account, and (optionally) a public steward group
 // with that account as its sole member; then each side pins the other's real
@@ -95,9 +123,10 @@ export async function createFederatedPair(
   });
 
   const sides: Record<string, Side> = { [a.domain]: a, [b.domain]: b };
-  const transport = createInMemoryFederationTransport(async (domain, envelope) => {
+  const { cuts, isCut } = createTransportCuts();
+  const receiveAt = async (domain: string, envelope: FederationEnvelope) => {
     const side = sides[domain];
-    if (!side) return { ok: false, retryable: false, error: "unknown_test_domain" };
+    if (!side) return { ok: false as const, retryable: false, error: "unknown_test_domain" };
     // Re-read the node per delivery — production resolves the current node
     // per request, so mid-test changes (registration mode, thresholds,
     // steward) must be visible to handlers.
@@ -108,23 +137,29 @@ export async function createFederatedPair(
       { localNode: freshNode },
     );
     return outcome.outcome === "applied" || outcome.outcome === "duplicate"
-      ? { ok: true }
-      : { ok: false, retryable: false, error: outcome.reason };
-  });
+      ? { ok: true as const }
+      : { ok: false as const, retryable: false, error: outcome.reason };
+  };
+  const transportFrom = (senderDomain: string) =>
+    createInMemoryFederationTransport(async (domain, envelope) => {
+      if (isCut(domain, senderDomain)) return { ok: false, retryable: true, error: "transport_cut" };
+      return receiveAt(domain, envelope);
+    });
+  const transport = createInMemoryFederationTransport(receiveAt);
 
   // Drains both outboxes until quiescent (far-future clock bypasses backoff).
   const pump = async () => {
     for (let round = 0; round < 6; round += 1) {
       const future = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
       const [fromA, fromB] = [
-        await deliverPendingFederationEvents(prismaA, transport, { now: future }),
-        await deliverPendingFederationEvents(prismaB, transport, { now: future }),
+        await deliverPendingFederationEvents(prismaA, transportFrom(a.domain), { now: future }),
+        await deliverPendingFederationEvents(prismaB, transportFrom(b.domain), { now: future }),
       ];
       if (fromA.attempted === 0 && fromB.attempted === 0) return;
     }
   };
 
-  return { a, b, transport, pump };
+  return { a, b, transport, pump, ...cuts };
 }
 
 export type FederatedTriad = {
@@ -132,7 +167,7 @@ export type FederatedTriad = {
   b: Side;
   c: Side;
   pump: () => Promise<void>;
-};
+} & TransportCuts;
 
 // Hub topology (A4): A holds ACTIVE agreements with B and with C; B and C
 // hold NO pin of each other at all — any content that crosses B→C can only
@@ -142,6 +177,7 @@ export async function createFederatedTriad(
   prismaB: PrismaClient,
   prismaC: PrismaClient,
   prefix: string,
+  options: { mesh?: boolean } = {},
 ): Promise<FederatedTriad> {
   await cleanupSide(prismaA, prefix);
   await cleanupSide(prismaB, prefix);
@@ -158,11 +194,17 @@ export async function createFederatedTriad(
   await prismaA.federatedNode.create({ data: { domain: c.domain, publicKey: keyC.publicKey, status: "active" } });
   await prismaB.federatedNode.create({ data: { domain: a.domain, publicKey: keyA.publicKey, status: "active" } });
   await prismaC.federatedNode.create({ data: { domain: a.domain, publicKey: keyA.publicKey, status: "active" } });
+  if (options.mesh) {
+    // Full mesh (the continuity-lease topology): B and C also pin each other.
+    await prismaB.federatedNode.create({ data: { domain: c.domain, publicKey: keyC.publicKey, status: "active" } });
+    await prismaC.federatedNode.create({ data: { domain: b.domain, publicKey: keyB.publicKey, status: "active" } });
+  }
 
   const sides: Record<string, Side> = { [a.domain]: a, [b.domain]: b, [c.domain]: c };
-  const transport = createInMemoryFederationTransport(async (domain, envelope) => {
+  const { cuts, isCut } = createTransportCuts();
+  const receiveAt = async (domain: string, envelope: FederationEnvelope) => {
     const side = sides[domain];
-    if (!side) return { ok: false, retryable: false, error: "unknown_test_domain" };
+    if (!side) return { ok: false as const, retryable: false, error: "unknown_test_domain" };
     const freshNode = await side.prisma.node.findUniqueOrThrow({ where: { id: side.node.id } });
     const outcome = await receiveFederationEnvelope(
       side.prisma,
@@ -170,23 +212,28 @@ export async function createFederatedTriad(
       { localNode: freshNode },
     );
     return outcome.outcome === "applied" || outcome.outcome === "duplicate"
-      ? { ok: true }
-      : { ok: false, retryable: false, error: outcome.reason };
-  });
+      ? { ok: true as const }
+      : { ok: false as const, retryable: false, error: outcome.reason };
+  };
+  const transportFrom = (senderDomain: string) =>
+    createInMemoryFederationTransport(async (domain, envelope) => {
+      if (isCut(domain, senderDomain)) return { ok: false, retryable: true, error: "transport_cut" };
+      return receiveAt(domain, envelope);
+    });
 
   const pump = async () => {
     for (let round = 0; round < 8; round += 1) {
       const future = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
       const results = [
-        await deliverPendingFederationEvents(prismaA, transport, { now: future }),
-        await deliverPendingFederationEvents(prismaB, transport, { now: future }),
-        await deliverPendingFederationEvents(prismaC, transport, { now: future }),
+        await deliverPendingFederationEvents(prismaA, transportFrom(a.domain), { now: future }),
+        await deliverPendingFederationEvents(prismaB, transportFrom(b.domain), { now: future }),
+        await deliverPendingFederationEvents(prismaC, transportFrom(c.domain), { now: future }),
       ];
       if (results.every((result) => result.attempted === 0)) return;
     }
   };
 
-  return { a, b, c, pump };
+  return { a, b, c, pump, ...cuts };
 }
 
 async function createSide(prisma: PrismaClient, prefix: string, suffix: string, withSteward: boolean): Promise<Side> {

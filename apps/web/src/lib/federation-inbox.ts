@@ -20,6 +20,12 @@ import {
   handleBackupRevoked,
 } from "./continuity-establishment";
 import { handleBackupDelta } from "./continuity-replication";
+import {
+  handleChallengeRelayRequest,
+  handleProofOfLife,
+  handleProofOfLifeRelay,
+  handleTakeoverChallenge,
+} from "./continuity-lease";
 import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
@@ -196,6 +202,10 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   backup_revoked: handleBackupRevoked,
   backup_hosting_ended: handleBackupHostingEnded,
   backup_delta: handleBackupDelta,
+  takeover_challenge: handleTakeoverChallenge,
+  challenge_relay_request: handleChallengeRelayRequest,
+  proof_of_life: handleProofOfLife,
+  proof_of_life_relay: handleProofOfLifeRelay,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

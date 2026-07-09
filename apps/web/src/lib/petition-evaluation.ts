@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { evaluatePetition, evaluateEmergencyPetition, type EvaluateResult } from "./petitions";
+import { resolveWriteAuthority } from "./continuity";
 import {
   onRevisionPetitionApproved,
   onLivingDocumentArchivalPetitionApproved,
@@ -53,9 +54,20 @@ export async function evaluateAndApplyPetition(prisma: PrismaClient, petitionId:
   return prisma.$transaction(async (tx) => {
     const petition = await tx.petition.findUnique({
       where: { id: petitionId },
-      select: { category: true, subjectType: true },
+      select: { category: true, subjectType: true, scopeType: true, scopeId: true },
     });
     if (!petition) return { outcome: "pending" };
+
+    // Continuity write-authority gate (register F-9): the resolver is the one
+    // writer with no human present. This single check covers every resolver
+    // trigger (instrumentation sweep, group visit, project page, dashboard,
+    // node page, petition actions). Not writable ⇒ the petition stays open,
+    // untouched — it resolves when the lease returns.
+    const authority = await resolveWriteAuthority(tx, {
+      entityType: petition.scopeType,
+      entityId: petition.scopeId,
+    });
+    if (authority !== "writable") return { outcome: "pending" };
 
     const result =
       petition.category === "emergency" && petition.subjectType === "emergency_declaration"

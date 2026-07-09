@@ -131,6 +131,13 @@ export async function deliverPendingFederationEvents(
         where: { id: item.id },
         data: { status: "delivered", deliveredAt: new Date(), attempts: item.attempts + 1, lastError: null },
       });
+      // Lease visibility (register F-9): a successful outbound delivery is
+      // federation contact — max(lastSeenAt, lastOutboundOkAt) feeds the
+      // write-authority clock in resolveWriteAuthority.
+      await prisma.federatedNode.update({
+        where: { id: item.peerId },
+        data: { lastOutboundOkAt: now },
+      });
       result.delivered += 1;
       continue;
     }
