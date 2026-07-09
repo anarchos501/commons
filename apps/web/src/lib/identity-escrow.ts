@@ -73,6 +73,58 @@ export async function ensureEscrowWrap(
   });
 }
 
+// Entity dispatch (Phase 5): groups and projects carry their members' wraps;
+// coalition replicas carry NONE — a coalition has no accounts, and its
+// people are covered by their own groups' backups (stated in register D-10).
+export async function buildEntityEscrowEntries(
+  client: Prisma.TransactionClient | PrismaClient,
+  entityType: string,
+  entityId: string,
+): Promise<Array<{ handle: string; did: string; salt: string; wrapped: string }>> {
+  if (entityType === "group") return buildEscrowEntries(client, entityId);
+  if (entityType === "project") {
+    const memberships = await client.projectMembership.findMany({
+      where: { projectId: entityId, status: "active" },
+      select: {
+        account: {
+          select: {
+            displayName: true,
+            portableIdentity: {
+              select: { did: true, keyCustody: { select: { escrowSalt: true, escrowWrappedKey: true } } },
+            },
+          },
+        },
+      },
+    });
+    return collectEscrowEntries(memberships);
+  }
+  return [];
+}
+
+type EscrowMembership = {
+  account: {
+    displayName: string;
+    portableIdentity: { did: string; keyCustody: { escrowSalt: string | null; escrowWrappedKey: string | null } | null } | null;
+  };
+};
+
+function collectEscrowEntries(memberships: EscrowMembership[]): Array<{ handle: string; did: string; salt: string; wrapped: string }> {
+  const entries: Array<{ handle: string; did: string; salt: string; wrapped: string }> = [];
+  for (const membership of memberships) {
+    const identity = membership.account.portableIdentity;
+    const custody = identity?.keyCustody;
+    if (identity && custody?.escrowSalt && custody.escrowWrappedKey) {
+      entries.push({
+        handle: membership.account.displayName,
+        did: identity.did,
+        salt: custody.escrowSalt,
+        wrapped: custody.escrowWrappedKey,
+      });
+    }
+  }
+  return entries;
+}
+
 // The replica-bound escrow entries for a group's local members: ciphertext by
 // construction (the backup never has the password), so they may ride before
 // F4 — but they belong to the cannot-read tier, never the structural manifest.

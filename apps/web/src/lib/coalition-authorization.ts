@@ -1,4 +1,19 @@
 import type { PrismaClient } from "../generated/prisma/client";
+import { resolveWriteAuthority } from "./continuity";
+
+// Continuity write-authority gate for coalition writes (register F-9,
+// F3.5 Phase 5): a coalition's writes do NOT flow through the petition
+// resolver, so every coalition write path calls this — the page actions,
+// the mediated-action handler, and the broadcast apply path.
+export async function requireCoalitionWritable(
+  prisma: PrismaClient,
+  coalitionId: string,
+): Promise<void> {
+  const authority = await resolveWriteAuthority(prisma, { entityType: "coalition", entityId: coalitionId });
+  if (authority !== "writable") {
+    throw new Error("This coalition is in continuity failover and is temporarily read-only.");
+  }
+}
 
 export async function requireCoalitionParticipant(
   prisma: PrismaClient,

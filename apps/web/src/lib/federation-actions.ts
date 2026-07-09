@@ -5,6 +5,7 @@ import { ensurePeerNodeRow, getPeerByDomain } from "./federation-peers";
 import { resolveFederatedStance } from "./federated-visibility";
 import { enqueueSignedNodeEvent } from "./federations";
 import { joinOpenGroup } from "./group-membership";
+import { resolveWriteAuthority } from "./continuity";
 import { verifyWithPublicKeyPem } from "./node-keys";
 import { ensurePortableIdentity, identitySigningProvider } from "./portable-identity";
 import { hashSignedEventPayload, type SignedEventPayload } from "./signed-events";
@@ -91,6 +92,11 @@ const MEDIATED_ACTION_HANDLERS: Record<string, MediatedActionHandler> = {
     const viaRemoteGroupId = typeof action.viaRemoteGroupId === "string" ? action.viaRemoteGroupId : null;
     const body = typeof action.body === "string" ? action.body.trim() : "";
     if (!coalitionId || !viaRemoteGroupId || !body) return { ok: false, reason: "malformed_action" };
+
+    // Continuity gate (register F-9, Phase 5): a coalition in failover is
+    // read-only on its home too — the mediated result carries the reason.
+    const authority = await resolveWriteAuthority(tx, { entityType: "coalition", entityId: coalitionId });
+    if (authority !== "writable") return { ok: false, reason: "continuity_read_only" };
 
     const membership = await tx.coalitionMembership.findFirst({
       where: {

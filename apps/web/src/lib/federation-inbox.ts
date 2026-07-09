@@ -20,6 +20,7 @@ import {
   handleBackupRevoked,
 } from "./continuity-establishment";
 import { handleBackupDelta } from "./continuity-replication";
+import { handleCoalitionBackupWithdrawal } from "./federated-coalitions";
 import {
   handleChallengeRelayRequest,
   handleProofOfLife,
@@ -216,6 +217,7 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   takeover_activated: handleTakeoverActivated,
   catch_up_applied: handleCatchUpApplied,
   takeover_ceded: handleTakeoverCeded,
+  coalition_backup_withdrawal: handleCoalitionBackupWithdrawal,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

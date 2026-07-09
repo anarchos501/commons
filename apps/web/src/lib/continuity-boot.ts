@@ -1,5 +1,5 @@
 import type { PrismaClient } from "../generated/prisma/client";
-import { CONTINUITY_DATA_CLASS, selfNodeForGroup } from "./continuity-establishment";
+import { CONTINUITY_DATA_CLASS, selfNodeForEntity } from "./continuity-establishment";
 import { ensureAnnexAuthor, TAKEOVER_REPLAY_HANDLERS, type TakeoverLogRecord } from "./continuity-takeover";
 import { enqueueSignedNodeEvent } from "./federations";
 import { nodeSigningProvider, verifyWithPublicKeyPem } from "./node-keys";
@@ -80,7 +80,7 @@ export async function runQuietBootVerification(
   });
   for (const backup of pending) {
     try {
-      const selfNode = backup.entityType === "group" ? await selfNodeForGroup(prisma, backup.entityId) : null;
+      const selfNode = await selfNodeForEntity(prisma, backup.entityType, backup.entityId);
       if (!selfNode) continue;
       const signer = await nodeSigningProvider(prisma, selfNode.id);
       const pull = async (afterSeq: number, includeLog: boolean): Promise<StatusResponse["payload"]> => {
@@ -132,9 +132,10 @@ export async function runQuietBootVerification(
         for (const entry of entries) {
           await prisma.$transaction(async (tx) => {
             const handler = TAKEOVER_REPLAY_HANDLERS[entry.actionType];
-            if (handler && backup.entityType === "group") {
+            const spaceType = backup.entityType as "group" | "project" | "coalition";
+            if (handler && ["group", "project", "coalition"].includes(spaceType)) {
               const fallbackAuthorId = await ensureAnnexAuthor(tx, selfNode.id);
-              await handler(tx, { groupId: backup.entityId, entry, fallbackAuthorId });
+              await handler(tx, { spaceType, spaceId: backup.entityId, entry, fallbackAuthorId });
             }
             appliedThrough = entry.seq;
             await tx.entityBackup.update({ where: { id: backup.id }, data: { lastAppliedSeq: entry.seq } });

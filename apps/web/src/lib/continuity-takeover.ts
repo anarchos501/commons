@@ -455,73 +455,82 @@ const ANNEX_MESSAGE_TTL_MS = 180 * 24 * 3_600_000;
 
 async function ensureAnnexThread(
   tx: Prisma.TransactionClient,
-  groupId: string,
+  spaceType: "group" | "project" | "coalition",
+  spaceId: string,
   authorAccountId: string,
 ): Promise<string> {
   const existing = await tx.discussionThread.findFirst({
-    where: { spaceType: "group", spaceId: groupId, title: "Failover annex" },
+    where: { spaceType, spaceId, title: "Failover annex" },
     select: { id: true },
   });
   if (existing) return existing.id;
   const thread = await tx.discussionThread.create({
-    data: { spaceType: "group", spaceId: groupId, title: "Failover annex", createdByAccountId: authorAccountId },
+    data: { spaceType, spaceId, title: "Failover annex", createdByAccountId: authorAccountId },
     select: { id: true },
   });
   return thread.id;
 }
 
+type ReplaySpace = { spaceType: "group" | "project" | "coalition"; spaceId: string };
+
 type ReplayHandler = (
   tx: Prisma.TransactionClient,
-  input: { groupId: string; entry: TakeoverLogRecord; fallbackAuthorId: string },
+  input: ReplaySpace & { entry: TakeoverLogRecord; fallbackAuthorId: string },
 ) => Promise<void>;
 
+async function replayAnnexMessage(
+  tx: Prisma.TransactionClient,
+  input: ReplaySpace & { authorId: string; body: string },
+): Promise<void> {
+  const threadId = await ensureAnnexThread(tx, input.spaceType, input.spaceId, input.authorId);
+  await tx.discussionMessage.create({
+    data: {
+      threadId,
+      authorId: input.authorId,
+      body: input.body,
+      expiresAt: new Date(Date.now() + ANNEX_MESSAGE_TTL_MS),
+    },
+  });
+  await tx.discussionThread.update({
+    where: { id: threadId },
+    data: { lastActivityAt: new Date(), messageCount: { increment: 1 } },
+  });
+}
+
 export const TAKEOVER_REPLAY_HANDLERS: Record<string, ReplayHandler> = {
-  takeover_post_message: async (tx, { groupId, entry, fallbackAuthorId }) => {
+  takeover_post_message: async (tx, { spaceType, spaceId, entry, fallbackAuthorId }) => {
     const body = typeof entry.action.body === "string" ? entry.action.body : "";
     if (!body) return;
     const did = typeof entry.action.actorDid === "string" ? entry.action.actorDid : null;
     const verified = did
       ? await tx.account.findFirst({ where: { portableIdentity: { did } }, select: { id: true } })
       : null;
-    const authorId = verified?.id ?? fallbackAuthorId;
-    const threadId = await ensureAnnexThread(tx, groupId, authorId);
-    await tx.discussionMessage.create({
-      data: {
-        threadId,
-        authorId,
-        body: verified ? body : `${entry.actorLabel}: ${body}`,
-        expiresAt: new Date(Date.now() + ANNEX_MESSAGE_TTL_MS),
-      },
-    });
-    await tx.discussionThread.update({
-      where: { id: threadId },
-      data: { lastActivityAt: new Date(), messageCount: { increment: 1 } },
+    await replayAnnexMessage(tx, {
+      spaceType,
+      spaceId,
+      authorId: verified?.id ?? fallbackAuthorId,
+      body: verified ? body : `${entry.actorLabel}: ${body}`,
     });
   },
-  takeover_join_open_group: async (tx, { groupId, entry, fallbackAuthorId }) => {
+  takeover_join_open_group: async (tx, { spaceType, spaceId, entry, fallbackAuthorId }) => {
     const did = typeof entry.action.actorDid === "string" ? entry.action.actorDid : null;
     const verified = did
       ? await tx.account.findFirst({ where: { portableIdentity: { did } }, select: { id: true } })
       : null;
-    if (verified) {
+    if (verified && spaceType === "group") {
       // A known member of this node rejoining through the annex: the
-      // ordinary open-join door, as themselves.
-      await joinOpenGroup(tx as unknown as PrismaClient, verified.id, groupId);
+      // ordinary open-join door, as themselves. Groups only — projects and
+      // coalitions have no open-join door, so their intents stay records.
+      await joinOpenGroup(tx as unknown as PrismaClient, verified.id, spaceId);
       return;
     }
-    // Unverified: record the intent legibly, import no one (register D-5).
-    const threadId = await ensureAnnexThread(tx, groupId, fallbackAuthorId);
-    await tx.discussionMessage.create({
-      data: {
-        threadId,
-        authorId: fallbackAuthorId,
-        body: `${entry.actorLabel} asked to join this collective during failover.`,
-        expiresAt: new Date(Date.now() + ANNEX_MESSAGE_TTL_MS),
-      },
-    });
-    await tx.discussionThread.update({
-      where: { id: threadId },
-      data: { lastActivityAt: new Date(), messageCount: { increment: 1 } },
+    // Unverified (or no join door): record the intent legibly, import no
+    // one (register D-5).
+    await replayAnnexMessage(tx, {
+      spaceType,
+      spaceId,
+      authorId: fallbackAuthorId,
+      body: `${entry.actorLabel} asked to join during failover.`,
     });
   },
 };

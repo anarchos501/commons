@@ -35,7 +35,8 @@ export type FederationWireEventType =
   | "takeover_handoff"
   | "takeover_activated"
   | "takeover_ceded"
-  | "catch_up_applied";
+  | "catch_up_applied"
+  | "coalition_backup_withdrawal";
 
 export type FederationEnvelope = {
   version: number;

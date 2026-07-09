@@ -8,7 +8,10 @@ import { DiscussionMessage } from "../../../../components/shared/DiscussionMessa
 import { FormWithNotice } from "../../../../components/shared/FormWithNotice";
 import { type FormState } from "../../../../components/shared/form-state";
 import { SubmitButton } from "../../../../components/shared/SubmitButton";
-import { canAccessCoalition } from "../../../../lib/coalition-authorization";
+import { canAccessCoalition, requireCoalitionWritable } from "../../../../lib/coalition-authorization";
+import { resolveWriteAuthority } from "../../../../lib/continuity";
+import { openCoalitionBackupDesignationProposal } from "../../../../lib/coalitions";
+import { proposeCoalitionBackupWithdrawal } from "../../../../lib/federated-coalitions";
 import {
   openCoalitionDepartureProposal,
   openCoalitionJoinProposal,
@@ -56,6 +59,7 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
     const input = parseEventSubmission(formData, { accountId: s.accountId, hostType: "coalition", hostId: coalitionId });
     const prisma = createPrismaClient();
     try {
+      await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
       const result = await submitEvent(prisma, input);
       if (!result.ok) return { kind: "error", message: submitEventFailureMessage(result.reason) };
       revalidatePath(`/coalitions/${coalitionId}`);
@@ -118,7 +122,106 @@ export default async function CoalitionSpacePage({ params, searchParams }: PageP
             <p className="mt-3 text-xs text-[var(--muted)]">
               {data.coalition.memberships.length} member {data.coalition.memberships.length === 1 ? "collective" : "collectives"}
             </p>
+            {data.continuityAuthority !== "writable" && (
+              <div className="mt-3 border border-[var(--border)] bg-[var(--subtle)] p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Continuity failover</p>
+                <p className="mt-1 text-sm text-[var(--soft-text)]">
+                  {data.continuityAuthority === "unverified"
+                    ? "This node just restarted and is verifying with the coalition's backup node. The space is read-only for a moment."
+                    : "This coalition's home node has been out of federation contact longer than its failover window — the space is read-only until contact returns. Proposals are paused, not lost."}
+                </p>
+              </div>
+            )}
           </div>
+
+          <CollapsibleSection
+            id="continuity"
+            title="Continuity"
+            eyebrow="Backup designation — a decision of every member collective"
+            storageKey={`coalition:${coalitionId}:section:continuity`}
+            className="bg-[var(--surface)] p-5 sm:p-6"
+          >
+            {data.continuity.backup && data.continuity.backup.status !== "revoked" && data.continuity.backup.status !== "ended" ? (
+              <div className="space-y-2 text-sm text-[var(--soft-text)]">
+                <p>
+                  Backup on <span className="font-medium text-[var(--text)]">{data.continuity.backup.peerLabel}</span>{" "}
+                  ({data.continuity.backup.peerDomain}) · window {data.continuity.backup.windowHours}h · directive{" "}
+                  <span className="capitalize">{data.continuity.backup.directive}</span> ·{" "}
+                  <span className="capitalize">{data.continuity.backup.status.replaceAll("_", " ")}</span>
+                  {data.continuity.backup.lastReplicatedAt && (
+                    <> · last replicated {data.continuity.backup.lastReplicatedAt.toISOString().slice(0, 16).replace("T", " ")} UTC</>
+                  )}
+                </p>
+                <p className="text-xs text-[var(--muted)]">
+                  The replica holds this coalition&apos;s home-side skeleton and relay thread only — never member
+                  collectives&apos; own data. Any single member collective can withdraw its consent, which revokes
+                  the backup for everyone (it stands on unanimous consent).
+                </p>
+                {data.continuity.withdrawOptions.length > 0 && (
+                  <FormWithNotice action={withdrawCoalitionBackupAction} className="mt-2">
+                    <input type="hidden" name="coalitionId" value={coalitionId} />
+                    <label className="block max-w-xs">
+                      <span className="field-label">Withdraw consent as</span>
+                      <select name="groupId" className="field-input">
+                        {data.continuity.withdrawOptions.map((member) => (
+                          <option key={member.groupId} value={member.groupId}>{member.groupName}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="mt-2">
+                      <SubmitButton variant="secondary">Open withdrawal petition</SubmitButton>
+                    </div>
+                  </FormWithNotice>
+                )}
+              </div>
+            ) : data.continuity.hasOpenProposal ? (
+              <p className="text-sm text-[var(--soft-text)]">
+                A backup designation is being decided — every member collective, on every node, votes through its
+                own governance. It applies only when all approve.
+              </p>
+            ) : data.canWrite && data.continuity.activePeers.length > 0 ? (
+              <FormWithNotice action={proposeCoalitionBackupDesignationAction} className="space-y-3">
+                <input type="hidden" name="coalitionId" value={coalitionId} />
+                <p className="text-sm text-[var(--soft-text)]">
+                  Designating a backup asks EVERY member collective — on every node — to consent to the chosen
+                  node, the failover window, and the advance directive. The replica holds the coalition&apos;s
+                  home-side skeleton and relay thread only, never member collectives&apos; own data.
+                </p>
+                {/* The calm-weather property (register F-8): stated where the decision is made. */}
+                <p className="text-xs text-[var(--muted)]">
+                  Designation needs every member node reachable — a proposal with an unreachable member times out.
+                  Arrange protection before you need it: designate early, in calm weather.
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="block">
+                    <span className="field-label">Backup node</span>
+                    <select name="peerNodeId" className="field-input">
+                      {data.continuity.activePeers.map((peer) => (
+                        <option key={peer.id} value={peer.id}>{peer.displayName ?? peer.domain}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Failover window (hours)</span>
+                    <input name="windowHours" type="number" min={1} defaultValue={24} className="field-input" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">If the home is ever permanently lost</span>
+                    <select name="directive" className="field-input">
+                      <option value="none">Do nothing — members re-form by hand</option>
+                      <option value="reconstitute">Consent now to re-forming from the replica</option>
+                    </select>
+                  </label>
+                  <SubmitButton variant="secondary">Open designation proposal</SubmitButton>
+                </div>
+              </FormWithNotice>
+            ) : (
+              <p className="text-sm text-[var(--muted)]">
+                No backup designated. Designation requires an active federation agreement and an active membership
+                in a member collective.
+              </p>
+            )}
+          </CollapsibleSection>
 
           <CollapsibleSection
             id="discussion"
@@ -456,7 +559,24 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
           .map((group) => ({ groupId: group.id, group: { name: group.label } }))
       : [];
 
-    const canWrite = myCurrentMemberMemberships.length > 0;
+    // Continuity (F3.5 Phase 5): authority forces read-only during failover;
+    // the card shows the current backup and the designation/withdrawal doors.
+    const continuityAuthority = await resolveWriteAuthority(prisma, { entityType: "coalition", entityId: coalitionId });
+    const backup = await prisma.entityBackup.findUnique({
+      where: { entityType_entityId: { entityType: "coalition", entityId: coalitionId } },
+      include: { peer: { select: { domain: true, displayName: true } } },
+    });
+    const activePeers = await prisma.federatedNode.findMany({
+      where: { status: "active" },
+      select: { id: true, domain: true, displayName: true },
+      orderBy: { domain: "asc" },
+    });
+    const openBackupProposal = await prisma.coalitionProposal.findFirst({
+      where: { coalitionId, action: "backup_designation", status: "open" },
+      select: { id: true },
+    });
+
+    const canWrite = myCurrentMemberMemberships.length > 0 && continuityAuthority === "writable";
 
     return {
       coalition,
@@ -468,10 +588,107 @@ async function getCoalitionSpaceData(accountId: string, coalitionId: string, sel
       removalOptions,
       canSponsorCurrentMember,
       joinApplicantOptions,
+      continuityAuthority,
+      continuity: {
+        backup: backup
+          ? {
+              peerLabel: backup.peer.displayName ?? backup.peer.domain,
+              peerDomain: backup.peer.domain,
+              status: backup.status,
+              windowHours: backup.windowHours,
+              directive: backup.directive,
+              lastReplicatedAt: backup.lastReplicatedAt,
+            }
+          : null,
+        activePeers,
+        hasOpenProposal: Boolean(openBackupProposal),
+        withdrawOptions: localMembers.filter((member) => myMembershipIdByGroupId.has(member.groupId)),
+        myMembershipIdByGroupId: Object.fromEntries(myMembershipIdByGroupId),
+      },
     };
   } finally {
     await prisma.$disconnect();
   }
+}
+
+async function proposeCoalitionBackupDesignationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const coalitionId = requiredString(formData, "coalitionId");
+  const peerNodeId = requiredString(formData, "peerNodeId");
+  const windowHours = Number.parseInt(requiredString(formData, "windowHours"), 10);
+  const directive = requiredString(formData, "directive");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findFirst({
+      where: {
+        accountId: session.accountId,
+        status: "active",
+        participationStatus: "active",
+        group: { coalitionMemberships: { some: { coalitionId, endedAt: null } } },
+      },
+      select: { id: true },
+    });
+    if (!membership) return { kind: "error", message: "Active membership in a member collective is required." };
+    const result = await openCoalitionBackupDesignationProposal(prisma, {
+      coalitionId,
+      peerNodeId,
+      windowHours,
+      directive,
+      createdByMembershipId: membership.id,
+    });
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        invalid_window: "The failover window must be at least 1 hour.",
+        invalid_directive: "Choose a valid directive.",
+        no_active_agreement: "Every member node needs an active federation agreement path — one is missing or lapsed.",
+        backup_already_exists: "This coalition already has a backup designated.",
+        proposal_already_open: "A designation proposal is already being decided.",
+        not_eligible: "An active member of a member collective must open this.",
+        not_found: "This coalition could not be found.",
+      };
+      return { kind: "error", message: messages[result.reason] ?? "The designation proposal could not be opened." };
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/coalitions/${coalitionId}`);
+  return { kind: "success", message: "Designation proposal opened — every member collective now decides through its own governance." };
+}
+
+async function withdrawCoalitionBackupAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const coalitionId = requiredString(formData, "coalitionId");
+  const groupId = requiredString(formData, "groupId");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.groupMembership.findFirst({
+      where: { accountId: session.accountId, groupId, status: "active", participationStatus: "active" },
+      select: { id: true },
+    });
+    if (!membership) return { kind: "error", message: "Active membership in that collective is required." };
+    const result = await proposeCoalitionBackupWithdrawal(prisma, {
+      coalitionId,
+      groupId,
+      createdByMembershipId: membership.id,
+    });
+    if (!result.ok) {
+      return {
+        kind: "error",
+        message:
+          result.reason === "petition_already_open"
+            ? "A withdrawal petition is already open in that collective."
+            : "The withdrawal petition could not be opened.",
+      };
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/coalitions/${coalitionId}`);
+  return { kind: "success", message: "Withdrawal petition opened in your collective — its approval alone revokes the backup." };
 }
 
 async function createDiscussionThreadAction(formData: FormData) {
@@ -482,6 +699,7 @@ async function createDiscussionThreadAction(formData: FormData) {
   const title = requiredString(formData, "title");
   const prisma = createPrismaClient();
   try {
+    await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
     await createCoalitionDiscussionThread(prisma, { coalitionId, accountId: session.accountId, title });
   } finally {
     await prisma.$disconnect();
@@ -498,6 +716,7 @@ async function postDiscussionMessageAction(formData: FormData) {
   const body = requiredString(formData, "body");
   const prisma = createPrismaClient();
   try {
+    await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
     const message = await postCoalitionDiscussionMessage(prisma, {
       coalitionId,
       threadId,
@@ -540,6 +759,7 @@ async function joinCoalitionAction(_prev: FormState, formData: FormData): Promis
 
   const prisma = createPrismaClient();
   try {
+    await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
     const coalition = await prisma.coalition.findUnique({
       where: { id: coalitionId },
       select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },
@@ -592,6 +812,7 @@ async function departCoalitionAction(_prev: FormState, formData: FormData): Prom
 
   const prisma = createPrismaClient();
   try {
+    await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
     const membership = await prisma.groupMembership.findUnique({
       where: { accountId_groupId: { accountId: session.accountId, groupId: departingGroupId } },
       select: { id: true, status: true, participationStatus: true },
@@ -623,6 +844,7 @@ async function removeCoalitionMemberAction(_prev: FormState, formData: FormData)
 
   const prisma = createPrismaClient();
   try {
+    await requireCoalitionWritable(prisma, coalitionId); // continuity gate (register F-9)
     const coalition = await prisma.coalition.findUnique({
       where: { id: coalitionId },
       select: { memberships: { where: { endedAt: null }, select: { groupId: true } } },

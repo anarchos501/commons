@@ -130,24 +130,20 @@ export async function applyBackupDesignationFromPetition(
 ): Promise<void> {
   const petition = await requireApprovedPetition(tx, petitionId, "backup_designation");
   const [entityType, entityId, peerNodeId, action, windowRaw, directiveRaw] = petition.subjectId.split(":");
-  if (entityType !== "group" || !entityId || !peerNodeId) return;
+  // Groups and projects apply per-petition; coalition designation applies at
+  // PROPOSAL level (family coalition_backup_designation) and never lands here.
+  if ((entityType !== "group" && entityType !== "project") || !entityId || !peerNodeId) return;
 
-  const selfNode = await selfNodeForGroup(tx, entityId);
+  const selfNode = await selfNodeForEntity(tx, entityType, entityId);
   if (!selfNode) return;
 
   if (action === "revoke") {
     const backup = await tx.entityBackup.findUnique({
       where: { entityType_entityId: { entityType, entityId } },
+      select: { peerId: true },
     });
-    if (!backup || backup.peerId !== peerNodeId || backup.status === "revoked" || backup.status === "ended") return;
-    await tx.entityBackup.update({ where: { id: backup.id }, data: { status: "revoked" } });
-    const peer = await tx.federatedNode.findUnique({ where: { id: peerNodeId }, select: { domain: true } });
-    if (peer) {
-      await enqueueSignedNodeEvent(tx, selfNode, peer.domain, "backup_revoked", {
-        entityType,
-        entityId,
-      }, CONTINUITY_DATA_CLASS);
-    }
+    if (!backup || backup.peerId !== peerNodeId) return;
+    await revokeEntityBackup(tx, { entityType, entityId, selfNode });
     return;
   }
 
@@ -157,43 +153,108 @@ export async function applyBackupDesignationFromPetition(
   if (!Number.isInteger(windowHours) || windowHours < 1 || !isBackupDirective(directive)) return;
 
   // Staleness re-checks at apply time (the world may have moved mid-vote).
-  const group = await tx.group.findUnique({ where: { id: entityId }, select: { name: true, archivedAt: true } });
+  let entityName: string | null = null;
+  if (entityType === "group") {
+    const group = await tx.group.findUnique({ where: { id: entityId }, select: { name: true, archivedAt: true } });
+    entityName = group && !group.archivedAt ? group.name : null;
+  } else {
+    const project = await tx.project.findUnique({ where: { id: entityId }, select: { name: true, archivedAt: true, status: true } });
+    entityName = project && !project.archivedAt && project.status !== "closed" ? project.name : null;
+  }
   const peer = await tx.federatedNode.findUnique({ where: { id: peerNodeId } });
-  if (!group || group.archivedAt || !peer || peer.status !== "active") return;
-  const existing = await tx.entityBackup.findUnique({
-    where: { entityType_entityId: { entityType, entityId } },
-    select: { id: true, status: true },
-  });
-  if (existing && (existing.status === "proposed" || existing.status === "active")) return;
+  if (!entityName || !peer || peer.status !== "active") return;
 
-  const memberCount = await countLocalMembers(tx, entityId);
-  const backup = existing
-    ? await tx.entityBackup.update({
-        where: { id: existing.id },
-        data: {
-          peerId: peerNodeId,
-          windowHours,
-          directive,
-          status: "proposed",
-          manifestSeq: 0,
-          lastManifest: Prisma.DbNull,
-          takeoverState: "none",
-          lastAppliedSeq: 0,
-        },
-      })
-    : await tx.entityBackup.create({
-        data: { entityType, entityId, peerId: peerNodeId, windowHours, directive },
-      });
-
-  await enqueueSignedNodeEvent(tx, selfNode, peer.domain, "backup_establish_request", {
+  await establishEntityBackup(tx, {
     entityType,
     entityId,
-    name: group.name,
-    memberCount,
+    entityName,
+    memberCount: await countEntityMembers(tx, entityType, entityId),
+    peerId: peer.id,
+    peerDomain: peer.domain,
+    selfNode,
     windowHours,
     directive,
-    backupId: backup.id,
-  }, CONTINUITY_DATA_CLASS);
+  });
+}
+
+// ── Project entrance (Phase 5): same family, project-native governance ──────
+
+export async function proposeProjectBackupDesignation(
+  prisma: PrismaClient,
+  {
+    projectId,
+    peerNodeId,
+    windowHours,
+    directive,
+    createdByProjectMembershipId,
+  }: {
+    projectId: string;
+    peerNodeId: string;
+    windowHours: number;
+    directive: string;
+    createdByProjectMembershipId: string;
+  },
+): Promise<ProposeBackupDesignationResult> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { archivedAt: true, status: true, foundingGroupId: true },
+  });
+  if (!project || project.archivedAt || project.status === "closed") return { ok: false, reason: "not_found" };
+  if (!Number.isInteger(windowHours) || windowHours < 1) return { ok: false, reason: "invalid_window" };
+  if (!isBackupDirective(directive)) return { ok: false, reason: "invalid_directive" };
+  const peer = await prisma.federatedNode.findUnique({ where: { id: peerNodeId }, select: { status: true } });
+  if (!peer || peer.status !== "active") return { ok: false, reason: "no_active_agreement" };
+  const existing = await prisma.entityBackup.findUnique({
+    where: { entityType_entityId: { entityType: "project", entityId: projectId } },
+    select: { status: true },
+  });
+  if (existing && (existing.status === "proposed" || existing.status === "active")) {
+    return { ok: false, reason: "backup_already_exists" };
+  }
+  // Project-native petition (the events.ts project shape): project members
+  // vote; the founding group provides governance parameters.
+  return openPetition(prisma, {
+    groupId: project.foundingGroupId,
+    category: "group_settings",
+    subjectType: "backup_designation",
+    subjectId: `project:${projectId}:${peerNodeId}:designate:${windowHours}:${directive}`,
+    createdByProjectMembershipId,
+    scopeType: "project",
+    scopeId: projectId,
+    voterScope: { type: "project", scopeId: projectId },
+  });
+}
+
+export async function proposeProjectBackupRevocation(
+  prisma: PrismaClient,
+  {
+    projectId,
+    peerNodeId,
+    createdByProjectMembershipId,
+  }: { projectId: string; peerNodeId: string; createdByProjectMembershipId: string },
+): Promise<ProposeBackupDesignationResult> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { foundingGroupId: true },
+  });
+  if (!project) return { ok: false, reason: "not_found" };
+  const backup = await prisma.entityBackup.findUnique({
+    where: { entityType_entityId: { entityType: "project", entityId: projectId } },
+    select: { peerId: true, status: true },
+  });
+  if (!backup || backup.peerId !== peerNodeId || backup.status === "revoked" || backup.status === "ended") {
+    return { ok: false, reason: "no_backup_to_revoke" };
+  }
+  return openPetition(prisma, {
+    groupId: project.foundingGroupId,
+    category: "group_settings",
+    subjectType: "backup_designation",
+    subjectId: `project:${projectId}:${peerNodeId}:revoke`,
+    createdByProjectMembershipId,
+    scopeType: "project",
+    scopeId: projectId,
+    voterScope: { type: "project", scopeId: projectId },
+  });
 }
 
 // ── Node-level consent settings ───────────────────────────────────────────────
@@ -537,6 +598,131 @@ export async function selfNodeForGroup(
     select: { node: { select: { id: true, domain: true } } },
   });
   return group?.node ?? null;
+}
+
+// The node an entity's continuity machinery signs as (Phase 5, entity-generic).
+// Project branch anchors on the FOUNDING group deliberately: hosting can
+// change, and an anchor that moved with the current host would silently
+// re-home the entity's signing identity after a hosting transfer — a
+// wrongness that only shows up later. Founding-group provenance is immutable.
+// Coalition home = the node where the Coalition row lives (positional, F3).
+export async function selfNodeForEntity(
+  tx: Prisma.TransactionClient | PrismaClient,
+  entityType: string,
+  entityId: string,
+): Promise<{ id: string; domain: string } | null> {
+  if (entityType === "group") return selfNodeForGroup(tx, entityId);
+  if (entityType === "project") {
+    const project = await tx.project.findUnique({
+      where: { id: entityId },
+      select: { foundingGroup: { select: { node: { select: { id: true, domain: true } } } } },
+    });
+    return project?.foundingGroup.node ?? null;
+  }
+  if (entityType === "coalition") {
+    const coalition = await tx.coalition.findUnique({
+      where: { id: entityId },
+      select: { node: { select: { id: true, domain: true } } },
+    });
+    return coalition?.node ?? null;
+  }
+  return null;
+}
+
+// Entity-generic member count for the establish request. Groups and projects
+// count local PEOPLE (the locals-only discipline, register F-10); a coalition
+// counts member COLLECTIVES — its people live on their own nodes under their
+// own backups, so the collective count is the honest number available, and
+// the receiving node sees entityType alongside it.
+export async function countEntityMembers(
+  client: Prisma.TransactionClient | PrismaClient,
+  entityType: string,
+  entityId: string,
+): Promise<number> {
+  if (entityType === "group") return countLocalMembers(client, entityId);
+  if (entityType === "project") {
+    return client.projectMembership.count({
+      where: { projectId: entityId, status: "active", account: NOT_SHADOW_ACCOUNT_FILTER },
+    });
+  }
+  if (entityType === "coalition") {
+    return client.coalitionMembership.count({ where: { coalitionId: entityId, endedAt: null } });
+  }
+  return 0;
+}
+
+// Shared establish step (used by the group/project petition apply AND the
+// coalition proposal apply): create-or-reset the EntityBackup and send the
+// establish request through the D-3 chokepoint.
+export async function establishEntityBackup(
+  tx: Prisma.TransactionClient,
+  input: {
+    entityType: string;
+    entityId: string;
+    entityName: string;
+    memberCount: number;
+    peerId: string;
+    peerDomain: string;
+    selfNode: { id: string; domain: string };
+    windowHours: number;
+    directive: BackupDirective;
+  },
+): Promise<void> {
+  const existing = await tx.entityBackup.findUnique({
+    where: { entityType_entityId: { entityType: input.entityType, entityId: input.entityId } },
+    select: { id: true, status: true },
+  });
+  if (existing && (existing.status === "proposed" || existing.status === "active")) return;
+  const backup = existing
+    ? await tx.entityBackup.update({
+        where: { id: existing.id },
+        data: {
+          peerId: input.peerId,
+          windowHours: input.windowHours,
+          directive: input.directive,
+          status: "proposed",
+          manifestSeq: 0,
+          lastManifest: Prisma.DbNull,
+          takeoverState: "none",
+          lastAppliedSeq: 0,
+        },
+      })
+    : await tx.entityBackup.create({
+        data: {
+          entityType: input.entityType,
+          entityId: input.entityId,
+          peerId: input.peerId,
+          windowHours: input.windowHours,
+          directive: input.directive,
+        },
+      });
+  await enqueueSignedNodeEvent(tx, input.selfNode, input.peerDomain, "backup_establish_request", {
+    entityType: input.entityType,
+    entityId: input.entityId,
+    name: input.entityName,
+    memberCount: input.memberCount,
+    windowHours: input.windowHours,
+    directive: input.directive,
+    backupId: backup.id,
+  }, CONTINUITY_DATA_CLASS);
+}
+
+// Shared revoke step (petition apply, coalition withdrawal, wire withdrawal).
+export async function revokeEntityBackup(
+  tx: Prisma.TransactionClient,
+  input: { entityType: string; entityId: string; selfNode: { id: string; domain: string } },
+): Promise<boolean> {
+  const backup = await tx.entityBackup.findUnique({
+    where: { entityType_entityId: { entityType: input.entityType, entityId: input.entityId } },
+    include: { peer: { select: { domain: true } } },
+  });
+  if (!backup || backup.status === "revoked" || backup.status === "ended") return false;
+  await tx.entityBackup.update({ where: { id: backup.id }, data: { status: "revoked" } });
+  await enqueueSignedNodeEvent(tx, input.selfNode, backup.peer.domain, "backup_revoked", {
+    entityType: input.entityType,
+    entityId: input.entityId,
+  }, CONTINUITY_DATA_CLASS);
+  return true;
 }
 
 async function localNode(tx: Prisma.TransactionClient): Promise<{ id: string; domain: string } | null> {

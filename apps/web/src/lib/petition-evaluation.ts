@@ -39,6 +39,7 @@ import {
   evaluateBackupHostingConsentForPetition,
 } from "./continuity-establishment";
 import { applyTakeoverExpediteFromPetition } from "./continuity-takeover";
+import { applyCoalitionBackupWithdrawalFromPetition } from "./federated-coalitions";
 import {
   applyFederationDisableFromPetition,
   applyFederationPolicyFromPetition,
@@ -182,6 +183,8 @@ async function applyApprovedPetition(
     await applyBackupHostingPolicyFromPetition(tx, petitionId);
   } else if (subjectType === "backup_takeover_expedite") {
     await applyTakeoverExpediteFromPetition(tx, petitionId);
+  } else if (subjectType === "coalition_backup_revocation") {
+    await applyCoalitionBackupWithdrawalFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -429,6 +432,28 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
     return subjectType === "node_name_change"
       ? `Rename node to "${proposal.proposedName}"`
       : `Propose node name: "${proposal.proposedName}"`;
+  }
+
+  if (subjectType === "coalition_backup_designation") {
+    const proposal = await prisma.coalitionProposal.findUnique({
+      where: { id: subjectId },
+      select: { name: true, participantSnapshot: true, coalition: { select: { name: true } } },
+    });
+    if (!proposal) return proposalFamilyLabel(subjectType);
+    const snapshot = proposal.participantSnapshot as { backupTerms?: { peerDomain?: string } } | null;
+    const coalitionName = proposal.name?.trim() || proposal.coalition?.name || "the coalition";
+    const peerLabel = snapshot?.backupTerms?.peerDomain ?? "a federated node";
+    return `Designate ${peerLabel} as the backup for coalition "${coalitionName}"`;
+  }
+
+  if (subjectType === "coalition_backup_revocation") {
+    const coalitionId = subjectId.split(":")[1] ?? "";
+    const coalition = await prisma.coalition.findUnique({ where: { id: coalitionId }, select: { name: true } });
+    const presence = coalition
+      ? null
+      : await prisma.federatedCoalitionPresence.findFirst({ where: { coalitionId }, select: { name: true } });
+    const label = coalition?.name ?? presence?.name ?? "the coalition";
+    return `Withdraw this collective's consent to the backup of coalition "${label}"`;
   }
 
   if (
@@ -1150,6 +1175,69 @@ const backupTakeoverExpediteDetail: PetitionDetailBuilder = async (prisma, { sub
   };
 };
 
+const coalitionBackupDesignationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const proposal = await prisma.coalitionProposal.findUnique({
+    where: { id: subjectId },
+    select: {
+      name: true,
+      content: true,
+      homeNodeDomain: true,
+      participantSnapshot: true,
+      coalition: { select: { name: true } },
+      petitions: { select: { groupSnapshot: true } },
+    },
+  });
+  if (!proposal) return null;
+  const snapshot = proposal.participantSnapshot as {
+    backupTerms?: { peerDomain?: string; windowHours?: number; directive?: string };
+    participantLabels?: string[];
+  } | null;
+  const terms = snapshot?.backupTerms ?? {};
+  const coalitionName = proposal.name?.trim() || proposal.coalition?.name || "the coalition";
+  const directive = terms.directive === "reconstitute"
+    ? `"reconstitute" — if the coalition's home node is ever permanently lost, this consents in advance to re-forming it from the replica on the backup node`
+    : `"none" — the replica is never activated as a new coalition; after a permanent loss the path is re-forming by hand`;
+  return {
+    summary: `Designate ${terms.peerDomain ?? "a federated node"} as the backup for coalition "${coalitionName}"`,
+    proposer,
+    outcome: frameOutcome(
+      status,
+      `once EVERY member collective — on every node — approves, the coalition's home-side skeleton and relay thread replicate to ${terms.peerDomain ?? "the chosen node"}; member collectives' own data is never included. Any single member collective can later withdraw its consent, which revokes the backup`,
+    ),
+    fields: [
+      { label: "Coalition", value: coalitionName },
+      { label: "Backup node", value: terms.peerDomain ?? "unknown" },
+      { label: "Failover window", value: `${terms.windowHours ?? "?"}h of total federation silence before the backup may activate (a member click opens the challenge; any proof of life cancels it)` },
+      { label: "Advance directive", value: directive },
+      { label: "Consenting collectives", value: (snapshot?.participantLabels?.length ? snapshot.participantLabels : proposal.petitions.map((p) => (p.groupSnapshot as { name?: string })?.name ?? "a collective")).join(", ") },
+      // The calm-weather property (register F-8): consent needs every member
+      // node reachable — arrange protection before you need it.
+      { label: "Timing", value: "Designation needs every member node reachable — a proposal with an unreachable member times out. Designate early, in calm weather." },
+    ],
+  };
+};
+
+const coalitionBackupRevocationDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const coalitionId = subjectId.split(":")[1] ?? "";
+  const coalition = await prisma.coalition.findUnique({ where: { id: coalitionId }, select: { name: true } });
+  const presence = coalition
+    ? null
+    : await prisma.federatedCoalitionPresence.findFirst({
+        where: { coalitionId },
+        select: { name: true, homeFederatedNode: { select: { domain: true } } },
+      });
+  const label = coalition?.name ?? presence?.name ?? "the coalition";
+  return {
+    summary: `Withdraw this collective's consent to the backup of coalition "${label}"`,
+    proposer,
+    outcome: frameOutcome(
+      status,
+      `the coalition's backup designation is revoked for everyone — it stood on unanimous member consent, and one collective's withdrawal breaks that unanimity (stopping is always cheaper than starting, register F-2)${presence ? `; the signed withdrawal travels to the coalition's home node (${presence.homeFederatedNode.domain})` : ""}`,
+    ),
+    fields: [{ label: "Coalition", value: label }],
+  };
+};
+
 const backupSizeThresholdDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
   const raw = subjectId.split(":")[1];
   const none = raw === "none";
@@ -1385,6 +1473,8 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   backup_size_threshold_change: backupSizeThresholdDetail,
   backup_hosting_policy_change: backupHostingPolicyDetail,
   backup_takeover_expedite: backupTakeoverExpediteDetail,
+  coalition_backup_designation: coalitionBackupDesignationDetail,
+  coalition_backup_revocation: coalitionBackupRevocationDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -1503,6 +1593,8 @@ export function proposalFamilyLabel(subjectType: string) {
     case "backup_size_threshold_change": return "Backup size threshold";
     case "backup_hosting_policy_change": return "Backup hosting policy";
     case "backup_takeover_expedite": return "Failover expedite";
+    case "coalition_backup_designation": return "Coalition backup designation";
+    case "coalition_backup_revocation": return "Coalition backup withdrawal";
     case "federation_termination": return "End federation agreement";
     case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";

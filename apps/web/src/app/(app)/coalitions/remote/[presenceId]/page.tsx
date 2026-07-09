@@ -88,6 +88,22 @@ export default async function RemoteCoalitionPage({ params }: { params: Promise<
                 <SubmitButton variant="secondary">Send to {homeLabel}</SubmitButton>
               </form>
             )}
+
+            {presence.status === "active" && (
+              <form action={withdrawRemoteCoalitionBackupAction} className="mt-4 border-t border-[var(--border)] pt-3">
+                <input type="hidden" name="presenceId" value={presence.id} />
+                {/* The same unilateral door local member groups have (register
+                    F-8): membership is not tiered by where a group's data lives. */}
+                <p className="text-xs text-[var(--muted)]">
+                  If this coalition holds a backup designation, your collective can withdraw its consent through
+                  its own petition — one collective&apos;s withdrawal revokes the backup for everyone, because the
+                  designation stands on unanimous member consent.
+                </p>
+                <div className="mt-2">
+                  <SubmitButton variant="secondary">Open backup-withdrawal petition</SubmitButton>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       </main>
@@ -95,6 +111,35 @@ export default async function RemoteCoalitionPage({ params }: { params: Promise<
   } finally {
     await prisma.$disconnect();
   }
+}
+
+async function withdrawRemoteCoalitionBackupAction(formData: FormData) {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const presenceId = requiredString(formData, "presenceId");
+  const prisma = createPrismaClient();
+  try {
+    const presence = await prisma.federatedCoalitionPresence.findUnique({
+      where: { id: presenceId },
+      select: { coalitionId: true, groupId: true },
+    });
+    if (!presence) return;
+    const membership = await prisma.groupMembership.findFirst({
+      where: { accountId: session.accountId, groupId: presence.groupId, status: "active", participationStatus: "active" },
+      select: { id: true },
+    });
+    if (!membership) return;
+    const { proposeCoalitionBackupWithdrawal } = await import("../../../../../lib/federated-coalitions");
+    await proposeCoalitionBackupWithdrawal(prisma, {
+      coalitionId: presence.coalitionId,
+      groupId: presence.groupId,
+      createdByMembershipId: membership.id,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/coalitions/remote/${presenceId}`);
 }
 
 async function postRemoteCoalitionMessageAction(formData: FormData) {

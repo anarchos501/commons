@@ -322,6 +322,62 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
           interestAction={eventInterestAction}
           cancelAction={eventCancelAction}
         />
+        {isActive && (
+        <CollapsibleSection id="continuity" title="Continuity" eyebrow="Backup designation" storageKey={`project:${projectId}:section:continuity`} className="bg-[var(--surface)] p-5 sm:p-6">
+          {data.continuityBackup && data.continuityBackup.status !== "revoked" && data.continuityBackup.status !== "ended" ? (
+            <div className="space-y-2 text-sm text-[var(--soft-text)]">
+              <p>
+                Backup on <span className="font-medium text-[var(--text)]">{data.continuityBackup.peer.displayName ?? data.continuityBackup.peer.domain}</span>
+                {" "}({data.continuityBackup.peer.domain}) · window {data.continuityBackup.windowHours}h · directive{" "}
+                <span className="capitalize">{data.continuityBackup.directive}</span> ·{" "}
+                <span className="capitalize">{data.continuityBackup.status.replaceAll("_", " ")}</span>
+              </p>
+              {canWrite && (
+                <FormWithNotice action={proposeProjectBackupRevocationAction}>
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <input type="hidden" name="peerNodeId" value={data.continuityBackup.peer.id} />
+                  <SubmitButton variant="secondary">Open revocation petition</SubmitButton>
+                </FormWithNotice>
+              )}
+            </div>
+          ) : canWrite && data.continuityPeers.length > 0 ? (
+            <FormWithNotice action={proposeProjectBackupDesignationAction} className="space-y-3">
+              <input type="hidden" name="projectId" value={projectId} />
+              <p className="text-sm text-[var(--soft-text)]">
+                Designate a federated node to hold this project&apos;s structural backup — skeleton only (name,
+                counts, timings), readable by that node&apos;s operator by design. Project members decide.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="block">
+                  <span className="field-label">Backup node</span>
+                  <select name="peerNodeId" className="field-input">
+                    {data.continuityPeers.map((peer) => (
+                      <option key={peer.id} value={peer.id}>{peer.displayName ?? peer.domain}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="field-label">Failover window (hours)</span>
+                  <input name="windowHours" type="number" min={1} defaultValue={24} className="field-input" />
+                </label>
+                <label className="block">
+                  <span className="field-label">If the home is ever permanently lost</span>
+                  <select name="directive" className="field-input">
+                    <option value="none">Do nothing — members re-form by hand</option>
+                    <option value="reconstitute">Consent now to re-forming from the replica</option>
+                  </select>
+                </label>
+                <SubmitButton variant="secondary">Open designation petition</SubmitButton>
+              </div>
+            </FormWithNotice>
+          ) : (
+            <p className="text-sm text-[var(--muted)]">
+              No backup designated. Designation needs an active federation agreement and active project membership.
+            </p>
+          )}
+        </CollapsibleSection>
+        )}
+
         {/* ── Library ─────────────────────────────────────────────── */}
         {isActive && (
         <CollapsibleSection id="library" title="Library" eyebrow="Project resources" storageKey={`project:${projectId}:section:library`} className="bg-[var(--surface)] p-5 sm:p-6">
@@ -698,6 +754,83 @@ export default async function ProjectSpacePage({ params, searchParams }: PagePro
 
 // ── Data Loading ──────────────────────────────────────────────────────────────
 
+async function proposeProjectBackupDesignationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const peerNodeId = requiredString(formData, "peerNodeId");
+  const windowHours = Number.parseInt(requiredString(formData, "windowHours"), 10);
+  const directive = requiredString(formData, "directive");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.projectMembership.findUnique({
+      where: { accountId_projectId: { accountId: session.accountId, projectId } },
+      select: { id: true, status: true, participationStatus: true },
+    });
+    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
+      return { kind: "error", message: "Active project membership is required." };
+    }
+    const { proposeProjectBackupDesignation } = await import("../../../../lib/continuity-establishment");
+    const result = await proposeProjectBackupDesignation(prisma, {
+      projectId,
+      peerNodeId,
+      windowHours,
+      directive,
+      createdByProjectMembershipId: membership.id,
+    });
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        invalid_window: "The failover window must be at least 1 hour.",
+        invalid_directive: "Choose a valid directive.",
+        no_active_agreement: "A backup requires an active federation agreement with that node.",
+        backup_already_exists: "This project already has a backup designated.",
+        petition_already_open: "A backup petition is already open.",
+        not_found: "This project could not be found.",
+      };
+      return { kind: "error", message: messages[result.reason] ?? "The backup petition could not be opened." };
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Backup designation petition opened — project members decide." };
+}
+
+async function proposeProjectBackupRevocationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  "use server";
+  const session = await getSession();
+  if (!session.accountId) redirect("/login");
+  const projectId = requiredString(formData, "projectId");
+  const peerNodeId = requiredString(formData, "peerNodeId");
+  const prisma = createPrismaClient();
+  try {
+    const membership = await prisma.projectMembership.findUnique({
+      where: { accountId_projectId: { accountId: session.accountId, projectId } },
+      select: { id: true, status: true, participationStatus: true },
+    });
+    if (!membership || membership.status !== "active" || membership.participationStatus !== "active") {
+      return { kind: "error", message: "Active project membership is required." };
+    }
+    const { proposeProjectBackupRevocation } = await import("../../../../lib/continuity-establishment");
+    const result = await proposeProjectBackupRevocation(prisma, {
+      projectId,
+      peerNodeId,
+      createdByProjectMembershipId: membership.id,
+    });
+    if (!result.ok) {
+      return {
+        kind: "error",
+        message: result.reason === "petition_already_open" ? "A backup petition is already open." : "The revocation petition could not be opened.",
+      };
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { kind: "success", message: "Revocation petition opened." };
+}
+
 async function getProjectSpaceData(accountId: string, projectId: string, selectedThreadId: string | null) {
   const prisma = createPrismaClient();
   try {
@@ -906,9 +1039,22 @@ async function getProjectSpaceData(accountId: string, projectId: string, selecte
       ),
     }));
 
+    // Continuity (F3.5 Phase 5): the project's backup state + entrances.
+    const continuityBackup = await prisma.entityBackup.findUnique({
+      where: { entityType_entityId: { entityType: "project", entityId: projectId } },
+      include: { peer: { select: { id: true, domain: true, displayName: true } } },
+    });
+    const continuityPeers = await prisma.federatedNode.findMany({
+      where: { status: "active" },
+      select: { id: true, domain: true, displayName: true },
+      orderBy: { domain: "asc" },
+    });
+
     return {
       project,
       currentMembership,
+      continuityBackup,
+      continuityPeers,
       canRequestMembership,
       pendingJoinRequests,
       hostGroups,

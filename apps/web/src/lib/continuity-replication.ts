@@ -1,8 +1,8 @@
 import { Prisma, type FederatedNode, type Node, type PrismaClient } from "../generated/prisma/client";
-import { CONTINUITY_DATA_CLASS, countLocalMembers, selfNodeForGroup } from "./continuity-establishment";
+import { CONTINUITY_DATA_CLASS, countEntityMembers, selfNodeForEntity } from "./continuity-establishment";
 import type { FederationEnvelope } from "./federation-envelope";
 import { enqueueSignedNodeEvent } from "./federations";
-import { buildEscrowEntries } from "./identity-escrow";
+import { buildEntityEscrowEntries } from "./identity-escrow";
 import { stableStringify, type SignedEventPayload } from "./signed-events";
 
 // F3.5 Phase 2 — structural delta replication (register D-10).
@@ -37,41 +37,68 @@ export async function buildStructuralManifest(
   client: Prisma.TransactionClient | PrismaClient,
   ref: { entityType: string; entityId: string },
 ): Promise<StructuralManifest | null> {
-  if (ref.entityType !== "group") return null; // project/coalition builders land in Phase 5
-  const group = await client.group.findUnique({
-    where: { id: ref.entityId },
-    select: { name: true, archivedAt: true },
-  });
-  if (!group || group.archivedAt) return null;
+  let name: string | null = null;
+  if (ref.entityType === "group") {
+    const group = await client.group.findUnique({ where: { id: ref.entityId }, select: { name: true, archivedAt: true } });
+    name = group && !group.archivedAt ? group.name : null;
+  } else if (ref.entityType === "project") {
+    const project = await client.project.findUnique({
+      where: { id: ref.entityId },
+      select: { name: true, archivedAt: true, status: true },
+    });
+    name = project && !project.archivedAt && project.status !== "closed" ? project.name : null;
+  } else if (ref.entityType === "coalition") {
+    const coalition = await client.coalition.findUnique({ where: { id: ref.entityId }, select: { name: true, status: true } });
+    name = coalition && coalition.status === "active" ? coalition.name : null;
+  }
+  if (!name) return null;
 
-  const [memberCount, petitions, events] = await Promise.all([
-    countLocalMembers(client, ref.entityId),
-    client.petition.findMany({
-      where: { scopeType: "group", scopeId: ref.entityId, archivedAt: null },
-      select: { id: true, subjectType: true, status: true, closesAt: true },
-      orderBy: { opensAt: "desc" },
-      take: 50,
-    }),
-    client.calendarEvent.findMany({
-      where: { hostType: "group", hostId: ref.entityId, startTime: { gte: new Date() } },
-      select: { id: true, startTime: true, title: true, visibility: true },
-      orderBy: { startTime: "asc" },
-      take: 50,
-    }),
-  ]);
+  // Petition skeleton: group/project petitions by scope; a coalition's open
+  // decisions are CoalitionProposal rows (its member petitions live in the
+  // member groups and are not the coalition's to replicate).
+  const petitionSkeleton =
+    ref.entityType === "coalition"
+      ? (
+          await client.coalitionProposal.findMany({
+            where: { coalitionId: ref.entityId, status: "open" },
+            select: { id: true, action: true, createdAt: true },
+            orderBy: { createdAt: "desc" },
+            take: 50,
+          })
+        ).map((proposal) => ({
+          id: proposal.id,
+          familyLabel: `coalition_${proposal.action}`,
+          status: "open",
+          closesAt: proposal.createdAt.toISOString(),
+        }))
+      : (
+          await client.petition.findMany({
+            where: { scopeType: ref.entityType, scopeId: ref.entityId, archivedAt: null },
+            select: { id: true, subjectType: true, status: true, closesAt: true },
+            orderBy: { opensAt: "desc" },
+            take: 50,
+          })
+        ).map((petition) => ({
+          id: petition.id,
+          familyLabel: petition.subjectType, // the family string, never content
+          status: petition.status,
+          closesAt: petition.closesAt.toISOString(),
+        }));
+
+  const events = await client.calendarEvent.findMany({
+    where: { hostType: ref.entityType as "group" | "project" | "coalition", hostId: ref.entityId, startTime: { gte: new Date() } },
+    select: { id: true, startTime: true, title: true, visibility: true },
+    orderBy: { startTime: "asc" },
+    take: 50,
+  });
 
   return {
     v: 1,
     entityType: ref.entityType,
     entityId: ref.entityId,
-    name: group.name,
-    memberCount,
-    petitions: petitions.map((petition) => ({
-      id: petition.id,
-      familyLabel: petition.subjectType, // the family string, never content
-      status: petition.status,
-      closesAt: petition.closesAt.toISOString(),
-    })),
+    name,
+    memberCount: await countEntityMembers(client, ref.entityType, ref.entityId),
+    petitions: petitionSkeleton,
     calendar: events.map((event) => ({
       id: event.id,
       startTime: event.startTime.toISOString(),
@@ -97,7 +124,7 @@ export async function runContinuityReplicationSweep(
     result.attempted += 1;
     try {
       // Sign as the entity's own node — the origin the peer has pinned.
-      const selfNode = await selfNodeForGroup(prisma, backup.entityId);
+      const selfNode = await selfNodeForEntity(prisma, backup.entityType, backup.entityId);
       if (!selfNode) {
         result.skipped += 1;
         continue;
@@ -107,7 +134,7 @@ export async function runContinuityReplicationSweep(
         result.skipped += 1;
         continue;
       }
-      const escrow = backup.entityType === "group" ? await buildEscrowEntries(prisma, backup.entityId) : [];
+      const escrow = await buildEntityEscrowEntries(prisma, backup.entityType, backup.entityId);
       const payload = { manifest, escrow } as unknown as SignedEventPayload;
       const previous = backup.lastManifest ? stableStringify(backup.lastManifest) : null;
       if (previous === stableStringify(payload)) {

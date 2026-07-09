@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "../generated/prisma/client";
-import { selfNodeForGroup } from "./continuity-establishment";
+import { selfNodeForEntity } from "./continuity-establishment";
 import { enqueueSignedNodeEvent } from "./federations";
 import { nodeSigningProvider } from "./node-keys";
 import { hashSignedEventPayload } from "./signed-events";
@@ -92,8 +92,7 @@ export async function runContinuityHeartbeat(
   // in this database — but never guess by row age).
   const selfNodes = new Map<string, { id: string; domain: string }>();
   for (const backup of backups) {
-    if (backup.entityType !== "group") continue;
-    const selfNode = await selfNodeForGroup(prisma, backup.entityId);
+    const selfNode = await selfNodeForEntity(prisma, backup.entityType, backup.entityId);
     if (selfNode) selfNodes.set(selfNode.id, selfNode);
   }
   const firstSelf = [...selfNodes.values()][0];

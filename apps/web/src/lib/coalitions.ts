@@ -11,9 +11,16 @@ import {
 import { enqueueSignedNodeEvent } from "./federations";
 import type { ProposalFamily } from "./governance-proposal-families";
 import { evaluatePetition, openPetition, openSystemGroupPetition } from "./petitions";
+import {
+  countEntityMembers,
+  establishEntityBackup,
+  isBackupDirective,
+  selfNodeForEntity,
+} from "./continuity-establishment";
+import { resolveWriteAuthority } from "./continuity";
 import { assertWithinTransaction } from "./prisma";
 
-export type CoalitionProposalAction = "formation" | "join" | "departure" | "removal";
+export type CoalitionProposalAction = "formation" | "join" | "departure" | "removal" | "backup_designation";
 
 type GroupSponsor = {
   groupId: string;
@@ -28,7 +35,13 @@ type ParticipantSnapshot = {
   // THERE, and the deadline after which silent remote consent times out.
   remoteParticipants?: RemoteParticipantRef[];
   remoteDeadline?: string;
+  // F3.5 Phase 5: backup-designation terms — machine-readable so the
+  // proposal-level apply and every mirror render the SAME peer/W/directive
+  // the members consented to.
+  backupTerms?: { peerNodeId: string; peerDomain: string; windowHours: number; directive: string };
 };
+
+export type CoalitionBackupTerms = NonNullable<ParticipantSnapshot["backupTerms"]>;
 
 export type OpenCoalitionProposalResult =
   | { ok: true; proposalId: string; petitionIds: string[] }
@@ -274,6 +287,15 @@ export async function evaluateCoalitionProposal(
   if (proposal.homeNodeDomain) {
     return evaluateMemberSideProposal(prisma, proposal);
   }
+  // Continuity gate (register F-9, Phase 5): membership changes and every
+  // other coalition-level decision hold while the coalition's lease is not
+  // writable — pending, never failed. Covers the petition hook AND the
+  // expiry sweep (both funnel through this evaluator). Formation has no
+  // coalition yet, so it is writable by construction (no EntityBackup row).
+  if (proposal.coalitionId) {
+    const authority = await resolveWriteAuthority(prisma, { entityType: "coalition", entityId: proposal.coalitionId });
+    if (authority !== "writable") return { outcome: "pending" };
+  }
   const crossNodeSnapshot = proposal.participantSnapshot as ParticipantSnapshot;
   const remoteParticipants = crossNodeSnapshot.remoteParticipants ?? [];
   if (remoteParticipants.length > 0) {
@@ -422,6 +444,138 @@ export async function evaluateCoalitionProposalForPetition(
   return evaluateCoalitionProposal(prisma, child.proposalId);
 }
 
+// ── F3.5 Phase 5: coalition backup designation (a coalition decision) ───────
+//
+// Membership in a coalition is not tiered by where a group's data happens to
+// live (register F-8): EVERY member group consents through its own node's
+// governance — local groups by petition here, remote groups by mirrored
+// petitions on their own nodes reported through the decisions map — exactly
+// as formation does. The peer CHOICE is part of what members consent to,
+// which also collects, pre-disaster, the consent reconstitution stands on.
+//
+// Calm-weather property (stated in the UI and the guide): full-member
+// consent means a coalition can only arrange its disaster protection while
+// ALL its member nodes are healthy — a proposal with an unreachable member
+// times out. Designate early, in calm weather.
+
+export type OpenCoalitionBackupResult =
+  | OpenCoalitionProposalResult
+  | {
+      ok: false;
+      reason:
+        | "invalid_window"
+        | "invalid_directive"
+        | "no_active_agreement"
+        | "backup_already_exists"
+        | "proposal_already_open";
+    };
+
+export async function openCoalitionBackupDesignationProposal(
+  prisma: PrismaClient,
+  {
+    coalitionId,
+    peerNodeId,
+    windowHours,
+    directive,
+    createdByMembershipId,
+  }: {
+    coalitionId: string;
+    peerNodeId: string;
+    windowHours: number;
+    directive: string;
+    createdByMembershipId: string;
+  },
+): Promise<OpenCoalitionBackupResult> {
+  const coalition = await prisma.coalition.findUnique({
+    where: { id: coalitionId },
+    include: {
+      memberships: {
+        where: { endedAt: null },
+        include: {
+          group: { select: { id: true, name: true, nodeId: true } },
+          federatedGroupPresence: {
+            select: { remoteGroupId: true, name: true, federatedNode: { select: { domain: true, status: true } } },
+          },
+        },
+      },
+    },
+  });
+  if (!coalition || coalition.status !== "active") return { ok: false, reason: "not_found" };
+  if (!Number.isInteger(windowHours) || windowHours < 1) return { ok: false, reason: "invalid_window" };
+  if (!isBackupDirective(directive)) return { ok: false, reason: "invalid_directive" };
+
+  const peer = await prisma.federatedNode.findUnique({
+    where: { id: peerNodeId },
+    select: { id: true, domain: true, status: true },
+  });
+  if (!peer || peer.status !== "active") return { ok: false, reason: "no_active_agreement" };
+
+  const existing = await prisma.entityBackup.findUnique({
+    where: { entityType_entityId: { entityType: "coalition", entityId: coalitionId } },
+    select: { status: true },
+  });
+  if (existing && (existing.status === "proposed" || existing.status === "active")) {
+    return { ok: false, reason: "backup_already_exists" };
+  }
+  // Single-open backed by the DB partial index (register F-7); this check is
+  // legibility, the index is the invariant.
+  const openProposal = await prisma.coalitionProposal.findFirst({
+    where: { coalitionId, action: "backup_designation", status: "open" },
+    select: { id: true },
+  });
+  if (openProposal) return { ok: false, reason: "proposal_already_open" };
+
+  const localGroups = coalition.memberships.flatMap((membership) => (membership.group ? [membership.group] : []));
+  const remoteParticipants: RemoteParticipantRef[] = coalition.memberships.flatMap((membership) =>
+    membership.federatedGroupPresence && membership.federatedGroupPresence.federatedNode.status === "active"
+      ? [
+          {
+            domain: membership.federatedGroupPresence.federatedNode.domain,
+            remoteGroupId: membership.federatedGroupPresence.remoteGroupId,
+            name: membership.federatedGroupPresence.name,
+          },
+        ]
+      : [],
+  );
+  if (localGroups.length === 0) return { ok: false, reason: "not_eligible" };
+  // A remote member whose federation agreement lapsed cannot be consulted —
+  // the proposal must not silently drop their consent.
+  const remoteMemberCount = coalition.memberships.filter((m) => m.federatedGroupPresence).length;
+  if (remoteParticipants.length !== remoteMemberCount) return { ok: false, reason: "no_active_agreement" };
+
+  const initiator = await prisma.groupMembership.findUnique({
+    where: { id: createdByMembershipId },
+    select: { groupId: true, status: true, participationStatus: true },
+  });
+  if (
+    !initiator ||
+    initiator.status !== "active" ||
+    initiator.participationStatus !== "active" ||
+    !localGroups.some((group) => group.id === initiator.groupId)
+  ) {
+    return { ok: false, reason: "not_eligible" };
+  }
+
+  return createCoalitionProposal(prisma, {
+    action: "backup_designation",
+    coalitionId,
+    proposedByGroupId: initiator.groupId,
+    targetGroupId: null,
+    name: coalition.name,
+    description: null,
+    content: `Designate ${peer.domain} as the backup for coalition "${coalition.name}" (failover window ${windowHours}h, directive "${directive}"). The replica holds the coalition's home-side skeleton and relay thread only — never member collectives' own data.`,
+    currentCoalitionGroupIds: localGroups.map((group) => group.id),
+    sponsors: localGroups.map((group) => ({
+      groupId: group.id,
+      role: "participant",
+      ...(group.id === initiator.groupId ? { createdByMembershipId } : {}),
+    })),
+    groups: localGroups,
+    remoteParticipants,
+    backupTerms: { peerNodeId: peer.id, peerDomain: peer.domain, windowHours, directive },
+  });
+}
+
 async function createCoalitionProposal(
   prisma: PrismaClient,
   input: {
@@ -436,6 +590,7 @@ async function createCoalitionProposal(
     sponsors: Array<GroupSponsor & { role: string }>;
     groups: Array<{ id: string; name: string; nodeId: string }>;
     remoteParticipants?: RemoteParticipantRef[];
+    backupTerms?: CoalitionBackupTerms;
   },
 ): Promise<OpenCoalitionProposalResult> {
   const proposalId = randomUUID();
@@ -446,6 +601,7 @@ async function createCoalitionProposal(
     groupIds,
     currentCoalitionGroupIds: [...input.currentCoalitionGroupIds].sort(),
     ...(remoteParticipants.length > 0 ? { remoteParticipants } : {}),
+    ...(input.backupTerms ? { backupTerms: input.backupTerms } : {}),
   };
   await prisma.coalitionProposal.create({
     data: {
@@ -532,6 +688,9 @@ async function createCoalitionProposal(
     });
     const delivered = await sendCoalitionProposalOpened(prisma, selfNode, {
       proposalId,
+      action: input.action,
+      coalitionId: input.coalitionId,
+      backupTerms: input.backupTerms ?? null,
       name: input.name,
       content: input.content.trim(),
       participantLabels: [
@@ -624,6 +783,59 @@ async function applyCoalitionProposal(
         where: { id: sponsorGroup.nodeId },
         select: { id: true, domain: true },
       });
+      await broadcastCoalitionResolved(prisma, selfNode, {
+        proposalId: proposal.id,
+        outcome: "succeeded",
+        remoteParticipants,
+        coalition: { id: coalition.id, name: coalition.name },
+      });
+    }
+    return { outcome: "succeeded" as const, coalitionId: coalition.id };
+  }
+
+  if (proposal.action === "backup_designation") {
+    if (!proposal.coalitionId || !snapshot.backupTerms) {
+      return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
+    }
+    const terms = snapshot.backupTerms;
+    // Staleness re-checks at apply time: coalition still active, channel
+    // still open, no backup raced in.
+    const coalition = await prisma.coalition.findUnique({
+      where: { id: proposal.coalitionId },
+      select: { id: true, name: true, status: true },
+    });
+    const peer = await prisma.federatedNode.findUnique({
+      where: { id: terms.peerNodeId },
+      select: { id: true, domain: true, status: true },
+    });
+    const selfNode = await selfNodeForEntity(prisma, "coalition", proposal.coalitionId);
+    if (
+      !coalition ||
+      coalition.status !== "active" ||
+      !peer ||
+      peer.status !== "active" ||
+      !selfNode ||
+      !isBackupDirective(terms.directive)
+    ) {
+      return failCoalitionProposal(prisma, proposal, "failed-withdrawn");
+    }
+    await establishEntityBackup(prisma, {
+      entityType: "coalition",
+      entityId: coalition.id,
+      entityName: coalition.name,
+      memberCount: await countEntityMembers(prisma, "coalition", coalition.id),
+      peerId: peer.id,
+      peerDomain: peer.domain,
+      selfNode,
+      windowHours: terms.windowHours,
+      directive: terms.directive,
+    });
+    await prisma.coalitionProposal.update({
+      where: { id: proposal.id },
+      data: { status: "succeeded", resolvedAt: new Date() },
+    });
+    const remoteParticipants = snapshot.remoteParticipants ?? [];
+    if (remoteParticipants.length > 0) {
       await broadcastCoalitionResolved(prisma, selfNode, {
         proposalId: proposal.id,
         outcome: "succeeded",

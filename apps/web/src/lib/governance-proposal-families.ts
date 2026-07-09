@@ -10,6 +10,8 @@ export type ProposalFamily =
   | "coalition_join"
   | "coalition_departure"
   | "coalition_removal"
+  | "coalition_backup_designation"
+  | "coalition_backup_revocation"
   // Inter-node federation (register F-5): agreement + policy families are
   // steward-group petitions; termination/disable are the node-wide STOP valves.
   | "federation_formation"
@@ -82,6 +84,8 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   coalition_join: "group_settings",
   coalition_departure: "group_settings",
   coalition_removal: "group_settings",
+  coalition_backup_designation: "group_settings",
+  coalition_backup_revocation: "group_settings",
   // Steward-group petitions ride the steward group's own group_settings
   // params, exactly like coalition_* — deliberately NOT a new constitutional
   // category (register F-5: starting is delegated, only stopping is node-wide).
@@ -176,6 +180,11 @@ export function deriveCompetitionKey(
     case "coalition_join":
     case "coalition_departure":
     case "coalition_removal":
+    // Proposal-children like coalition_*; single-open designation is the
+    // CoalitionProposal partial index, single-open withdrawal per (group,
+    // coalition) is a Petition partial index (register F-7).
+    case "coalition_backup_designation":
+    case "coalition_backup_revocation":
     // Non-competing like coalition_*: each federation proposal is independent
     // and the cross-node decisions map (not competition) resolves conflicts.
     case "federation_formation":

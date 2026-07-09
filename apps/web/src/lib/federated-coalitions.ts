@@ -3,7 +3,9 @@ import { applyDecision, parseDecisions, type FederationDecisionOutcome } from ".
 import type { FederationEnvelope } from "./federation-envelope";
 import { enqueueSignedNodeEvent } from "./federations";
 import { mediateRemoteAction, type MediateRemoteActionResult } from "./federation-actions";
-import { openSystemGroupPetition } from "./petitions";
+import { openPetition, requireApprovedPetition, openSystemGroupPetition, type OpenPetitionResult } from "./petitions";
+import { CONTINUITY_DATA_CLASS, revokeEntityBackup, selfNodeForEntity } from "./continuity-establishment";
+import { resolveWriteAuthority } from "./continuity";
 
 // Cross-node coalitions (F3(2), plan §5): the coalition lives on ONE home
 // node (the proposing group's node); member groups elsewhere hold presences.
@@ -32,6 +34,9 @@ export async function sendCoalitionProposalOpened(
   selfNode: { id: string; domain: string },
   input: {
     proposalId: string;
+    action?: string;
+    coalitionId?: string | null;
+    backupTerms?: { peerNodeId: string; peerDomain: string; windowHours: number; directive: string } | null;
     name: string | null;
     content: string;
     participantLabels: string[];
@@ -51,7 +56,9 @@ export async function sendCoalitionProposalOpened(
       "coalition_proposal_opened",
       {
         proposalId: input.proposalId,
-        action: "formation",
+        action: input.action ?? "formation",
+        coalitionId: input.coalitionId ?? null,
+        backupTerms: input.backupTerms ?? null,
         name: input.name,
         content: input.content,
         homeDomain: selfNode.domain,
@@ -103,6 +110,11 @@ export async function broadcastCoalitionMessage(
     postedAt: Date;
   },
 ): Promise<void> {
+  // Defense-in-depth continuity gate (primary writers are gated upstream):
+  // a coalition in failover must not fan content out as if it held the lease.
+  const authority = await resolveWriteAuthority(client, { entityType: "coalition", entityId: input.coalitionId });
+  if (authority !== "writable") return;
+
   const remoteMembers = await client.coalitionMembership.findMany({
     where: { coalitionId: input.coalitionId, endedAt: null, federatedGroupPresenceId: { not: null } },
     select: { federatedGroupPresence: { select: { federatedNode: { select: { domain: true } } } } },
@@ -187,7 +199,16 @@ export const handleCoalitionProposalOpened = async (
     return { ok: false, reason: "malformed_payload" };
   }
   if (homeDomain !== origin.domain) return { ok: false, reason: "home_spoof" };
-  if (p.action !== "formation") return { ok: false, reason: "unsupported_action" };
+  const action = typeof p.action === "string" ? p.action : "formation";
+  if (action !== "formation" && action !== "backup_designation") {
+    return { ok: false, reason: "unsupported_action" };
+  }
+  const homeCoalitionId = typeof p.coalitionId === "string" ? p.coalitionId : null;
+  const backupTerms =
+    p.backupTerms && typeof p.backupTerms === "object" ? (p.backupTerms as Record<string, unknown>) : null;
+  if (action === "backup_designation" && (!homeCoalitionId || !backupTerms)) {
+    return { ok: false, reason: "malformed_payload" };
+  }
 
   const existing = await tx.coalitionProposal.findUnique({ where: { id: proposalId }, select: { id: true } });
   if (existing) return { ok: true };
@@ -198,10 +219,24 @@ export const handleCoalitionProposalOpened = async (
   });
   if (groups.length !== remoteGroupIds.length) return { ok: false, reason: "group_not_found" };
 
+  // Backup designation concerns an EXISTING coalition: each named group must
+  // actually hold an active presence in it — the home cannot invent members.
+  if (action === "backup_designation" && homeCoalitionId) {
+    for (const groupId of remoteGroupIds) {
+      const presence = await tx.federatedCoalitionPresence.findUnique({
+        where: { coalitionId_groupId: { coalitionId: homeCoalitionId, groupId } },
+        select: { status: true, homeFederatedNodeId: true },
+      });
+      if (!presence || presence.status !== "active" || presence.homeFederatedNodeId !== origin.id) {
+        return { ok: false, reason: "not_coalition_member" };
+      }
+    }
+  }
+
   await tx.coalitionProposal.create({
     data: {
       id: proposalId,
-      action: "formation",
+      action,
       proposedByGroupId: groups[0].id,
       name,
       content,
@@ -211,6 +246,11 @@ export const handleCoalitionProposalOpened = async (
         groupIds: remoteGroupIds.sort(),
         currentCoalitionGroupIds: [],
         participantLabels: Array.isArray(p.participantLabels) ? p.participantLabels : [],
+        // Mirror-side terms: the coalition FK is local-only, so the home's
+        // coalition id and the designation terms ride the snapshot — the
+        // detail builder renders exactly what is being consented to.
+        ...(homeCoalitionId ? { homeCoalitionId } : {}),
+        ...(backupTerms ? { backupTerms: backupTerms as Prisma.InputJsonValue } : {}),
         // The home's deadline bounds the mirror too: if the home never
         // resolves us, the sweep fails the mirror past this point.
         remoteDeadline: new Date(
@@ -228,7 +268,7 @@ export const handleCoalitionProposalOpened = async (
     const petition = await openSystemGroupPetition(tx, {
       groupId: group.id,
       category: "group_settings",
-      subjectType: "coalition_formation",
+      subjectType: action === "backup_designation" ? "coalition_backup_designation" : "coalition_formation",
       subjectId: proposalId,
     });
     if (!petition.ok) {
@@ -409,3 +449,122 @@ export async function resolveExpiredCrossNodeCoalitionProposals(
   }
   return { attempted, resolved };
 }
+
+
+// ── F3.5 Phase 5: backup consent-withdrawal (register F-8, F-2) ──────────────
+//
+// Designation stands on unanimous member consent, so ANY member group
+// withdrawing breaks the ground it stands on — no second unanimity, no
+// proposal: one group's own petition, through its own node's governance,
+// revokes the coalition's backup. Local and remote member groups get the
+// SAME unilateral door (membership is not tiered by data locality): a local
+// group's approval revokes directly; a remote group's approval sends a
+// signed coalition_backup_withdrawal to the home, which revokes. Stop stays
+// cheaper than start.
+
+export type ProposeWithdrawalResult =
+  | OpenPetitionResult
+  | { ok: false; reason: "not_found" | "not_coalition_member" };
+
+export async function proposeCoalitionBackupWithdrawal(
+  prisma: PrismaClient,
+  {
+    coalitionId,
+    groupId,
+    createdByMembershipId,
+  }: { coalitionId: string; groupId: string; createdByMembershipId: string },
+): Promise<ProposeWithdrawalResult> {
+  // Home side: the group must be an active local member of the coalition.
+  const localMembership = await prisma.coalitionMembership.findFirst({
+    where: { coalitionId, groupId, endedAt: null, coalition: { status: "active" } },
+    select: { id: true },
+  });
+  // Member side: the group holds an active presence in a coalition homed away.
+  const presence = localMembership
+    ? null
+    : await prisma.federatedCoalitionPresence.findUnique({
+        where: { coalitionId_groupId: { coalitionId, groupId } },
+        select: { status: true },
+      });
+  if (!localMembership && (!presence || presence.status !== "active")) {
+    return { ok: false, reason: "not_coalition_member" };
+  }
+  return openPetition(prisma, {
+    groupId,
+    category: "group_settings",
+    subjectType: "coalition_backup_revocation",
+    subjectId: `coalition:${coalitionId}`,
+    createdByMembershipId,
+  });
+}
+
+export async function applyCoalitionBackupWithdrawalFromPetition(
+  tx: Prisma.TransactionClient,
+  petitionId: string,
+): Promise<void> {
+  const petition = await requireApprovedPetition(tx, petitionId, "coalition_backup_revocation");
+  const coalitionId = petition.subjectId.split(":")[1];
+  if (!coalitionId || !petition.groupId) return;
+
+  const coalition = await tx.coalition.findUnique({ where: { id: coalitionId }, select: { id: true } });
+  if (coalition) {
+    // HOME side: withdraw-and-revoke directly (staleness: still a member?).
+    const membership = await tx.coalitionMembership.findFirst({
+      where: { coalitionId, groupId: petition.groupId, endedAt: null },
+      select: { id: true },
+    });
+    if (!membership) return;
+    const selfNode = await selfNodeForEntity(tx, "coalition", coalitionId);
+    if (!selfNode) return;
+    await revokeEntityBackup(tx, { entityType: "coalition", entityId: coalitionId, selfNode });
+    return;
+  }
+
+  // MEMBER side: send the signed withdrawal to the home; the home verifies
+  // membership against its own rows and revokes.
+  const presence = await tx.federatedCoalitionPresence.findUnique({
+    where: { coalitionId_groupId: { coalitionId, groupId: petition.groupId } },
+    select: { status: true, homeFederatedNode: { select: { domain: true } }, group: { select: { nodeId: true } } },
+  });
+  if (!presence || presence.status !== "active") return;
+  const selfNode = await tx.node.findUnique({
+    where: { id: presence.group.nodeId },
+    select: { id: true, domain: true },
+  });
+  if (!selfNode) return;
+  await enqueueSignedNodeEvent(
+    tx,
+    selfNode,
+    presence.homeFederatedNode.domain,
+    "coalition_backup_withdrawal",
+    { coalitionId, remoteGroupId: petition.groupId },
+    CONTINUITY_DATA_CLASS,
+  );
+}
+
+// Home side: a remote member group withdrew its consent through its own
+// governance. Verify the claim against OUR membership rows (the sender
+// speaks only for its own group), then revoke. Idempotent when no backup.
+export const handleCoalitionBackupWithdrawal = async (
+  tx: Prisma.TransactionClient,
+  { origin, envelope }: HandlerContext,
+): Promise<{ ok: true } | { ok: false; reason: string }> => {
+  const p = envelope.payload as Record<string, unknown>;
+  const coalitionId = typeof p.coalitionId === "string" ? p.coalitionId : null;
+  const remoteGroupId = typeof p.remoteGroupId === "string" ? p.remoteGroupId : null;
+  if (!coalitionId || !remoteGroupId) return { ok: false, reason: "malformed_payload" };
+
+  const membership = await tx.coalitionMembership.findFirst({
+    where: {
+      coalitionId,
+      endedAt: null,
+      federatedGroupPresence: { federatedNodeId: origin.id, remoteGroupId },
+    },
+    select: { id: true },
+  });
+  if (!membership) return { ok: true }; // not a member here: noise, not error
+  const selfNode = await selfNodeForEntity(tx, "coalition", coalitionId);
+  if (!selfNode) return { ok: true };
+  await revokeEntityBackup(tx, { entityType: "coalition", entityId: coalitionId, selfNode });
+  return { ok: true };
+};
