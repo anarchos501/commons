@@ -60,6 +60,7 @@ export type ProposalFamily =
   | "backup_hosting_end"
   | "backup_size_threshold_change"
   | "backup_hosting_policy_change"
+  | "backup_takeover_expedite"
   // Collective-wide settings that must be petitioned rather than flipped by one member.
   | "custom_support_requests_toggle"
   | "membership_policy_change"
@@ -125,6 +126,7 @@ const FAMILY_TO_CATEGORY: Record<ProposalFamily, GovernanceCategory> = {
   backup_hosting_end: "group_settings",
   backup_size_threshold_change: "node_stewardship",
   backup_hosting_policy_change: "group_settings",
+  backup_takeover_expedite: "group_settings",
   custom_support_requests_toggle: "group_settings",
   // Changing the membership model is a membership-weight decision, so it inherits the
   // group's membership thresholds/duration (per feedback #2).
@@ -208,6 +210,7 @@ export function deriveCompetitionKey(
     case "backup_hosting_consent":
     case "backup_hosting_end":
     case "backup_hosting_policy_change":
+    case "backup_takeover_expedite": // single-open per replica is a DB partial index (F-7)
     // Non-competing AND reversible like the two settings above; the partial
     // unique index Petition_federation_policy_change_open_unique enforces
     // one-open-at-a-time instead of a competition key.

@@ -61,3 +61,12 @@ even while the pages load fine. Devcontainers reset `/etc/hosts` on rebuild; re-
 Register each node's first account **through its own hostname** (`http://node-a.localhost:3000/register`, `http://node-b.localhost:3001/register`) — Commons records the first-registration hostname as the node's permanent domain, and federation identifies peers by that domain. Registering via `localhost:3000` would mint the wrong identity.
 
 Cross-node deliveries flow through the federation outbox (a 30-second sweep); watch each instance's console for `[federation]` lines. `/.well-known/commons` on each instance shows what a peer sees when pinning it.
+
+## Continuity restart blip
+
+With an active backup designation (F3.5), restarting a dev node makes its backed-up
+collectives read-only for a few seconds after boot: `markUnverifiedAtBoot` runs first in
+`instrumentation.ts`, and writes resume only after the signed `continuity-status` pull to the
+backup node round-trips. Expected, fail-safe behavior — not a bug. Stopping node B while node
+A has a backup there keeps A's backed-up groups read-only until B returns (or until the
+federation contact clock W lapses and the ordinary lease rules take over).

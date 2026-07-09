@@ -362,6 +362,30 @@ export async function cleanupSide(prisma: PrismaClient, prefix: string) {
     where: { OR: [{ scopeId: { startsWith: prefix } }, { group: { nodeId: { startsWith: prefix } } }] },
   });
   await prisma.actionLog.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
+  // Group-space discussion threads (e.g. the F3.5 "Failover annex") hold FKs
+  // to prefix accounts — remove them before the accounts go. Key on BOTH the
+  // space and the creator/author (a partially-failed earlier cleanup can
+  // leave a thread whose group is already gone).
+  const prefixGroupIds = (
+    await prisma.group.findMany({ where: { nodeId: { startsWith: prefix } }, select: { id: true } })
+  ).map((group) => group.id);
+  await prisma.discussionMessage.deleteMany({
+    where: {
+      OR: [
+        { thread: { spaceType: "group", spaceId: { in: prefixGroupIds } } },
+        { thread: { creator: { homeNode: { id: { startsWith: prefix } } } } },
+        { author: { homeNode: { id: { startsWith: prefix } } } },
+      ],
+    },
+  });
+  await prisma.discussionThread.deleteMany({
+    where: {
+      OR: [
+        { spaceType: "group", spaceId: { in: prefixGroupIds } },
+        { creator: { homeNode: { id: { startsWith: prefix } } } },
+      ],
+    },
+  });
   await prisma.groupMembership.deleteMany({ where: { group: { nodeId: { startsWith: prefix } } } });
   await prisma.group.deleteMany({ where: { nodeId: { startsWith: prefix } } });
   // Shadow accounts are homed on peer Node rows created by presence flows;
@@ -371,6 +395,9 @@ export async function cleanupSide(prisma: PrismaClient, prefix: string) {
       OR: [
         { id: { startsWith: prefix } },
         { homeNode: { domain: { startsWith: prefix }, id: { not: { startsWith: prefix } } } },
+        // Cuid-id system accounts homed on prefix nodes (e.g. the F3.5
+        // "Failover annex" author).
+        { homeNode: { id: { startsWith: prefix } } },
       ],
     },
   });

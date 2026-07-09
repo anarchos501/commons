@@ -38,6 +38,7 @@ import {
   applyBackupSizeThresholdFromPetition,
   evaluateBackupHostingConsentForPetition,
 } from "./continuity-establishment";
+import { applyTakeoverExpediteFromPetition } from "./continuity-takeover";
 import {
   applyFederationDisableFromPetition,
   applyFederationPolicyFromPetition,
@@ -179,6 +180,8 @@ async function applyApprovedPetition(
     await applyBackupSizeThresholdFromPetition(tx, petitionId);
   } else if (subjectType === "backup_hosting_policy_change") {
     await applyBackupHostingPolicyFromPetition(tx, petitionId);
+  } else if (subjectType === "backup_takeover_expedite") {
+    await applyTakeoverExpediteFromPetition(tx, petitionId);
   } else if (subjectType === "group_visibility_proposal") {
     await applyGroupVisibilityFromPetition(tx, petitionId);
   } else if (subjectType === "custom_support_requests_toggle") {
@@ -519,6 +522,15 @@ export async function describePetitionSubject(prisma: PrismaClient, subjectType:
   if (subjectType === "backup_size_threshold_change") {
     const raw = subjectId.split(":")[1];
     return raw === "none" ? "Remove the backup size threshold" : `Set the backup size threshold to ${raw} members`;
+  }
+
+  if (subjectType === "backup_takeover_expedite") {
+    const replica = await prisma.backupReplica.findUnique({
+      where: { id: subjectId },
+      select: { entityName: true, origin: { select: { domain: true } } },
+    });
+    const label = replica ? `"${replica.entityName}" from ${replica.origin.domain}` : "a remote community";
+    return `Expedite failover activation for ${label}`;
   }
 
   if (subjectType === "backup_hosting_policy_change") {
@@ -1118,6 +1130,26 @@ const backupHostingEndDetail: PetitionDetailBuilder = async (prisma, { subjectId
   };
 };
 
+const backupTakeoverExpediteDetail: PetitionDetailBuilder = async (prisma, { subjectId, status }, { proposer }) => {
+  const replica = await prisma.backupReplica.findUnique({
+    where: { id: subjectId },
+    select: { entityName: true, windowHours: true, challengeOpenedAt: true, origin: { select: { domain: true } } },
+  });
+  if (!replica) return null;
+  return {
+    summary: `Expedite failover activation for "${replica.entityName}" from ${replica.origin.domain}`,
+    proposer,
+    outcome: frameOutcome(
+      status,
+      `the open challenge is treated as if its full ${replica.windowHours}h window had elapsed — activation still requires the challenge to stay unanswered (any proof of life cancels it; expedite compresses the wait, it never skips the challenge)`,
+    ),
+    fields: [
+      { label: "Community", value: `"${replica.entityName}" (${replica.origin.domain})` },
+      { label: "Challenge opened", value: replica.challengeOpenedAt ? replica.challengeOpenedAt.toISOString() : "no open challenge (petition will apply as a no-op)" },
+    ],
+  };
+};
+
 const backupSizeThresholdDetail: PetitionDetailBuilder = async (_prisma, { subjectId, status }, { proposer }) => {
   const raw = subjectId.split(":")[1];
   const none = raw === "none";
@@ -1352,6 +1384,7 @@ const PETITION_DETAIL_BUILDERS: Partial<Record<ProposalFamily, PetitionDetailBui
   backup_hosting_end: backupHostingEndDetail,
   backup_size_threshold_change: backupSizeThresholdDetail,
   backup_hosting_policy_change: backupHostingPolicyDetail,
+  backup_takeover_expedite: backupTakeoverExpediteDetail,
   trusted_provider_proposal: trustedProviderProposalDetail,
   trusted_provider_revocation: trustedProviderRevocationDetail,
   project_hosting_offer: projectHostingDetail,
@@ -1469,6 +1502,7 @@ export function proposalFamilyLabel(subjectType: string) {
     case "backup_hosting_end": return "Backup hosting end";
     case "backup_size_threshold_change": return "Backup size threshold";
     case "backup_hosting_policy_change": return "Backup hosting policy";
+    case "backup_takeover_expedite": return "Failover expedite";
     case "federation_termination": return "End federation agreement";
     case "federation_disable": return "Disable federation";
     case "event_authorization": return "Event authorization";

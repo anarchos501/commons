@@ -4,7 +4,7 @@ import { SubmitButton } from "../../../../components/shared/SubmitButton";
 import { createPrismaClient } from "../../../../lib/prisma";
 import { getSession } from "../../../../lib/session";
 import type { StructuralManifest } from "../../../../lib/continuity-replication";
-import { openTakeoverChallengeAction } from "./actions";
+import { openTakeoverChallengeAction, performTakeoverActionAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,11 @@ export default async function ReplicaPage({ params }: PageProps) {
       include: { origin: true },
     });
     if (!replica || replica.status === "refused" || replica.status === "ended") notFound();
+
+    const takeoverLog =
+      replica.status === "takeover_active" || replica.status === "ceding"
+        ? await prisma.takeoverLogEntry.findMany({ where: { replicaId: replica.id }, orderBy: { seq: "asc" }, take: 200 })
+        : [];
 
     const manifest = replica.manifest as StructuralManifest | null;
     const statusLabel = replica.status.replaceAll("_", " ");
@@ -61,6 +66,67 @@ export default async function ReplicaPage({ params }: PageProps) {
                 this by proving life. If the full failover window passes in total silence, this replica activates
                 for discussion.
               </p>
+            </div>
+          )}
+
+          {(replica.status === "takeover_active" || replica.status === "ceding") && (
+            <div className="border border-[var(--border)] bg-[var(--subtle)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {replica.status === "ceding" ? "Failover ending — home node is back" : "Failover active"}
+              </p>
+              {/* D-6 takeover banner — ratified wording (register F-8): Tier 2 is "actable for discussion". */}
+              <p className="mt-1 text-sm text-[var(--soft-text)]">
+                During failover, this space accepts discussion and join requests only; petitions are paused until
+                the home node returns — and if the home never returns, the path forward is the re-homing consent
+                your group recorded when it chose this backup, or re-forming fresh.
+              </p>
+              {replica.status === "ceding" && (
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  The home node is replaying this log now; new entries are no longer accepted.
+                </p>
+              )}
+            </div>
+          )}
+
+          {replica.status === "takeover_active" && (
+            <div className="space-y-3 border border-[var(--border)] p-4">
+              <FormWithNotice action={performTakeoverActionAction}>
+                <input type="hidden" name="replicaId" value={replica.id} />
+                <input type="hidden" name="actionType" value="takeover_post_message" />
+                <label className="block">
+                  <span className="field-label">Post to the failover log</span>
+                  <textarea name="body" rows={3} required maxLength={4000} className="field-input" />
+                </label>
+                <div className="mt-2">
+                  <SubmitButton variant="secondary">Post</SubmitButton>
+                </div>
+              </FormWithNotice>
+              <FormWithNotice action={performTakeoverActionAction}>
+                <input type="hidden" name="replicaId" value={replica.id} />
+                <input type="hidden" name="actionType" value="takeover_join_open_group" />
+                <p className="text-xs text-[var(--muted)]">
+                  Asking to join is recorded as an intent for the home node — it creates no membership here.
+                </p>
+                <div className="mt-2">
+                  <SubmitButton variant="secondary">Ask to join this collective</SubmitButton>
+                </div>
+              </FormWithNotice>
+            </div>
+          )}
+
+          {takeoverLog.length > 0 && (
+            <div className="border border-[var(--border)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Failover log</p>
+              <ul className="mt-1 space-y-1">
+                {takeoverLog.map((entry) => (
+                  <li key={entry.id} className="text-sm text-[var(--soft-text)]">
+                    #{entry.seq} · {entry.actorLabel} ·{" "}
+                    {entry.actionType === "takeover_post_message"
+                      ? String((entry.action as { body?: string }).body ?? "")
+                      : "asked to join"}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

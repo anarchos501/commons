@@ -26,6 +26,12 @@ import {
   handleProofOfLifeRelay,
   handleTakeoverChallenge,
 } from "./continuity-lease";
+import {
+  handleCatchUpApplied,
+  handleTakeoverActivated,
+  handleTakeoverCeded,
+  handleTakeoverHandoff,
+} from "./continuity-takeover";
 import { applyPresenceEstablish, applyPresenceRevoke } from "./federation-presence";
 import {
   dissolveFederationLocally,
@@ -206,6 +212,10 @@ const INBOX_HANDLERS: Record<string, FederationInboxHandler> = {
   challenge_relay_request: handleChallengeRelayRequest,
   proof_of_life: handleProofOfLife,
   proof_of_life_relay: handleProofOfLifeRelay,
+  takeover_handoff: handleTakeoverHandoff,
+  takeover_activated: handleTakeoverActivated,
+  catch_up_applied: handleCatchUpApplied,
+  takeover_ceded: handleTakeoverCeded,
 };
 
 export const KNOWN_INBOX_EVENT_TYPES = Object.keys(INBOX_HANDLERS);

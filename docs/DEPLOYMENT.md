@@ -285,6 +285,19 @@ docker compose -f docker-compose.prod.yml --env-file apps/web/.env.production ps
 
 ---
 
+## Continuity restart blip (expected behavior)
+
+If any collective on this node has designated a backup (F3.5 continuity), every deploy or
+restart causes a **seconds-long read-only blip** for those collectives: the node marks its
+backed-up entities unverified at boot and re-verifies with each backup node (a signed status
+pull) before trusting its own database again. During that window the affected group spaces
+show a "verifying with backup" banner and reject writes. This is **fail-safe and intended** —
+the node must not act on state a takeover may have superseded while it was down. It is never
+a bug; if the backup node is unreachable, the entity stays read-only and the check retries
+every federation tick (30s).
+
+---
+
 ## Security notes
 
 - PostgreSQL is not exposed to the internet — only Caddy and the web container can reach it.
