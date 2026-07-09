@@ -1,4 +1,5 @@
 import { type PrismaClient, Prisma } from "../generated/prisma/client";
+import { resolveWriteAuthority } from "./continuity-authority";
 import { isGovernanceCategory } from "./governance-categories";
 import { isProposalFamily, categoryForFamily, deriveCompetitionKey } from "./governance-proposal-families";
 import { snapshotGovernanceParams } from "./governance-resolver";
@@ -504,6 +505,17 @@ export async function evaluatePetition(
 
   if (!petition || petition.status !== "open") return { outcome: "pending" };
   if (new Date() < petition.closesAt) return { outcome: "pending" };
+
+  // Continuity gate AT THE FLIPPER (register F-9, Phase 6): every caller —
+  // evaluateAndApplyPetition, the coalition and event proposal evaluators'
+  // direct child evaluations — passes through here, so a scope entity whose
+  // lease is not writable holds its petitions open structurally, not by each
+  // caller remembering to check.
+  const authority = await resolveWriteAuthority(prisma, {
+    entityType: petition.scopeType,
+    entityId: petition.scopeId,
+  });
+  if (authority !== "writable") return { outcome: "pending" };
 
   const snapshot = petition.governanceSnapshot as { threshold: number };
   const eligible =

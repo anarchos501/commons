@@ -32,7 +32,14 @@ export async function requireGroupMembershipStatus(accountId: string, groupId: s
     where: { accountId_groupId: { accountId, groupId } },
     select: { id: true, status: true },
   });
+  // Continuity gate (register F-9, Phase 6 sweep finding): the status-only
+  // guard is deliberately more permissive about WHO may act — never about
+  // WHETHER the group is writable.
+  const authority = membership ? await resolveWriteAuthority(prisma, { entityType: "group", entityId: groupId }) : "writable";
   await prisma.$disconnect();
   if (!membership || membership.status !== "active") throw new Error("Group membership required.");
+  if (authority !== "writable") {
+    throw new Error("This collective is in continuity failover and is temporarily read-only.");
+  }
   return membership;
 }

@@ -151,7 +151,7 @@ The phase order held — F3(2b) cross-node coalitions landed **before** F3.5, so
 
 1. ~~F3.5 Phase 5~~ — **landed**: project + coalition designation entrances, the consent-withdrawal revocation, and the coalition write-authority gate (see the F3.5 row).
 2. ~~F3(3), minimal cut~~ — **landed**: shared `NodeTag` origin badge at all three render sites; home-side coalition page renders remote members with the tag. Dashboard aggregation of remote coalition spaces stays deliberately deferred (the group federation module remains the surface).
-3. **F3.5 Phase 6 — hardening sweep**: the continuity gate-scan test (no resolver or action path bypasses the write-authority gate — until it lands, gate completeness is convention, not construction) + a written rate-limit review of the challenge button and both pull surfaces.
+3. ~~F3.5 Phase 6~~ — **landed**: the continuity gate-scan test pins gate completeness as construction. The sweep found and closed two real holes: the coalition/event proposal evaluators flipped child petitions through `evaluatePetition` directly, bypassing the resolver gate (closed by moving the gate INTO the flipper — every caller now inherits it structurally), and the concerns module's status-only guard skipped the authority check (closed in guards.ts). Rate-limit review: challenge button bounded by its 1h/replica cooldown; `continuity-status` route is signed-only with a timestamp window, its per-origin frequency cap named for F5; inbox throttling already F5 work.
 
 ### Before F4 (readiness, not migration)
 
