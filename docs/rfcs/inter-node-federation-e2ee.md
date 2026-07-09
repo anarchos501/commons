@@ -4,6 +4,8 @@
 
 Accepted — implementation in progress. F0 (protocol & peering) and Workstreams A (steward hardening + appointment legibility) and B (the design & decision register) are implemented; F1 (federation governance) and F2 (identity, presence, and Pattern-1 mediated actions) are implemented behind the two-node harness; F3–F6 and Workstream C are specified here and tracked in the implementation program. **Read the phase table before treating any section as a description of current behavior: everything marked "Specified" — including both encryption rungs, the F4 decisions, and the email workstream — is design that does not exist in code yet.** The canonical commitments this RFC rests on live in [docs/register.md](../register.md) — where this RFC and the register differ, the register wins and this RFC must be amended.
 
+**Authority rule (added after a status document drifted):** the register is canon for *commitments*; this RFC's phase table is the ONE authoritative *status* surface, stamped against a verified commit. Any status or analysis document kept outside this repository is a feeder, never authoritative — the repo copy wins, always. (The incident this encodes: an out-of-tree status document accumulated a stale duplicate section describing already-shipped work as unbuilt, and was believed; a document that lives beside the code gets read against the code.)
+
 ## Purpose
 
 Commons grows from a healthy single-node system toward federation between nodes, and from privacy-by-convention toward a content-blind host. This RFC is the constitutional text for both: how autonomous nodes form, live inside, and leave relationships with each other; and what the operator of a node can and cannot see as encryption lands. It covers the full program — the wire protocol (F0), federation governance (F1), identity and presence (F2), cross-node entities and UI (F3), Rung-1 encryption (F4, the beta gate), hardening (F5), the Rung-2 destination (F6), and the email workstream (C) — so later phases implement against a settled shape rather than re-deciding it.
@@ -126,20 +128,37 @@ Independent of federation, gating beta alongside F4 (it is the delivery channel 
 
 ## Phasing (the implementation program)
 
+*Status verified against commit `8b12aeb` (update this stamp with every phase commit — the stamp means someone compared this table to the code, not to memory).*
+
 | Phase | Contents | Status |
 |---|---|---|
-| F0 | Node keys, `/.well-known/commons`, signed envelopes, outbox/inbox, TOFU pinning, `mayFederate` chokepoint, two-node dev harness | Implemented |
-| A | Steward appointment/recall audit + hardening; appointment-mandate legibility | Implemented |
+| F0 | Node keys, `/.well-known/commons`, signed envelopes, outbox/inbox, TOFU pinning, `mayFederate` chokepoint, two-node dev harness | Implemented (`7b09306`) |
+| A | Steward appointment/recall audit + hardening; appointment-mandate legibility | Implemented (`48c8c12`, follow-ups `2d4c85a`) |
 | B | `docs/register.md` — the canonical decision register | Implemented |
-| F1 | Agreement models, mutual-consent protocol, steward-managed policy, node-wide STOP valves, federation petitions + details, node-page surface | Implemented |
-| F2 | `PortableIdentity` activation (`did:key`, custody), `LinkedNodePresence`, Pattern-1 mediated actions | Implemented |
-| F3 | Visibility grants (implemented), cross-node coalitions (implemented, hub topology), node tags + home aggregation (specified) | Partially implemented |
-| F3.5-0 | `registrationMode` column + node-wide mode petitions (C0 core; all nodes `open` until C0 ships the gate) | Implemented |
-| F3.5 | Continuity: establishment + advance directive, structural delta replication, Tier-1 read-only, Tier-2 lease + coordination annex, quiet-boot + catch-up, key escrow | Implemented for groups (Phases 0–4): establishment + consent matrix, key escrow with the stranded-login primitive, structural delta replication, Tier-1 lease (stateless resolver, mirror self-demotion, challenge/relay/witness proof-of-life), Tier-2 log-only takeover (two-verb annex, expedite + graceful-handoff accelerators, contested-activation convergence), quiet-boot over the signed continuity-status pull with chunked catch-up and cede. Project/coalition designation entrances are owed (register F-8 rider); the browser-side escrow-unwrap UI matures at F4 |
+| F1 | Agreement models, mutual-consent protocol, steward-managed policy, node-wide STOP valves, federation petitions + details, node-page surface | Implemented (`48c8c12`) |
+| F2 | `PortableIdentity` activation (`did:key`, custody), `LinkedNodePresence`, Pattern-1 mediated actions | Implemented (`ab2802e`) |
+| F3 | Visibility grants (implemented, `ae556de`); nullable-membership migration isolated (`4e809e4`); cross-node coalitions (implemented, `e256e2d` — hub relay proven over three databases with the hub-ness precondition asserted, membership XOR as a DB CHECK constraint); node tags + home aggregation (owed — see Owed & next) | Partially implemented |
+| F3.5-0 | `registrationMode` column + node-wide mode petitions (C0 core; all nodes `open` until C0 ships the gate) | Implemented (`e9ad199`) |
+| F3.5 | Continuity: establishment + advance directive, structural delta replication, Tier-1 read-only, Tier-2 lease + coordination annex, quiet-boot + catch-up, key escrow | Implemented for groups (Phases 0–4): establishment + consent matrix, key escrow with the stranded-login primitive, structural delta replication, Tier-1 lease (stateless resolver, mirror self-demotion, challenge/relay/witness proof-of-life), Tier-2 log-only takeover (two-verb annex, expedite + graceful-handoff accelerators, contested-activation convergence), quiet-boot over the signed continuity-status pull with chunked catch-up and cede (`ea77370`, `37e196d`, `4677620`, `8b12aeb`). Project/coalition designation entrances are owed (register F-8 rider); the browser-side escrow-unwrap UI matures at F4 |
 | F4 | Rung 1: content-blind host — vulnerability class → collective content → names + attribution audit; refuge ciphertext replication | Specified (beta gate) |
 | C | Registration modes, optional verified email, opt-in existence-only notifications | Specified (beta gate) |
 | F5 | Rate limits, suspension, countersigned key rotation, compromise runbook | Specified |
 | F6 | Rung 2: blind server | Named, guarded, post-beta |
+
+### Owed & next (the work between here and F4)
+
+The phase order held — F3(2b) cross-node coalitions landed **before** F3.5, so there is no owed/owed deadlock. What is genuinely owed, in build order:
+
+1. **F3.5 Phase 5 — project + coalition designation entrances, and the coalition write-authority gate.** Cross-node coalitions exist today with no continuity entrance and no `resolveWriteAuthority({entityType:"coalition"})` gate on their write paths; the F-8 rider's soft deadline ("before cross-node coalitions are promoted as a beta feature") makes this the next work. Designation without the gate is ceremony. Coalition designation is a full coalition decision through the existing cross-node proposal machinery — every member group consents through its own node's governance, remote included (membership in a coalition is not tiered by where a group's data happens to live); revocation is consent-withdrawal (any one member breaks unanimity).
+2. **F3(3), minimal cut** — shared `NodeTag` origin badge; home-side coalition page renders remote members (currently structurally dropped); routed-write copy on the remote post form. Dashboard aggregation of remote coalition spaces is deliberately deferred (the group federation module, already tagged, stays the surface).
+3. **F3.5 Phase 6 — hardening sweep**: the continuity gate-scan test (no resolver or action path bypasses the write-authority gate — until it lands, gate completeness is convention, not construction) + a written rate-limit review of the challenge button and both pull surfaces.
+
+### Before F4 (readiness, not migration)
+
+- **Identity-key backfill** is F4a's stated blocker; `ensurePortableIdentity` is lazy. **Escrow coverage trails further** (wraps happen only at registration/login/password-change), so it is a metric to watch, not a state a migration reaches: `SELECT count(*) FROM "IdentityKeyCustody" WHERE "escrowWrappedKey" IS NOT NULL` vs. total identities — watch it before treating stranded login as a real recovery path.
+- 🔒 **C1's password reset must rewrap the escrow**, enforced by a test in the C1 suite (Workstream C) — the coupling's failure is silent and surfaces only during a disaster.
+- **Alpha upgrade rehearsal**: restore a `pg_dump`, run migrations, then smoke the WRITE path (group page loads, a petition resolves on the tick, a member action succeeds) — the risk has moved from "will my rows survive" to "will my node still let people write" (the intended quiet-boot read-only blip; see DEPLOYMENT.md). Enum-migration facts for the rehearsal notes: `continuity_authority_changed` shipped as an isolated single-statement `ALTER TYPE ADD VALUE` (`20260709010000`), and `RegistrationMode` is a fresh `CREATE TYPE` — neither hits the add-and-use-in-one-transaction hazard.
+- **Rate-limit posture** (from the Phase 6 review when it lands): challenge button 1h/replica cooldown; `continuity-status` route signed-only with a timestamp window, per-origin frequency cap named for F5; inbox throttling is F5 work.
 
 ## Open Questions (deliberately open, tracked in the register)
 
